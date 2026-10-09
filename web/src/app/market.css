@@ -134,6 +134,13 @@
 .mkt .ad-methods { align-items: center; gap: 6px; }
 .mkt .ad-methods > svg { color: var(--muted); }
 .mkt .ad-methods .tag { font-size: 12px; padding: 3px 9px; border-radius: 8px; }
+.ad-go { width: 100%; min-width: 0; }
+.ad-go > svg { flex: none; }
+.ad-go-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.ad-go-txt b { font-weight: 720; }
+.ad-go:not(.btn-brand) > svg { color: var(--muted); transition: color .15s; }
+.ad-go:not(.btn-brand):hover { border-color: var(--accent); color: var(--accent); }
+.ad-go:not(.btn-brand):hover > svg { color: var(--accent); }
 .mkt .empty-box { justify-content: center; }
 
 /* tablet: un lado del libro a la vez, con interruptor fijo arriba */

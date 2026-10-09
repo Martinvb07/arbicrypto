@@ -151,6 +151,7 @@ function AdRow({ ad, asset, best, side, s, i }: { ad: Ad; asset: string; best: n
   const capital = s.settings.capital;
   const fits = ad.min <= capital && capital <= ad.max;
   const unit = isDollar(asset) ? "por dólar" : `por ${asset}`;
+  const url = advertiserUrl(ad);
   return (
     <article className={`ad ${j.good ? "good" : "bad"} ${top ? "top" : ""}`} style={{ ["--i" as string]: Math.min(i, 12) } as CSSProperties}>
       <header className="ad-head">
@@ -159,7 +160,7 @@ function AdRow({ ad, asset, best, side, s, i }: { ad: Ad; asset: string; best: n
           {ad.merchant && <span className="ad-avatar-badge"><Icon name="badgeCheck" size={13} /></span>}
         </span>
         <div className="ad-who">
-          <ExtLink href={advertiserUrl(ad)}>{ad.nick}</ExtLink>
+          <ExtLink href={url}>{ad.nick}</ExtLink>
           {ad.merchant && <span className="ad-merchant" title="Comerciante verificado por Binance"><Icon name="shield" size={13} /> Comerciante</span>}
         </div>
         <span className={`verdict ${j.good ? "good" : "bad"}`}>
@@ -193,6 +194,15 @@ function AdRow({ ad, asset, best, side, s, i }: { ad: Ad; asset: string; best: n
           {ad.methods.map((m) => <span key={m} className="tag">{m}</span>)}
         </div>
       </footer>
+
+      {url && (
+        <a className={`btn ad-go ${top ? "btn-brand" : ""}`} href={url} target="_blank" rel="noopener noreferrer"
+          title={`Abre el perfil de ${ad.nick} en Binance P2P para ${side === "BUY" ? "comprarle" : "venderle"} ${asset}`}>
+          <Icon name={side === "BUY" ? "cart" : "handCoins"} size={16} />
+          <span className="ad-go-txt">{side === "BUY" ? "Comprar" : "Vender"} {asset} a <b>{ad.nick}</b></span>
+          <Icon name="external" size={14} />
+        </a>
+      )}
     </article>
   );
 }
