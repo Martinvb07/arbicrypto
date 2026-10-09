@@ -655,7 +655,7 @@ def run_loop(name, step, interval):
 
 # ---------------------------------------------------------------- seguridad y sesiones
 
-PUBLIC_PATHS = {"/login", "/login.html", "/favicon.ico", "/api/auth/login", "/api/auth/register"}
+PUBLIC_PATHS = {"/login", "/login.html", "/favicon.ico", "/robots.txt", "/api/auth/login", "/api/auth/register"}
 PUBLIC_PREFIXES = ("/_next/", "/coins/", "/brand/", "/icons/")
 
 
@@ -703,6 +703,7 @@ def security_headers(resp):
     resp.headers.setdefault("X-Frame-Options", "DENY")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     resp.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")  # panel privado: fuera de los buscadores
     if request.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -1403,6 +1404,9 @@ def api_orders_csv():
 
 # ---------------------------------------------------------------- interfaz (Next.js exportado en web/out)
 
+SITE_PLACEHOLDER = "https://arbicrypto.local"  # el mismo de web/src/app/layout.tsx
+
+
 @app.get("/")
 @app.get("/<path:path>")
 def web(path=""):
@@ -1413,6 +1417,10 @@ def web(path=""):
     for candidate in (target, f"{target}.html", f"{target}/index.html"):
         full = safe_join(WEB_DIR, candidate)
         if full and os.path.isfile(full):
+            if candidate.endswith(".html"):  # vistas previas al compartir: URLs absolutas con el dominio real
+                with open(full, encoding="utf-8") as f:
+                    page = f.read().replace(SITE_PLACEHOLDER, f"{request.scheme}://{request.host}")
+                return Response(page, mimetype="text/html")
             return send_from_directory(WEB_DIR, candidate)
     abort(404)
 

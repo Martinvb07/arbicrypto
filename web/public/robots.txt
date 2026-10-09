@@ -1,0 +1,6 @@
+# ArbiCrypto es un panel privado: no se indexa (ver también la etiqueta noindex en cada página).
+# /login queda accesible para que los buscadores lean ese noindex y para las vistas previas al compartir el link.
+User-agent: *
+Allow: /login
+Allow: /brand/og.png
+Disallow: /

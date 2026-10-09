@@ -5,10 +5,38 @@ import "./market.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
 
+// El sitio se compila una vez y corre en cualquier dominio: el servidor cambia este origen por el
+// dominio real al entregar cada página, así las vistas previas (WhatsApp, Telegram, X) traen URLs absolutas.
+const SITE = "https://arbicrypto.local";
+const TITLE = "ArbiCrypto · Arbitraje P2P y Spot en Binance";
+const DESCRIPTION =
+  "Panel privado de arbitraje en Binance: P2P en pesos colombianos y Spot en tiempo real, con comisiones y 4x1000 incluidos y avisos al instante para tu equipo.";
+const SHARE = "Arbitraje P2P y Spot en Binance, en pesos y en vivo. Panel privado para tu equipo.";
+
 export const metadata: Metadata = {
-  title: "ArbiCrypto",
-  description: "Arbitraje P2P y Spot en Binance, en vivo, para ti y tu equipo.",
+  metadataBase: new URL(SITE),
+  title: { default: TITLE, template: "%s · ArbiCrypto" },
+  description: DESCRIPTION,
   applicationName: "ArbiCrypto",
+  category: "finance",
+  // Panel privado: no aparece en buscadores, pero el link se ve bien al compartirlo
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: { index: false, follow: false, noimageindex: true },
+  },
+  openGraph: {
+    type: "website",
+    locale: "es_CO",
+    siteName: "ArbiCrypto",
+    url: "/",
+    title: TITLE,
+    description: SHARE,
+    images: [{ url: "/brand/og.png", width: 1200, height: 630, type: "image/png", alt: "ArbiCrypto: arbitraje P2P y Spot en Binance, en pesos y en vivo" }],
+  },
+  twitter: { card: "summary_large_image", title: TITLE, description: SHARE, images: ["/brand/og.png"] },
+  formatDetection: { telephone: false, email: false, address: false },
   manifest: "/icons/site.webmanifest",
   icons: {
     // PNG primero y sin SVG: Chrome prefiere el SVG si existe, y la pestaña debe mostrar el PNG
@@ -40,7 +68,7 @@ const themeScript = `try{var t=localStorage.getItem("theme");if(t)document.docum
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" className={inter.variable} suppressHydrationWarning>
+    <html lang="es-CO" className={inter.variable} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
