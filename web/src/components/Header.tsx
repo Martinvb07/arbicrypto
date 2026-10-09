@@ -60,13 +60,11 @@ function AlertsMenu({ onTelegram }: { onTelegram: () => void }) {
         <div className="pop">
           <div className="pop-head"><b>Avisos</b><small>Solo cuando aparece una oportunidad con ganancia</small></div>
           <Row title="Avisar desde" sub="Ganancia por dólar">
-            {admin ? (
-              <span className="inline-field">
-                <input type="number" min={0} step="any" value={minUsd} onChange={(e) => setMinUsd(e.target.value)}
-                  onBlur={() => void commitMin()} onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />
-                <span>COP</span>
-              </span>
-            ) : <b>{perUsd(state.settings.min_per_usd)}</b>}
+            <span className="inline-field">
+              <input type="number" min={0} step="any" value={minUsd} onChange={(e) => setMinUsd(e.target.value)}
+                onBlur={() => void commitMin()} onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />
+              <span>COP</span>
+            </span>
           </Row>
           <Row title="Sonido" sub={prefs.sound && !soundReady ? "Toca Activar para habilitarlo" : undefined}>
             {prefs.sound && !soundReady && <button className="btn btn-sm" onClick={enableSound}>Activar</button>}

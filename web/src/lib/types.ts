@@ -215,6 +215,8 @@ export interface Alert {
   capital?: number | null;
   /** Dueño del aviso (vigilancias de venta); los demás no lo ven. */
   user?: string | null;
+  /** Usuarios a los que les toca (cada quien tiene su capital, 4x1000 y mínimo); si existe, manda sobre capital/user. */
+  users?: string[] | null;
   t: number;
   kind: AlertKind;
   title: string;

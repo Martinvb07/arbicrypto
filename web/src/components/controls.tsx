@@ -17,21 +17,20 @@ export function CostsNote({ s, extra }: { s: State; extra?: string }) {
   return <p className="note"><Icon name="check" size={14} /> {costsNote(s)}{extra ? ` ${extra}` : ""}</p>;
 }
 
-/** Interruptor del 4x1000: se prende o apaga desde las mismas tablas (solo el administrador lo cambia). */
+/** Interruptor del 4x1000: cada usuario decide si su cuenta paga 4x1000 (solo cambia sus propios cálculos). */
 export function GmfToggle() {
   const { state, saveSettings } = useLive();
   const [busy, setBusy] = useState(false);
   if (!state) return null;
   const on = state.settings.gmf > 0;
-  const admin = state.user.role === "admin";
   const flip = async () => {
     setBusy(true);
     await saveSettings({ gmf: on ? 0 : GMF });
     setBusy(false);
   };
   return (
-    <label className={`toggle ${on ? "on" : ""}`} title={admin ? "Incluir o quitar el 4x1000 de todos los cálculos" : "Lo cambia el administrador"}>
-      <input type="checkbox" checked={on} disabled={!admin || busy} onChange={() => void flip()} />
+    <label className={`toggle ${on ? "on" : ""}`} title="Incluir o quitar el 4x1000 de tus cálculos (si tu cuenta está exenta, apágalo)">
+      <input type="checkbox" checked={on} disabled={busy} onChange={() => void flip()} />
       <span className="toggle-track" aria-hidden="true" />
       4x1000
     </label>

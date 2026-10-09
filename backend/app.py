@@ -82,8 +82,9 @@ FIXED = {"fiat": FIAT, "p2p_assets": P2P_ASSETS, "max_profit": MAX_PROFIT, "p2p_
          "min_orders": MIN_ORDERS, "min_finish": MIN_FINISH,
          "safe_p2p": SAFE_P2P, "safe_spot": SAFE_SPOT, "spot_slippage": engine.SPOT_SLIPPAGE}
 
-# Lo unico que se configura: capital, desde cuanto avisar y si la cuenta esta exenta del 4x1000
+# Lo unico que se configura (cada usuario el suyo): capital, desde cuanto avisar y si su cuenta paga 4x1000
 DEFAULTS = {"capital": 500000, "min_per_usd": 3, "gmf": 0.004}
+PERSONAL = tuple(DEFAULTS)
 LIMITS = {"capital": (10000, 1e10), "min_per_usd": (0, 1e5), "gmf": (0, 0.01)}
 
 CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
@@ -142,25 +143,32 @@ def clean_settings(raw):
     return out
 
 
-def user_capital(user):
-    """Cada usuario tiene su capital; los administradores comparten el de los ajustes (el de los avisos de Telegram)."""
-    if not user or user.get("role") == "admin":
-        return settings["capital"]
-    return (prefs.get(user["name"]) or {}).get("capital") or settings["capital"]
+def profile(name):
+    """Capital, 4x1000 y "avisar desde" de un usuario (administradores incluidos). Lo que no haya puesto
+    sale de los valores iniciales de backend/data/settings.json."""
+    mine = prefs.get(name) or {} if name else {}
+    return {k: mine[k] if mine.get(k) is not None else settings[k] for k in PERSONAL}
 
 
-def all_capitals():
-    caps = {settings["capital"]}
-    for name, p in list(prefs.items()):
-        if p.get("capital") and name in auth.users and auth.users[name]["role"] != "admin":
-            caps.add(p["capital"])
-    return sorted(caps)[:8]
+def main_user():
+    """El administrador mas antiguo: su perfil manda en Telegram y en el historial (son del equipo)."""
+    admins = sorted((u.get("created", 0), n) for n, u in auth.users.items() if u.get("role") == "admin")
+    return admins[0][1] if admins else None
+
+
+def all_profiles():
+    """{(capital, 4x1000): [usuarios]}: las rutas P2P se calculan una vez por combinacion distinta."""
+    groups = {}
+    for name in list(auth.users):
+        pr = profile(name)
+        groups.setdefault((pr["capital"], pr["gmf"]), []).append(name)
+    if not groups:
+        groups[(settings["capital"], settings["gmf"])] = []
+    return dict(sorted(groups.items(), key=lambda kv: -len(kv[1]))[:8])
 
 
 def public_settings(user=None):
-    if user is not None:
-        return {**FIXED, **settings, "capital": user_capital(user)}
-    return {**FIXED, **settings}
+    return {**FIXED, **settings, **profile(user and user["name"])}
 
 
 def _doc(path):
@@ -260,7 +268,7 @@ def publish(kind, remote=True):
             pass
 
 
-def raise_alert(key, kind, title, body, capital=None, user=None, telegram_too=True):
+def raise_alert(key, kind, title, body, capital=None, user=None, telegram_too=True, users=None):
     now = time.time()
     with lock:
         if now - last_alert.get(key, 0) < ALERT_COOLDOWN:
@@ -268,7 +276,7 @@ def raise_alert(key, kind, title, body, capital=None, user=None, telegram_too=Tr
         last_alert[key] = now
         alert_id = db.add_alert(now, kind, title, body)
         state["alerts"].insert(0, {"id": alert_id, "t": now, "kind": kind, "title": title, "body": body,
-                                   "capital": capital, "user": user})
+                                   "capital": capital, "user": user, "users": users})
         del state["alerts"][200:]
     icon = {"p2p": "💰", "spot": "⚡", "system": "⚠️", "sell": "🎯"}.get(kind, "✅")
     if telegram_too:
@@ -378,7 +386,7 @@ def spot_step():
             break
         if t["profit"] > MAX_PROFIT:
             continue  # demasiado bueno para ser cierto: casi siempre es un precio viejo
-        amount_usdt = min(settings["capital"] / ref, t["liquidity"])  # capital de los ajustes (administrador)
+        amount_usdt = min(profile(main_user())["capital"] / ref, t["liquidity"])  # el monto solo afina el precio real
         if checked < 3:  # precio real con la profundidad del libro, solo para las mejores
             checked += 1
             try:
@@ -392,7 +400,7 @@ def spot_step():
         alive.add(key)
         streak[key] = streak.get(key, 0) + 1
         first_seen.setdefault(key, now)
-        if profit * ref >= settings["min_per_usd"] and streak[key] >= SPOT_CONFIRMATIONS:
+        if streak[key] >= SPOT_CONFIRMATIONS:  # el minimo de cada usuario se aplica despues
             found.append({"id": key, "kind": "spot", "profit": profit, "per_usd": profit * ref,
                           "gain": amount_usdt * profit * ref, "amount_usdt": amount_usdt, "since": first_seen[key], "tri": t,
                           "tight": profit < SAFE_SPOT})
@@ -402,17 +410,24 @@ def spot_step():
 
     sane = [t["profit"] for t in res["top"] if t["profit"] <= MAX_PROFIT]
     record_hour_best("spot", max(sane) * ref if sane and ref else None, now)
-    db.track("spot", {o["id"]: (" → ".join(o["tri"]["path"]), o["per_usd"], o["gain"], o["tri"]["symbols"]) for o in found},
-             settings["capital"], now)
+    main = profile(main_user())
+    team = [o for o in found if o["per_usd"] >= main["min_per_usd"]]
+    db.track("spot", {o["id"]: (" → ".join(o["tri"]["path"]), o["per_usd"], o["gain"], o["tri"]["symbols"]) for o in team},
+             main["capital"], now)
     with lock:
         graph = g_
         state["spot"] = dict(res, t=now, fee=fee, live=live.fresh())
         opps["spot"] = found
-    sync_alerts("spot", {o["id"]: (
-        "spot", f"{per_usd(o['per_usd'])} dentro de Binance" + (" · JUSTA, actúa rápido" if o["tight"] else ""),
-        f"{' → '.join(o['tri']['path'])}\nCon {num(o['amount_usdt'])} USDT en Spot: {money(o['gain'])} · 3 cambios seguidos, dura segundos\n"
-        "Precio real según tu monto, con comisiones, redondeo y colchón · usa órdenes de MERCADO, NO Convertir")
-        for o in found})
+    by_min = {}  # cada quien recibe las que pasan SU minimo
+    for name in list(auth.users):
+        by_min.setdefault(profile(name)["min_per_usd"], []).append(name)
+    main_name = main_user()
+    for minimum, names in by_min.items():
+        sync_alerts(f"spot@{minimum}", {f"{o['id']}@{minimum}": (
+            "spot", f"{per_usd(o['per_usd'])} dentro de Binance" + (" · JUSTA, actúa rápido" if o["tight"] else ""),
+            f"{' → '.join(o['tri']['path'])}\nCon {num(o['amount_usdt'])} USDT en Spot: {money(o['gain'])} · 3 cambios seguidos, dura segundos\n"
+            "Precio real según tu monto, con comisiones, redondeo y colchón · usa órdenes de MERCADO, NO Convertir")
+            for o in found if o["per_usd"] >= minimum}, users=names, telegram_too=main_name in names)
     ids = frozenset(o["id"] for o in found)
     if ids != spot_meta["opp_ids"] or now - spot_meta["published"] >= PUBLISH_EVERY:
         spot_meta["opp_ids"], spot_meta["published"] = ids, now
@@ -426,7 +441,6 @@ def p2p_step():
         if graph:
             break
         time.sleep(0.5)
-    s = settings
     cache = p2p_cache
     rest = [a for a in P2P_ASSETS if a not in P2P_ALWAYS]
     if len(cache["market"]) < len(P2P_ASSETS):
@@ -445,9 +459,10 @@ def p2p_step():
     usdt_ads = market.get("USDT", {}).get("BUY") or market.get("USDT", {}).get("SELL") or []
     ref = usdt_ads[0]["price"] if usdt_ads else (usd_ref() or 0)
     computed, keep = {}, set()
-    for cap in all_capitals():
-        routes = engine.p2p_routes(market, graph, fee, s["gmf"], cap, FIAT, pfee)
-        conversions = engine.usdt_conversions(market, graph, fee, s["gmf"], cap)
+    groups = all_profiles()
+    for (cap, gmf) in groups:
+        routes = engine.p2p_routes(market, graph, fee, gmf, cap, FIAT, pfee)
+        conversions = engine.usdt_conversions(market, graph, fee, gmf, cap)
         for r in routes:
             r["per_usd"] = r["profit"] * ref
             for step in r["steps"]:
@@ -457,20 +472,22 @@ def p2p_step():
         for r in routes:
             if r["profit"] <= 0:
                 break
-            if r["profit"] > MAX_PROFIT or r["per_usd"] < s["min_per_usd"]:
-                continue
-            key = "p2p:" + r["id"]
-            first_seen.setdefault(f"{key}@{cap}", now)
-            keep.add(f"{key}@{cap}")
+            if r["profit"] > MAX_PROFIT:
+                continue  # el minimo de cada usuario se aplica al mostrar y al avisar
+            key, seen_key = "p2p:" + r["id"], f"p2p:{r['id']}@{cap}@{gmf}"
+            first_seen.setdefault(seen_key, now)
+            keep.add(seen_key)
             found.append({"id": key, "kind": "p2p", "profit": r["profit"], "per_usd": r["per_usd"], "gain": r["profit_fiat"],
-                          "since": first_seen[f"{key}@{cap}"], "route": r, "tight": r["profit"] < SAFE_P2P})
-        computed[cap] = {"routes": routes, "conversions": conversions, "found": found}
+                          "since": first_seen[seen_key], "route": r, "tight": r["profit"] < SAFE_P2P})
+        computed[(cap, gmf)] = {"routes": routes, "conversions": conversions, "found": found}
     for key in [k for k in first_seen if k.startswith("p2p:") and k not in keep]:
         first_seen.pop(key, None)
-    own = computed.get(s["capital"]) or {"routes": [], "found": []}  # historial y Telegram: capital de los ajustes
+    main_name = main_user()
+    main = profile(main_name)  # historial y Telegram: el perfil del administrador principal
+    own = computed.get((main["capital"], main["gmf"])) or {"routes": [], "found": []}
     record_hour_best("p2p", own["routes"][0]["per_usd"] if own["routes"] else None, now)
-    db.track("p2p", {o["id"]: (route_label(o["route"]), o["per_usd"], o["gain"], route_text(o["route"])) for o in own["found"]},
-             s["capital"], now)
+    db.track("p2p", {o["id"]: (route_label(o["route"]), o["per_usd"], o["gain"], route_text(o["route"]))
+                     for o in own["found"] if o["per_usd"] >= main["min_per_usd"]}, main["capital"], now)
 
     point = {"t": int(now), "p": {a: [m["BUY"][0]["price"] if m["BUY"] else None, m["SELL"][0]["price"] if m["SELL"] else None]
                                   for a, m in market.items() if m["BUY"] or m["SELL"]}}
@@ -487,13 +504,19 @@ def p2p_step():
     if snapshot is not None:
         save_json(HISTORY_FILE, snapshot)
 
-    costs_txt = ("Ya descuenta comisiones, redondeo, colchón y 4x1000 sobre la ganancia" if s["gmf"]
-                 else "Ya descuenta comisiones, redondeo y colchón (sin 4x1000)")
-    for cap, c in computed.items():
-        sync_alerts(f"p2p@{cap}", {f"{o['id']}@{cap}": ("p2p", f"{per_usd(o['per_usd'])} en P2P" + (" · JUSTA, actúa rápido" if o["tight"] else ""),
-                                            f"{route_text(o['route'])}\nCon {money(cap)}: {money(o['gain'])} de ganancia\n{costs_txt}")
-                                    for o in c["found"]},
-                    capital=cap, telegram_too=cap == s["capital"])
+    for (cap, gmf), names in groups.items():
+        costs_txt = ("Ya descuenta comisiones, redondeo, colchón y 4x1000 sobre la ganancia" if gmf
+                     else "Ya descuenta comisiones, redondeo y colchón (sin 4x1000)")
+        found = computed[(cap, gmf)]["found"]
+        by_min = {}
+        for name in names:
+            by_min.setdefault(profile(name)["min_per_usd"], []).append(name)
+        for minimum, who in by_min.items():
+            tag = f"{cap}@{gmf}@{minimum}"
+            sync_alerts(f"p2p@{tag}", {f"{o['id']}@{tag}": (
+                "p2p", f"{per_usd(o['per_usd'])} en P2P" + (" · JUSTA, actúa rápido" if o["tight"] else ""),
+                f"{route_text(o['route'])}\nCon {money(cap)}: {money(o['gain'])} de ganancia\n{costs_txt}")
+                for o in found if o["per_usd"] >= minimum}, capital=cap, users=who, telegram_too=main_name in who)
     publish("p2p")
 
 
@@ -510,7 +533,7 @@ def qty8(v):
 def watch_need(w, o):
     """Pesos que tiene que dar la venta para cumplir el objetivo (el 4x1000 se cobra sobre la ganancia)."""
     extra = w["cost"] * WATCH_SPOT_EXTRA if len(o["path"]) > 1 else 0
-    return w["cost"] + extra + (w["target"] / (1 - settings["gmf"]) if w["target"] > 0 else 0)
+    return w["cost"] + extra + (w["target"] / (1 - profile(w["user"])["gmf"]) if w["target"] > 0 else 0)
 
 
 def watch_eval(w, targets):
@@ -520,7 +543,7 @@ def watch_eval(w, targets):
     best, best_gap = None, None
     for o in options:
         need = watch_need(w, o)
-        o["profit"] = engine.after_gmf(o["received"] - w["cost"], settings["gmf"])
+        o["profit"] = engine.after_gmf(o["received"] - w["cost"], profile(w["user"])["gmf"])
         o["need_price"] = need / o["qty"]  # precio por unidad que tiene que pagar el comprador
         o["ok"] = o["received"] >= need
         if best is None or o["received"] - need > best_gap:
@@ -941,7 +964,7 @@ def api_exit():
     finally:
         p2p_hold.clear()
         exit_busy.release()
-    gmf = settings["gmf"]
+    gmf = profile(g.user["name"])["gmf"]
     for o in options:
         o["profit"] = engine.after_gmf(o["received"] - cost, gmf) if cost else None
         if o["backup"]:
@@ -1040,22 +1063,24 @@ def api_watch_delete():
 def api_state():
     with lock:
         name = g.user["name"]  # saldos, ordenes y llave de Binance: solo los de su propia cuenta
-        cap = user_capital(g.user)
-        mine = by_capital.get(cap)
+        me = profile(name)
+        cap = me["capital"]
+        mine = by_capital.get((cap, me["gmf"]))
         p2p = state["p2p"]
-        if p2p and mine is None and graph:  # capital recien cambiado: se calcula ya con los anuncios guardados
-            routes = engine.p2p_routes(p2p["market"], graph, current_fee(), settings["gmf"], cap, FIAT, p2p_fee())
+        if p2p and mine is None and graph:  # capital o 4x1000 recien cambiado: se calcula ya con los anuncios guardados
+            routes = engine.p2p_routes(p2p["market"], graph, current_fee(), me["gmf"], cap, FIAT, p2p_fee())
             ref = usd_ref() or 0
             for r in routes:
                 r["per_usd"] = r["profit"] * ref
-            mine = {"routes": routes, "conversions": engine.usdt_conversions(p2p["market"], graph, current_fee(), settings["gmf"], cap),
+            mine = {"routes": routes, "conversions": engine.usdt_conversions(p2p["market"], graph, current_fee(), me["gmf"], cap),
                     "found": []}
         if p2p:
             p2p = {**p2p, "routes": (mine or {}).get("routes", []), "conversions": (mine or {}).get("conversions")}
         return jsonify({
             "boot": BOOT, "now": time.time(), "settings": public_settings(g.user), "fee": current_fee(), "p2p_fee": p2p_fee(),
             "spot": state["spot"], "p2p": p2p, "account": account_view(name),
-            "opps": sorted((mine or {}).get("found", []) + opps["spot"], key=lambda o: -o["per_usd"]),
+            "opps": sorted([o for o in (mine or {}).get("found", []) + opps["spot"] if o["per_usd"] >= me["min_per_usd"]],
+                           key=lambda o: -o["per_usd"]),
             "connected": name in accounts, "key_hint": accounts[name].hint() if name in accounts else None,
             "can_connect": can_connect(), "local": is_local(), "team": TEAM, "user": g.user, "telegram": telegram.info(), "usd_ref": usd_ref(),
             "alerts_at_boot": alerts_at_boot,
@@ -1073,19 +1098,14 @@ def api_history():
 
 @app.post("/api/settings")
 def api_settings():
-    global settings
-    b = body()
-    if g.user["role"] != "admin":
-        if set(b) - {"capital"}:
-            return jsonify(error="Solo el administrador puede cambiar eso."), 403
-        cap = clean_settings({**settings, "capital": b.get("capital")})["capital"]
-        with lock:
-            prefs[g.user["name"]] = {**prefs.get(g.user["name"], {}), "capital": cap}
-            save_json(PREFS_FILE, prefs)
-    else:
-        with lock:
-            settings = clean_settings({**settings, **b})
-            save_json(SETTINGS_FILE, settings)
+    b = {k: v for k, v in body().items() if k in PERSONAL}
+    if not b:
+        return jsonify(error="Nada que guardar."), 400
+    # capital, 4x1000 y "avisar desde" son de cada usuario, tambien de los administradores
+    clean = clean_settings({**profile(g.user["name"]), **b})
+    with lock:
+        prefs[g.user["name"]] = {**prefs.get(g.user["name"], {}), **{k: clean[k] for k in b}}
+        save_json(PREFS_FILE, prefs)
     for e in wake.values():
         e.set()
     return jsonify(public_settings(g.user))
@@ -1324,7 +1344,7 @@ def auto_operations(user):
             names = lambda rows: " + ".join(dict.fromkeys(f"{num(o['amount'], 2 if o['amount'] >= 1 else 8)} {o['asset']}" for o in rows))
             ops.append({"id": "auto:" + str(buys[0]["id"]), "auto": True, "user": user, "t": buys[0]["time"] / 1000,
                         "kind": "p2p", "description": f"Compraste {names(buys)} → vendiste {names(sells)}",
-                        "invested": paid, "received": got - (gross * settings["gmf"] if gross > 0 else 0),
+                        "invested": paid, "received": got - (gross * profile(user)["gmf"] if gross > 0 else 0),
                         "estimated": None, "note": None})
         buys.clear()
         sells.clear()

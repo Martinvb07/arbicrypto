@@ -3,8 +3,8 @@
 import type { Ad, HistPoint, Side, State } from "./types";
 
 /** ¿Este aviso es para mí? (rutas de mi capital y mis propias vigilancias) */
-export const isMine = (a: { capital?: number | null; user?: string | null }, s: State) =>
-  (a.capital == null || a.capital === s.settings.capital) && (!a.user || a.user === s.user.name);
+export const isMine = (a: { capital?: number | null; user?: string | null; users?: string[] | null }, s: State) =>
+  a.users ? a.users.includes(s.user.name) : (a.capital == null || a.capital === s.settings.capital) && (!a.user || a.user === s.user.name);
 
 export const COIN_NAMES: Record<string, string> = {
   USDT: "Tether · dólar", USDC: "USD Coin · dólar", FDUSD: "First Digital · dólar", BTC: "Bitcoin", ETH: "Ethereum",
