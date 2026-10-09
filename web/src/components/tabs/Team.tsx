@@ -171,8 +171,8 @@ export function Team() {
             </div>
           </div>
         )}
-        {!state.team && (
-          <p className="sub" style={{ marginTop: 10 }}>Para que entren desde otros celulares o PCs, enciende el panel en modo equipo: <b>pm2 start deploy/ecosystem.config.js --env equipo</b>.</p>
+        {!state.team && state.local && ( // solo en el PC donde corre el panel; en el VPS todos entran por el dominio
+          <p className="sub" style={{ marginTop: 10 }}>Para que tu equipo entre desde sus celulares en esta misma Wi-Fi, abre el panel en modo equipo (ver LEEME).</p>
         )}
       </div>
 
