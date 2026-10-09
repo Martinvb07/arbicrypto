@@ -269,9 +269,10 @@ def p2p_market(assets, fiat, amount, pay_types, merchant, min_orders, min_finish
     return market, errors
 
 
-def after_gmf(gain, gmf):
-    """El 4x1000 se cobra solo sobre la ganancia que llega a tu banco (Nequi); el capital va y vuelve sin cobro por los topes exentos."""
-    return gain - gmf * gain if gain > 0 else gain
+def with_gmf(paid, gmf):
+    """Lo que de verdad sale de tu banco al pagar: el pago mas el 4x1000 (0,4 % de cada pago, ganes o pierdas).
+    Al vender recibes plata, y eso no paga 4x1000."""
+    return paid * (1 + gmf)
 
 
 def _fits(ad, fiat_amount, crypto_qty):
@@ -282,7 +283,8 @@ def _fits(ad, fiat_amount, crypto_qty):
 def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0):
     """Arbitraje que se puede hacer ya, tomando anuncios existentes:
     pesos -> X (compra P2P) -> [X a Y en Spot] -> Y (venta P2P) -> pesos, para todas las criptos X, Y.
-    Cada paso usa el mejor anuncio que acepta el monto real; descuenta comision Spot y 4x1000 sobre la ganancia."""
+    Cada paso usa el mejor anuncio que acepta el monto real; descuenta comision Spot y el 4x1000 de lo que pagas
+    al vendedor (capital x 0,4 %)."""
     def buy_ad(asset):
         return next((a for a in market.get(asset, {}).get("BUY") or [] if _fits(a, capital, capital / a["price"])), None)
 
@@ -317,11 +319,12 @@ def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0):
                 steps.append(spot_step(x, y, rate, qty_y))
             steps.append(p2p_step("sell", y, sy, qty_y))
             received = qty_y * sy["price"] * (1 - p2p_fee)
-            gain = after_gmf(received - capital, gmf)
+            gmf_paid = with_gmf(capital, gmf) - capital  # el banco lo cobra al pagarle al vendedor
+            gain = received - capital - gmf_paid
             # en que se van los pesos: cada costo valorado al precio de venta
             costs = {k: v * sy["price"] for k, v in lost.items()}
             costs["p2p_fee"] = capital * p2p_fee + qty_y * sy["price"] * p2p_fee
-            costs["gmf"] = (received - capital) - gain
+            costs["gmf"] = gmf_paid
             routes.append({"id": f"{x}>{y}", "steps": steps, "received": received, "paid": capital, "costs": costs,
                            "profit_fiat": gain, "profit": gain / capital})
     routes.sort(key=lambda t: -t["profit"])
@@ -330,7 +333,8 @@ def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0):
 
 def usdt_conversions(market, graph, fee, gmf, capital):
     """Si ya tienes dolares (USDT) o los quieres comprar: ¿conviene hacerlo directo en P2P
-    o pasando por otra cripto en Spot? Todo en pesos por dolar, con comisiones (aqui no hay ganancia, no aplica 4x1000)."""
+    o pasando por otra cripto en Spot? Todo en pesos por dolar, con comisiones. Comprar paga 4x1000 (le pagas al
+    vendedor); vender no (recibes plata)."""
     def first(asset, side, fiat_amount, qty_of):
         for a in market.get(asset, {}).get(side) or []:
             if _fits(a, fiat_amount(a), qty_of(a)):
@@ -360,7 +364,7 @@ def usdt_conversions(market, graph, fee, gmf, capital):
         got = spot_fill(graph, x, "USDT", capital / ad["price"], fee) if ad else None
         if got:
             rate = got / (capital / ad["price"])
-            buy.append({"asset": x, "per_usd": ad["price"] / rate, "ad": ad,
+            buy.append({"asset": x, "per_usd": with_gmf(ad["price"], gmf) / rate, "ad": ad,
                         "symbol": graph[x]["USDT"][2] if x != "USDT" else None})
 
     direct_sell = next((r["per_usd"] for r in sell if r["asset"] == "USDT"), None)

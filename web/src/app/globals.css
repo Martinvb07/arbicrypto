@@ -1170,3 +1170,8 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
   .chat-dock-body .chat-conv, .chat-dock-body .chat-list, .chat-dock-body .chat-ch, .chat-msg .chat-bubble, .chat-dot-inline.on { animation: none; }
   .fab-ico, .chat-fab { transition: none; }
 }
+
+/* 4x1000: lo que de verdad sale de tu banco al comprar */
+.ad-gmf { margin-left: auto; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.ad-gmf b { color: var(--text-2); font-weight: 650; }
+.crow-sub { font-size: 11.5px; color: var(--muted); white-space: nowrap; }

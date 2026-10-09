@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { advertiserUrl, COIN_NAMES, effBuy, isDollar, isMine, roundTrip, spotUrl, usdtPrices } from "@/lib/calc";
+import { advertiserUrl, COIN_NAMES, effBuy, gmfOf, isDollar, isMine, roundTrip, spotUrl, usdtPrices } from "@/lib/calc";
 import { money, num, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Conversion, Route, State, Triangle } from "@/lib/types";
@@ -59,7 +59,7 @@ function Kpis({ s }: { s: State }) {
       <div className="kpi">
         <small>Dólar compra</small>
         <b>{money(buy)}</b>
-        <span>precio del anuncio</span>
+        <span>{s.settings.gmf > 0 ? "ya con 4x1000" : "precio del anuncio"}</span>
       </div>
       <div className="kpi">
         <small>Dólar venta</small>
@@ -112,7 +112,7 @@ function CostBar({ s }: { s: State }) {
     ["Redondeo Binance", "", true, "Binance redondea las cantidades hacia abajo; el sobrante queda suelto"],
     ["Colchón", pctTxt(s.settings.spot_slippage), true, "Por si el precio se mueve mientras haces el cambio en Spot"],
     ["Comisión P2P", pctTxt(s.p2p_fee ?? 0), (s.p2p_fee ?? 0) > 0, "Tomada de tus órdenes P2P; Binance normalmente no cobra al que toma un anuncio"],
-    ["4x1000", gmf ? "sobre la ganancia" : "apagado", gmf, "Solo sobre lo que ganas al llegar a Nequi"],
+    ["4x1000", gmf ? "0,4 % de lo que pagas" : "apagado", gmf, "Lo cobra tu banco cada vez que le pagas a un vendedor P2P, ganes o pierdas"],
   ];
   return (
     <div className="cost-bar" aria-label="Costos incluidos">
@@ -198,7 +198,7 @@ export function Steps({ row, s }: { row: Row; s: State }) {
                   {isDollar(st.asset) ? <><b>{num(st.qty, 2)} dólares</b> <Asset s={st.asset} size={18} /> a <b>{money(st.price)}</b> cada dólar</>
                     : <>{qty(st.qty)} <Asset s={st.asset} size={18} /> a <b>{money(st.price)}</b> por cada {st.asset}</>}
                   <span className="muted">
-                    {" "}· {st.kind === "buy" ? `pagas ${money(s.settings.capital, 0)} · confirma el precio antes de pagar` : `recibes ${money(st.qty * st.price, 0)}`}
+                    {" "}· {st.kind === "buy" ? `pagas ${money(s.settings.capital, 0)}${s.settings.gmf > 0 ? ` + 4x1000 ${money(gmfOf(s.settings.capital, s), 0)}` : ""} · confirma el precio antes de pagar` : `recibes ${money(st.qty * st.price, 0)}`}
                     {st.kind === "sell" && !isDollar(st.asset) && dollars ? ` · te queda a ${money((st.qty * st.price) / dollars)} por dólar` : ""}
                   </span>
                 </div>

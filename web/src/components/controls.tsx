@@ -10,7 +10,7 @@ const GMF = 0.004;
 
 /** Nota de costos que va debajo de cada tabla. */
 export function costsNote(s: State) {
-  return s.settings.gmf > 0 ? "Ya descuenta comisiones, redondeo de Binance, colchón por movimiento de precio y 4x1000 sobre la ganancia." : "Ya descuenta comisiones, redondeo de Binance y colchón por movimiento de precio · sin 4x1000.";
+  return s.settings.gmf > 0 ? "Ya descuenta comisiones, redondeo de Binance, colchón por movimiento de precio y el 4x1000 de lo que pagas (0,4 % de tu capital)." : "Ya descuenta comisiones, redondeo de Binance y colchón por movimiento de precio · sin 4x1000.";
 }
 
 export function CostsNote({ s, extra }: { s: State; extra?: string }) {

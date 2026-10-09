@@ -520,7 +520,7 @@ def p2p_step():
         save_json(HISTORY_FILE, snapshot)
 
     for (cap, gmf), names in groups.items():
-        costs_txt = ("Ya descuenta comisiones, redondeo, colchón y 4x1000 sobre la ganancia" if gmf
+        costs_txt = (f"Ya descuenta comisiones, redondeo, colchón y el 4x1000 de lo que pagas ({money(cap * gmf)})" if gmf
                      else "Ya descuenta comisiones, redondeo y colchón (sin 4x1000)")
         found = computed[(cap, gmf)]["found"]
         by_min = {}
@@ -545,10 +545,15 @@ def qty8(v):
     return num(v, 2 if v >= 1 else 8)
 
 
+def paid_with_gmf(user, cost):
+    """Lo que de verdad te costo una moneda: lo que le pagaste al vendedor + el 4x1000 que cobro tu banco."""
+    return engine.with_gmf(cost, profile(user)["gmf"])
+
+
 def watch_need(w, o):
-    """Pesos que tiene que dar la venta para cumplir el objetivo (el 4x1000 se cobra sobre la ganancia)."""
+    """Pesos que tiene que dar la venta para cumplir el objetivo: recuperar lo pagado (con su 4x1000) + la meta."""
     extra = w["cost"] * WATCH_SPOT_EXTRA if len(o["path"]) > 1 else 0
-    return w["cost"] + extra + (w["target"] / (1 - profile(w["user"])["gmf"]) if w["target"] > 0 else 0)
+    return paid_with_gmf(w["user"], w["cost"]) + extra + max(w["target"], 0)
 
 
 def watch_eval(w, targets):
@@ -558,7 +563,7 @@ def watch_eval(w, targets):
     best, best_gap = None, None
     for o in options:
         need = watch_need(w, o)
-        o["profit"] = engine.after_gmf(o["received"] - w["cost"], profile(w["user"])["gmf"])
+        o["profit"] = o["received"] - paid_with_gmf(w["user"], w["cost"])
         o["need_price"] = need / o["qty"]  # precio por unidad que tiene que pagar el comprador
         o["ok"] = o["received"] >= need
         if best is None or o["received"] - need > best_gap:
@@ -988,13 +993,13 @@ def api_exit():
     finally:
         p2p_hold.clear()
         exit_busy.release()
-    gmf = profile(g.user["name"])["gmf"]
+    spent = paid_with_gmf(g.user["name"], cost) if cost else 0  # lo que pagaste + su 4x1000
     for o in options:
-        o["profit"] = engine.after_gmf(o["received"] - cost, gmf) if cost else None
+        o["profit"] = o["received"] - spent if cost else None
         if o["backup"]:
-            o["backup"]["profit"] = engine.after_gmf(o["backup"]["received"] - cost, gmf) if cost else None
-        # precio minimo por unidad de la cripto que vendes para recuperar lo que pagaste
-        o["breakeven"] = cost / o["qty"] if cost else None
+            o["backup"]["profit"] = o["backup"]["received"] - spent if cost else None
+        # precio minimo por unidad de la cripto que vendes para recuperar lo que pagaste (con su 4x1000)
+        o["breakeven"] = spent / o["qty"] if cost else None
     return jsonify(asset=asset, qty=amount, cost=cost, options=options, failed=failed, t=time.time())
 
 
@@ -1358,18 +1363,17 @@ def api_history_stats():
 
 def auto_operations(user):
     """Bitacora automatica: arma cada operacion con las ordenes P2P completadas del usuario (compras seguidas de ventas).
-    Pagaste = suma de las compras; recibiste = suma de las ventas, ya con el 4x1000 sobre la ganancia."""
+    Pagaste = suma de las compras + el 4x1000 que cobro tu banco al pagar; recibiste = suma de las ventas."""
     done = sorted((o for o in db.orders(user) if o["status"] == "COMPLETED" and o["total"]), key=lambda o: o["time"])
     ops, buys, sells = [], [], []
 
     def close():
         if buys and sells:
             paid, got = sum(o["total"] for o in buys), sum(o["total"] for o in sells)
-            gross = got - paid
             names = lambda rows: " + ".join(dict.fromkeys(f"{num(o['amount'], 2 if o['amount'] >= 1 else 8)} {o['asset']}" for o in rows))
             ops.append({"id": "auto:" + str(buys[0]["id"]), "auto": True, "user": user, "t": buys[0]["time"] / 1000,
                         "kind": "p2p", "description": f"Compraste {names(buys)} → vendiste {names(sells)}",
-                        "invested": paid, "received": got - (gross * profile(user)["gmf"] if gross > 0 else 0),
+                        "invested": paid_with_gmf(user, paid), "received": got,
                         "estimated": None, "note": None})
         buys.clear()
         sells.clear()

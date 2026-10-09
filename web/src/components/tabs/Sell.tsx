@@ -217,7 +217,8 @@ function CoinForm({ edit, choices, holdings, onClose }: {
 
 /** Una moneda de la lista: lo que te dejaría venderla ya, qué tan cerca está, su aviso y el paso a paso. */
 function CoinRow({ w, i, onEdit }: { w: Watch; i: number; onEdit: () => void }) {
-  const { toast, refresh } = useLive();
+  const { state, toast, refresh } = useLive();
+  const gmf = state?.settings.gmf ?? 0; // 4x1000 que pagaste al comprar
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const b = w.last?.best;
@@ -256,7 +257,8 @@ function CoinRow({ w, i, onEdit }: { w: Watch; i: number; onEdit: () => void }) 
             <small>{COIN_NAMES[w.asset] ?? w.asset}</small>
           </div>
         </div>
-        <div className="crow-cell"><small>Te costó</small><b>{money(w.cost, 0)}</b></div>
+        <div className="crow-cell"><small>Te costó</small><b>{money(w.cost * (1 + gmf), 0)}</b>
+          {gmf > 0 && <span className="crow-sub">{money(w.cost, 0)} + 4x1000</span>}</div>
         <div className="crow-cell crow-now">
           <small>Si vendes ahora</small>
           {b ? <b className={`val ${tone(b.profit)}`}>{signedMoney(b.profit)}</b> : <b className="dim">calculando…</b>}
@@ -348,7 +350,7 @@ export function Sell() {
             )}
           </div>
         )}
-        <p className="note"><Icon name="check" size={14} /><span>Ya con comisiones, redondeo de Binance y 4x1000 sobre la ganancia. Confirma el precio en Binance antes de vender.</span></p>
+        <p className="note"><Icon name="check" size={14} /><span>Ya con comisiones, redondeo de Binance y el 4x1000 que pagaste al comprar (0,4 % de lo que te costó). Confirma el precio en Binance antes de vender.</span></p>
       </section>
       {form && <CoinForm edit={form.edit} choices={choices} holdings={holdings} onClose={() => setForm(null)} />}
     </div>

@@ -1,5 +1,5 @@
 // Cálculos que convierten los datos del backend en cifras simples.
-// Todo lo que se muestra ya incluye comisiones de Binance y el 4x1000 sobre la ganancia (lo que llega de más a Nequi).
+// Todo lo que se muestra ya incluye comisiones de Binance y el 4x1000: 0,4 % de cada pago que haces (al comprar), ganes o pierdas.
 import type { Ad, HistPoint, Side, State } from "./types";
 
 /** ¿Este aviso es para mí? (rutas de mi capital y mis propias vigilancias) */
@@ -20,11 +20,11 @@ export function bestAd(s: State, asset: string, side: Side): Ad | undefined {
   return s.p2p?.market[asset]?.[side]?.[0];
 }
 
-/** Lo que pagas al comprar: el precio del anuncio (el 4x1000 solo se cobra sobre la ganancia). */
-export const effBuy = (price: number | undefined, _s: State) => price;
+/** Lo que de verdad sale de tu banco al comprar: el precio del anuncio + el 4x1000 (0,4 % de lo que pagas). */
+export const effBuy = (price: number | undefined, s: State) => (price == null ? price : price * (1 + s.settings.gmf));
 
-/** Descuenta el 4x1000 solo cuando hay ganancia. */
-export const afterGmf = (ratio: number, s: State) => (ratio > 0 ? ratio * (1 - s.settings.gmf) : ratio);
+/** El 4x1000 que cobra el banco sobre un pago. */
+export const gmfOf = (paid: number, s: State) => paid * s.settings.gmf;
 
 export function usdtPrices(s: State) {
   return { buy: effBuy(bestAd(s, "USDT", "BUY")?.price, s), sell: bestAd(s, "USDT", "SELL")?.price };
@@ -39,10 +39,10 @@ export function roundTrip(s: State, asset: string): number | null {
   const sell = bestAd(s, asset, "SELL")?.price;
   if (!buy || !sell) return null;
   const keep = 1 - (s.p2p_fee ?? 0); // comisión P2P al comprar y al vender
-  return perDollar(afterGmf((sell * keep * keep) / buy - 1, s), s);
+  return perDollar((sell * keep * keep) / (effBuy(buy, s) ?? buy) - 1, s); // al comprar pagas el 4x1000
 }
 
-/** Serie de precios de una cripto (el 4x1000 no cambia el precio, solo la ganancia). */
+/** Serie de precios de una cripto: precios de los anuncios, antes de comisiones y 4x1000. */
 export function series(hist: HistPoint[], asset: string) {
   const out: { t: number; buy: number; sell: number }[] = [];
   for (const h of hist) {

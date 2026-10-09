@@ -95,7 +95,7 @@ function Kpi({ icon, kind, label, value, hint, i }: { icon: IconName; kind: stri
 
 // ---------------------------------------------------------------- comprar y vender ya
 
-/** Ruta directa de tu capital: comprar y vender la misma cripto en P2P (la calcula el servidor con comisiones y 4x1000). */
+/** Ruta directa de tu capital: comprar y vender la misma cripto en P2P (la calcula el servidor con comisiones y el 4x1000 de lo que pagas). */
 const directRoute = (s: State, asset: string) => s.p2p?.routes?.find((r) => r.id === `${asset}>${asset}`);
 
 /** Cuando comprar y vender gana: el paso a paso, igual que en Inicio. Abajo, las otras criptos que también ganan. */
@@ -116,7 +116,7 @@ function WinCard({ s, asset, onCoin }: { s: State; asset: string; onCoin: (a: st
               <span className="sec-ico green"><Icon name="trend" /></span>
               <div>
                 <h2>Gana ahora con {asset}: <span className="up">{signedMoney(r.profit_fiat)}</span></h2>
-                <p className="sub">Con {money(s.settings.capital, 0)} · ya descuenta comisión P2P y 4x1000 sobre la ganancia</p>
+                <p className="sub">Con {money(s.settings.capital, 0)} · ya descuenta comisión P2P y el 4x1000 de lo que pagas</p>
               </div>
             </div>
             <RouteStatus r={row} />
@@ -168,8 +168,9 @@ function AdRow({ ad, asset, best, side, s, i }: { ad: Ad; asset: string; best: n
       </header>
 
       <div className="ad-price-row">
-        <span className="ad-price">{money(side === "BUY" ? effBuy(ad.price, s) : ad.price)}</span>
+        <span className="ad-price">{money(ad.price)}</span>
         <span className="ad-unit">{unit}</span>
+        {side === "BUY" && s.settings.gmf > 0 && <span className="ad-gmf">con 4x1000: <b>{money(effBuy(ad.price, s))}</b></span>}
       </div>
 
       <dl className="ad-stats">
@@ -250,7 +251,7 @@ export function Market() {
   // precios netos con tu capital: lo que de verdad pagas y recibes por cada unidad (comisión P2P incluida)
   const route: Route | undefined = directRoute(state, asset);
   const [bStep, sStep] = (route?.steps ?? []) as P2PStep[];
-  const netBuy = route && bStep ? route.paid / bStep.qty : effBuy(buy, state);
+  const netBuy = route && bStep ? (route.paid + route.costs.gmf) / bStep.qty : effBuy(buy, state); // con su 4x1000
   const netSell = route && sStep ? route.received / sStep.qty : sell;
   const rt = route ? route.per_usd : roundTrip(state, asset);
   const cap = money(st.capital, 0);
@@ -290,7 +291,7 @@ export function Market() {
               hint={`Se revisa cada ${every(st.p2p_interval)}`} />
           </div>
 
-          <p className="mkt-net-note"><Icon name="info" size={14} /> Precios netos con tu capital: incluyen comisión P2P{(state.p2p_fee ?? 0) > 0 ? ` (${pctPlain(state.p2p_fee, 2)})` : " (hoy 0 %)"} y el 4x1000 sobre la ganancia{state.settings.gmf > 0 ? "" : " (apagado)"}.</p>
+          <p className="mkt-net-note"><Icon name="info" size={14} /> Precios netos con tu capital: incluyen comisión P2P{(state.p2p_fee ?? 0) > 0 ? ` (${pctPlain(state.p2p_fee, 2)})` : " (hoy 0 %)"} y {state.settings.gmf > 0 ? `el 4x1000 de lo que pagas (${money(state.settings.capital * state.settings.gmf, 0)} con tu capital)` : "sin 4x1000 (apagado)"}.</p>
 
           <WinCard s={state} asset={asset} onCoin={(a) => setPrefs({ asset: a })} />
 
