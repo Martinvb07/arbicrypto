@@ -101,9 +101,12 @@ jobs:
             (cd web && npm ci && npm run build)
           }
 
+          # Un solo proceso Python (no admite recarga sin corte): se recrea desde
+          # ecosystem.config.js para que siempre use su carpeta, Python y variables.
           recargar_pm2() {
             mkdir -p logs
-            pm2 startOrReload deploy/ecosystem.config.js --update-env
+            pm2 delete arbicrypto >/dev/null 2>&1 || true
+            pm2 start deploy/ecosystem.config.js
             pm2 save
           }
 
@@ -130,7 +133,10 @@ jobs:
           # Health check: la pagina de login del panel. Si falla, se reconstruye
           # la versión anterior y se recarga PM2.
           if ! verificar "http://127.0.0.1:8787/login"; then
-            echo "!! Health check fallido — revirtiendo a $ANTERIOR"
+            echo "!! Health check fallido — registros del panel:"
+            pm2 describe arbicrypto | grep -E "status|script path|exec cwd|interpreter|restarts" || true
+            pm2 logs arbicrypto --lines 60 --nostream || true
+            echo "!! Revirtiendo a $ANTERIOR"
             git reset --hard "$ANTERIOR"
             git clean -fd
             construir
