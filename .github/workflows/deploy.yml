@@ -136,6 +136,8 @@ jobs:
             echo "!! Health check fallido — registros del panel:"
             pm2 describe arbicrypto | grep -E "status|script path|exec cwd|interpreter|restarts" || true
             pm2 logs arbicrypto --lines 60 --nostream || true
+            echo "!! Quien usa el puerto 8787:"
+            ss -ltnp 'sport = :8787' || true
             echo "!! Revirtiendo a $ANTERIOR"
             git reset --hard "$ANTERIOR"
             git clean -fd
