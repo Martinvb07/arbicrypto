@@ -1,0 +1,146 @@
+name: CI y Deploy a VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Nunca dos deploys simultáneos sobre el mismo servidor.
+concurrency:
+  group: deploy-produccion
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: Revisar backend e interfaz
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12 + caché de pip
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Backend — dependencias, errores y arranque
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt pyflakes
+          python -m pyflakes .
+          # importar la app crea la base (SQLite temporal) y todas las rutas: si algo esta roto, falla aqui
+          python -c "import app"
+
+      - name: Node 20 + caché de npm
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Interfaz — dependencias, tipos y build
+        working-directory: web
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npm run build
+
+  desplegar:
+    name: Desplegar en VPS
+    needs: ci
+    runs-on: ubuntu-latest
+    environment:
+      name: produccion
+    steps:
+      - name: Preparar clave SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # ssh-keyscan falla de forma intermitente desde los runners:
+          # reintentar hasta 5 veces antes de rendirse.
+          exito=""
+          for intento in 1 2 3 4 5; do
+            if ssh-keyscan -T 10 -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null; then
+              exito=1
+              break
+            fi
+            echo "ssh-keyscan intento $intento fallido; reintentando en 5s..."
+            sleep 5
+          done
+          if [ -z "$exito" ]; then
+            echo "ssh-keyscan fallo tras 5 intentos"
+            exit 1
+          fi
+
+      - name: Actualizar código, construir y recargar PM2
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PATH: ${{ secrets.VPS_PATH }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ConnectTimeout=15 \
+              "$VPS_USER@$VPS_HOST" \
+              "VPS_PATH='$VPS_PATH' GIT_SHA='${{ github.sha }}' bash -s" <<'ENDSSH'
+          set -euo pipefail
+          cd "$VPS_PATH"
+
+          # Versión actual, por si hay que revertir.
+          ANTERIOR="$(git rev-parse HEAD)"
+
+          construir() {
+            backend/.venv/bin/pip install -q -r backend/requirements.txt
+            (cd web && npm ci && npm run build)
+          }
+
+          recargar_pm2() {
+            mkdir -p logs
+            pm2 startOrReload deploy/ecosystem.config.js --update-env
+            pm2 save
+          }
+
+          # Espera hasta ~36s a que la URL responda 200.
+          verificar() {
+            local url="$1" intentos=0 codigo
+            while true; do
+              codigo=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" || echo 000)
+              [ "$codigo" = "200" ] && return 0
+              intentos=$((intentos + 1))
+              [ "$intentos" -ge 12 ] && { echo "!! $url respondio $codigo"; return 1; }
+              sleep 3
+            done
+          }
+
+          git fetch --prune origin
+          git reset --hard "$GIT_SHA"
+          # -fd no toca archivos ignorados (backend/.env, backend/data, .venv, node_modules, web/out, logs).
+          git clean -fd
+
+          construir
+          recargar_pm2
+
+          # Health check: la pagina de login del panel. Si falla, se reconstruye
+          # la versión anterior y se recarga PM2.
+          if ! verificar "http://127.0.0.1:8787/login"; then
+            echo "!! Health check fallido — revirtiendo a $ANTERIOR"
+            git reset --hard "$ANTERIOR"
+            git clean -fd
+            construir
+            recargar_pm2
+            exit 1
+          fi
+
+          echo "OK — desplegado $(git rev-parse --short HEAD)"
+          ENDSSH
+
+      - name: Limpiar credenciales
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
