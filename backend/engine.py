@@ -9,7 +9,9 @@ from urllib.parse import urlencode
 
 import requests
 
-API = "https://api.binance.com"
+API = "https://api.binance.com"  # cuentas (llaves de cada usuario)
+# precios publicos: el espejo oficial de Binance solo de datos de mercado, sin bloqueo por pais (evita el HTTP 451)
+MARKET = "https://data-api.binance.vision"
 P2P = "https://p2p.binance.com/bapi/c2c/v2"
 
 _local = threading.local()
@@ -46,7 +48,7 @@ def _json(r):
 # ---------------------------------------------------------------- spot
 
 def load_pairs():
-    r = http().get(f"{API}/api/v3/exchangeInfo",
+    r = http().get(f"{MARKET}/api/v3/exchangeInfo",
                    params={"symbolStatus": "TRADING", "showPermissionSets": "false"}, timeout=30)
     symbols = _json(r)["symbols"]
     for s in symbols:
@@ -86,7 +88,7 @@ def spot_fill(graph, a, c, qty, fee):
 def fetch_book():
     """Mejor compra y venta de todos los pares: {simbolo: (bid, bid_qty, ask, ask_qty)}."""
     return {d["symbol"]: (float(d["bidPrice"]), float(d["bidQty"]), float(d["askPrice"]), float(d["askQty"]))
-            for d in _json(http().get(f"{API}/api/v3/ticker/bookTicker", timeout=10))}
+            for d in _json(http().get(f"{MARKET}/api/v3/ticker/bookTicker", timeout=10))}
 
 
 def build_graph(pairs, book):
@@ -109,7 +111,7 @@ def load_graph(pairs):
 # ---------------------------------------------------------------- precio real segun el monto (profundidad del libro)
 
 def depth(symbol, limit=20):
-    d = _json(http().get(f"{API}/api/v3/depth", params={"symbol": symbol, "limit": limit}, timeout=10))
+    d = _json(http().get(f"{MARKET}/api/v3/depth", params={"symbol": symbol, "limit": limit}, timeout=10))
     return ([(float(p), float(q)) for p, q in d["bids"]], [(float(p), float(q)) for p, q in d["asks"]])
 
 
@@ -434,7 +436,7 @@ class Account:
     def _timestamp(self):
         # Usa la hora del servidor de Binance para evitar el error -1021 si el reloj del PC esta corrido
         if time.time() - self._synced > 600:
-            server = _json(http().get(f"{API}/api/v3/time", timeout=10))["serverTime"]
+            server = _json(http().get(f"{MARKET}/api/v3/time", timeout=10))["serverTime"]
             self._offset, self._synced = server - int(time.time() * 1000), time.time()
         return int(time.time() * 1000) + self._offset
 

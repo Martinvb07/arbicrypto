@@ -9,7 +9,7 @@ import time
 
 import websocket
 
-URL = "wss://stream.binance.com:9443/stream"
+URL = "wss://data-stream.binance.vision/stream"  # solo datos de mercado, sin bloqueo por pais
 CHUNK = 100  # Binance permite suscribir muchos pares por mensaje; se envian en grupos
 
 
