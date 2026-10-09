@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS alerts (
   t {real} NOT NULL,
   kind TEXT NOT NULL,
   title TEXT NOT NULL,
-  body TEXT NOT NULL
+  body TEXT NOT NULL,
+  audience TEXT
 );
 CREATE TABLE IF NOT EXISTS journal (
   id {serial},
@@ -72,7 +73,7 @@ CREATE TABLE IF NOT EXISTS chat_reads (
 """
 
 # Columnas que se agregaron despues de crear la tabla: una base vieja (por ejemplo, la del VPS) las recibe sola
-ADDED_COLUMNS = (("p2p_orders", "user", "{keytext}"),)
+ADDED_COLUMNS = (("p2p_orders", "user", "{keytext}"), ("alerts", "audience", "TEXT"))
 
 KEEP_DAYS = 120  # historial de oportunidades y horas
 
@@ -149,11 +150,19 @@ class DB:
 
     # ------------------------------------------------------------ avisos
 
-    def add_alert(self, t, kind, title, body):
-        return self._run("INSERT INTO alerts (t, kind, title, body) VALUES (?, ?, ?, ?)", (t, kind, title, body), returning=True)
+    def add_alert(self, t, kind, title, body, audience):
+        """audience: usuarios que pueden ver el aviso (["@admins"] = solo administradores)."""
+        return self._run("INSERT INTO alerts (t, kind, title, body, audience) VALUES (?, ?, ?, ?, ?)",
+                         (t, kind, title, body, json.dumps(audience)), returning=True)
 
     def recent_alerts(self, n=200):
-        return self._all("SELECT id, t, kind, title, body FROM alerts ORDER BY id DESC LIMIT ?", (n,))
+        rows = self._all("SELECT id, t, kind, title, body, audience FROM alerts ORDER BY id DESC LIMIT ?", (n,))
+        for r in rows:
+            try:
+                r["audience"] = json.loads(r["audience"]) if r["audience"] else None
+            except ValueError:
+                r["audience"] = None
+        return rows
 
     # ------------------------------------------------------------ bitacora
 

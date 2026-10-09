@@ -268,15 +268,30 @@ def publish(kind, remote=True):
             pass
 
 
+ADMINS = "@admins"
+
+
+def alert_visible(a, user):
+    """Todo es privado: cada quien ve sus avisos; los del sistema, solo los administradores.
+    Los avisos viejos no guardaban de quien eran: se ocultan, salvo los del sistema (para administradores)."""
+    audience = a.get("audience")
+    if not audience:
+        return a.get("kind") == "system" and user["role"] == "admin"
+    if ADMINS in audience:
+        return user["role"] == "admin"
+    return user["name"] in audience
+
+
 def raise_alert(key, kind, title, body, capital=None, user=None, telegram_too=True, users=None):
     now = time.time()
+    audience = list(users) if users is not None else [user] if user else [ADMINS]
     with lock:
         if now - last_alert.get(key, 0) < ALERT_COOLDOWN:
             return
         last_alert[key] = now
-        alert_id = db.add_alert(now, kind, title, body)
+        alert_id = db.add_alert(now, kind, title, body, audience)
         state["alerts"].insert(0, {"id": alert_id, "t": now, "kind": kind, "title": title, "body": body,
-                                   "capital": capital, "user": user, "users": users})
+                                   "capital": capital, "user": user, "users": users, "audience": audience})
         del state["alerts"][200:]
     icon = {"p2p": "💰", "spot": "⚡", "system": "⚠️", "sell": "🎯"}.get(kind, "✅")
     if telegram_too:
@@ -578,8 +593,8 @@ def watch_alert(w, o):
     body = (f"Pagaste {money(w['cost'])} · recibes {money(o['received'])} · resultado {'+' if gain >= 0 else ''}{money(gain)}"
             " (ya con comisiones y 4x1000)\n" + "\n".join(lines) + "\nEstas ofertas duran poco: hazlo ya y confirma el precio.")
     # la clave cambia con cada aparicion: si la oferta se va y vuelve, avisa de nuevo
-    owner = auth.users.get(w["user"]) or {}
-    raise_alert(f"sell:{w['id']}:{w['alerts']}", "sell", title, body, user=w["user"], telegram_too=owner.get("role") == "admin")
+    # Telegram es uno solo (el del equipo): ahi solo van las ventas del administrador principal
+    raise_alert(f"sell:{w['id']}:{w['alerts']}", "sell", title, body, user=w["user"], telegram_too=w["user"] == main_user())
 
 
 def watch_step():
@@ -1093,7 +1108,7 @@ def api_state():
             "connected": name in accounts, "key_hint": accounts[name].hint() if name in accounts else None,
             "can_connect": can_connect(), "local": is_local(), "team": TEAM, "user": g.user, "telegram": telegram.info(), "usd_ref": usd_ref(),
             "alerts_at_boot": alerts_at_boot,
-            "alerts": state["alerts"][:100], "watches": watch_view(g.user),
+            "alerts": [a for a in state["alerts"] if alert_visible(a, g.user)][:100], "watches": watch_view(g.user),
             "errors": {**state["errors"], **({"account": acc_errors[name]} if name in acc_errors else {})},
         })
 
@@ -1180,7 +1195,8 @@ def api_test_alert():
     if now - last_test.get(g.user["name"], 0) < 15:
         return jsonify(error="Espera unos segundos antes de probar otra vez."), 429
     last_test[g.user["name"]] = now
-    raise_alert(f"test:{now}", "test", "Aviso de prueba", f"{g.user['name']} probó los avisos. Si te llegó, están funcionando.")
+    raise_alert(f"test:{now}", "test", "Aviso de prueba", "Si te llegó, tus avisos están funcionando.",
+                user=g.user["name"], telegram_too=g.user["name"] == main_user())
     return jsonify(ok=True)
 
 
@@ -1370,7 +1386,7 @@ def auto_operations(user):
 
 
 def journal_rows():
-    rows = db.journal(None if g.user["role"] == "admin" else g.user["name"])
+    rows = db.journal(g.user["name"])  # privada: cada quien ve solo sus operaciones, tambien los administradores
     # las operaciones automaticas salen de la cuenta de Binance de cada quien: solo las propias
     return sorted(rows + auto_operations(g.user["name"]), key=lambda e: -e["t"])
 
@@ -1403,7 +1419,7 @@ def api_journal_delete():
     entry = db.journal_entry(body().get("id"))
     if not entry:
         return jsonify(error="Esa operación no existe."), 404
-    if entry["user"] != g.user["name"] and g.user["role"] != "admin":
+    if entry["user"] != g.user["name"]:
         return jsonify(error="Solo puedes borrar tus propias operaciones."), 403
     db.delete_journal(entry["id"])
     return jsonify(ok=True)

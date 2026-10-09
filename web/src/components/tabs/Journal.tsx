@@ -79,7 +79,6 @@ export function Journal() {
   useEffect(load, [load]);
   if (!state || !entries) return <Skeleton rows={8} />;
 
-  const admin = state.user.role === "admin";
   const invested = entries.reduce((a, e) => a + e.invested, 0);
   const profit = entries.reduce((a, e) => a + (e.received - e.invested), 0);
   const withEst = entries.filter((e) => e.estimated != null);
@@ -94,7 +93,7 @@ export function Journal() {
   return (
     <div className="stack">
       <div className="kpis">
-        <div className="kpi"><small>Operaciones</small><b>{entries.length}</b><span>{admin ? "de todo el equipo" : "tuyas"}</span></div>
+        <div className="kpi"><small>Operaciones</small><b>{entries.length}</b><span>tuyas</span></div>
         <div className="kpi"><small>Ganancia real</small><b className={`val ${tone(profit)}`}>{signedMoney(profit)}</b><span>ya con todos los costos</span></div>
         <div className="kpi"><small>Promedio por operación</small><b className={`val ${tone(profit)}`}>{entries.length ? signedMoney(profit / entries.length) : "—"}</b><span>sobre {money(invested, 0)} pagados</span></div>
         <div className="kpi"><small>Real vs estimado</small><b className={`val ${tone(diff)}`}>{withEst.length ? signedMoney(diff) : "—"}</b><span>{withEst.length ? `en ${withEst.length} operaciones con estimado` : "anota la ganancia estimada"}</span></div>
@@ -122,13 +121,13 @@ export function Journal() {
                       <td>
                         <span className="tag">{e.kind === "p2p" ? "P2P" : e.kind === "spot" ? "Spot" : "Otro"}</span>
                         {e.auto && <span className="tag auto" title="Armada sola con tus órdenes P2P de Binance">Automática</span>} {e.description}
-                        {(e.note || admin) && <div className="sub">{admin ? e.user : ""}{admin && e.note ? " · " : ""}{e.note}</div>}
+                        {e.note && <div className="sub">{e.note}</div>}
                       </td>
                       <td className="num hide-sm">{money(e.invested, 0)}</td>
                       <td className="num hide-sm">{money(e.received, 0)}</td>
                       <td className="num"><b className={`val ${tone(g)}`}>{signedMoney(g)}</b></td>
                       <td className="num hide-sm dim">{e.estimated == null ? "—" : signedMoney(e.estimated)}</td>
-                      <td className="num">{!e.auto && (admin || e.user === state.user.name) && <button className="btn btn-ghost btn-sm btn-danger" onClick={() => void remove(Number(e.id))} aria-label="Borrar"><Icon name="trash" size={15} /></button>}</td>
+                      <td className="num">{!e.auto && <button className="btn btn-ghost btn-sm btn-danger" onClick={() => void remove(Number(e.id))} aria-label="Borrar"><Icon name="trash" size={15} /></button>}</td>
                     </tr>
                   );
                 })}
