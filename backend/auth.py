@@ -105,16 +105,21 @@ class Auth:
             self.sessions = {k: v for k, v in self.sessions.items() if v["user"] != username}
             self._persist("users", "sessions")
 
+    def check_rename(self, old, new):
+        """Valida un cambio de nombre sin aplicarlo; devuelve el nombre nuevo limpio."""
+        new = self.clean_username(new)
+        if old not in self.users:
+            raise AuthError("Ese usuario no existe.")
+        if new != old and new in self.users:
+            raise AuthError("Ese nombre de usuario ya existe. Elige otro.")
+        return new
+
     def rename_user(self, old, new):
         """Cambia el nombre de usuario sin cerrar sus sesiones ni perder invitaciones."""
-        new = self.clean_username(new)
         with self.lock:
-            if old not in self.users:
-                raise AuthError("Ese usuario no existe.")
+            new = self.check_rename(old, new)
             if new == old:
                 return new
-            if new in self.users:
-                raise AuthError("Ese nombre de usuario ya existe. Elige otro.")
             self.users[new] = self.users.pop(old)
             for u in self.users.values():
                 if u.get("invited_by") == old:

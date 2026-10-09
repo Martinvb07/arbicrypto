@@ -71,6 +71,9 @@ CREATE TABLE IF NOT EXISTS chat_reads (
 );
 """
 
+# Columnas que se agregaron despues de crear la tabla: una base vieja (por ejemplo, la del VPS) las recibe sola
+ADDED_COLUMNS = (("p2p_orders", "user", "{keytext}"),)
+
 KEEP_DAYS = 120  # historial de oportunidades y horas
 
 
@@ -97,6 +100,9 @@ class DB:
         my = sql.mysql
         sql.script(SCHEMA.format(serial=sql.serial(), real="DOUBLE" if my else "REAL", keytext=sql.keytext(),
                                  bigint="BIGINT" if my else "INTEGER", int="INTEGER"))
+        for table, column, kind in ADDED_COLUMNS:
+            if column not in sql.columns(table):
+                sql.run(f'ALTER TABLE {table} ADD COLUMN "{column}" {kind.format(keytext=sql.keytext())}')
         # Si el panel se apago con oportunidades abiertas, se cierran en su ultima hora vista
         sql.run("UPDATE opportunities SET open = 0 WHERE open = 1")
         sql.run("DELETE FROM hourly WHERE hour < ?", (time.time() - KEEP_DAYS * 86400,))
@@ -167,12 +173,15 @@ class DB:
         return rows[0] if rows else None
 
     def rename_user(self, old, new):
-        self._run('UPDATE journal SET "user" = ? WHERE "user" = ?', (new, old))
-        self._run('UPDATE p2p_orders SET "user" = ? WHERE "user" = ?', (new, old))
-        self._run("UPDATE messages SET sender = ? WHERE sender = ?", (new, old))
-        self._run("UPDATE messages SET recipient = ? WHERE recipient = ?", (new, old))
-        self._run('UPDATE chat_reads SET "user" = ? WHERE "user" = ?', (new, old))
-        self._run("UPDATE chat_reads SET peer = ? WHERE peer = ?", (new, old))
+        """Todo lo del usuario pasa al nombre nuevo en una sola transaccion: o se mueve todo o nada."""
+        self.sql.transaction([(q, (new, old)) for q in (
+            'UPDATE journal SET "user" = ? WHERE "user" = ?',
+            'UPDATE p2p_orders SET "user" = ? WHERE "user" = ?',
+            "UPDATE messages SET sender = ? WHERE sender = ?",
+            "UPDATE messages SET recipient = ? WHERE recipient = ?",
+            'UPDATE chat_reads SET "user" = ? WHERE "user" = ?',
+            "UPDATE chat_reads SET peer = ? WHERE peer = ?",
+        )])
 
     def delete_journal(self, entry_id):
         self._run("DELETE FROM journal WHERE id = ?", (entry_id,))

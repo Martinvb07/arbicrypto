@@ -831,25 +831,34 @@ def api_team_rename():
     b = body()
     old = str(b.get("username", ""))
     try:
-        new = auth.rename_user(old, b.get("new"))
+        new = auth.check_rename(old, b.get("new"))  # primero se valida; el usuario cambia de ultimo
     except AuthError as e:
         return jsonify(error=str(e)), 400
-    if new != old:
-        with lock:  # todo lo que va atado al nombre: capital, vigilancias, bitacora y la cuenta de Binance
-            if old in prefs:
-                prefs[new] = prefs.pop(old)
-                save_json(PREFS_FILE, prefs)
-        with watch_lock:
-            for w in watches:
-                if w["user"] == old:
-                    w["user"] = new
-            save_json(WATCH_FILE, watches)
-        db.rename_user(old, new)
-        vault.rename(old, new)
-        with lock:
-            for d in (accounts, acc_state, acc_errors):
-                if old in d:
-                    d[new] = d.pop(old)
+    if new == old:
+        return jsonify(ok=True, username=new)
+    # 1) base de datos en una transaccion: si falla, no se toca nada y el usuario sigue con su nombre
+    db.rename_user(old, new)
+    # 2) lo demas atado al nombre: capital y ajustes, vigilancias y la cuenta de Binance
+    with lock:
+        if old in prefs:
+            prefs[new] = prefs.pop(old)
+            save_json(PREFS_FILE, prefs)
+    with watch_lock:
+        for w in watches:
+            if w["user"] == old:
+                w["user"] = new
+        save_json(WATCH_FILE, watches)
+    vault.rename(old, new)
+    with lock:
+        for d in (accounts, acc_state, acc_errors):
+            if old in d:
+                d[new] = d.pop(old)
+    # 3) el usuario, sus sesiones e invitaciones
+    try:
+        auth.rename_user(old, new)
+    except AuthError as e:  # alguien tomo el nombre en este instante: se devuelve todo
+        db.rename_user(new, old)
+        return jsonify(error=str(e)), 400
     publish("watch")
     return jsonify(ok=True, username=new)
 

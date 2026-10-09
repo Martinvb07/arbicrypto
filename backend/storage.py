@@ -82,6 +82,24 @@ class SQL:
             self.con.commit()
             return cur.lastrowid
 
+    def columns(self, table):
+        """Nombres de las columnas de una tabla."""
+        if self.mysql:
+            return {r["Field"] for r in self.all(f"SHOW COLUMNS FROM {table}")}
+        return {r["name"] for r in self.all(f'PRAGMA table_info("{table}")')}
+
+    def transaction(self, statements):
+        """Ejecuta varias sentencias [(sql, args)] como una sola: o quedan todas o ninguna."""
+        with self.lock:
+            cur = self._cur()
+            try:
+                for q, args in statements:
+                    cur.execute(self._q(q), args or None) if self.mysql else cur.execute(q, args)
+                self.con.commit()
+            except Exception:
+                self.con.rollback()
+                raise
+
     def many(self, sql, rows):
         with self.lock:
             cur = self._cur()
