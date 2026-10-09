@@ -194,6 +194,23 @@ def update_env(**changes):
             f.write(f"{k}={env.get(k, '')}\n")
 
 
+def port_free(wait):
+    """True si el puerto se puede abrir. Tras un reinicio o un deploy el panel anterior puede tardar
+    unos segundos en soltarlo: se reintenta hasta `wait` segundos."""
+    end = time.time() + wait
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                if os.name != "nt":  # Linux: igual que uvicorn, ignora conexiones viejas en TIME_WAIT
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                probe.bind((HOST, PORT))
+            return True
+        except OSError:
+            if time.time() >= end:
+                return False
+            time.sleep(1)
+
+
 def lan_ip():
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -1441,16 +1458,14 @@ def main():
     print("\n  Para apagarlo: pm2 stop arbicrypto (o Ctrl+C si lo abriste a mano).\n")
     if "--no-browser" not in sys.argv:
         threading.Timer(1.5, webbrowser.open, (url,)).start()
-    try:  # el puerto debe estar libre antes de arrancar uvicorn
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            probe.bind((HOST, PORT))
-    except OSError:
+    if not port_free(30):
         print(f"  El puerto {PORT} esta ocupado: el panel probablemente ya esta abierto en {url}")
         sys.exit(3)
     import uvicorn
     # proxy_headers: detras de nginx se ve la IP real del visitante (solo se confia en el nginx local)
+    # timeout_graceful_shutdown: los eventos en vivo de los navegadores no deben retrasar el apagado (deploys)
     uvicorn.run(asgi(app), host=HOST, port=PORT, proxy_headers=True, forwarded_allow_ips="127.0.0.1",
-                log_level="warning", access_log=False)
+                log_level="warning", access_log=False, timeout_graceful_shutdown=3)
 
 
 if __name__ == "__main__":

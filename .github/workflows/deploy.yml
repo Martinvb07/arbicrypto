@@ -110,14 +110,14 @@ jobs:
             pm2 save
           }
 
-          # Espera hasta ~36s a que la URL responda 200.
+          # Espera hasta ~75s a que la URL responda 200 (el panel espera hasta 30s a que se libere el puerto).
           verificar() {
             local url="$1" intentos=0 codigo
             while true; do
               codigo=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" || echo 000)
               [ "$codigo" = "200" ] && return 0
               intentos=$((intentos + 1))
-              [ "$intentos" -ge 12 ] && { echo "!! $url respondio $codigo"; return 1; }
+              [ "$intentos" -ge 25 ] && { echo "!! $url respondio $codigo"; return 1; }
               sleep 3
             done
           }
