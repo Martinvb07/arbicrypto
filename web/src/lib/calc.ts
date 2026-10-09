@@ -65,3 +65,52 @@ export const advertiserUrl = (ad: Ad) =>
 
 export const spotUrl = (pair?: [string, string] | null) =>
   pair ? `https://www.binance.com/es/trade/${pair[0]}_${pair[1]}?type=spot` : undefined;
+
+/** Cantidad lista para pegar en Binance: con punto decimal y redondeada hacia abajo (nunca más de lo que tienes). */
+export function copyQty(q: number, asset: string): string {
+  const d = isDollar(asset) ? 2 : 6;
+  return (Math.floor(q * 10 ** d) / 10 ** d).toFixed(d).replace(/\.?0+$/, "");
+}
+
+/** Anunciante recomendable: muchas órdenes y casi no cancela (el mismo criterio que pinta verde en Precios P2P). */
+export const GOOD_ORDERS = 50;
+export const GOOD_FINISH = 0.97;
+export const trusted = (ad: Ad) => ad.orders >= GOOD_ORDERS && ad.finish >= GOOD_FINISH;
+
+/** Comprar y vender la misma cripto en P2P con anunciantes recomendables, acepten o no tu capital. */
+export interface Deal {
+  asset: string;
+  buy: Ad;
+  sell: Ad;
+  /** Montos en pesos que aceptan los dos anuncios a la vez. */
+  lo: number;
+  hi: number;
+  /** Ganancia por cada peso que le pagas al vendedor, ya con comisión P2P y 4x1000. */
+  ratio: number;
+  per_usd: number;
+  /** El monto sugerido: tu capital si cabe; si no, el más cercano que aceptan. */
+  amount: number;
+  fitsCapital: boolean;
+}
+
+/** El mejor par de anuncios recomendables que gana comprando y vendiendo `asset`, y entre qué montos se puede hacer. */
+export function bestDeal(s: State, asset: string): Deal | null {
+  const m = s.p2p?.market[asset];
+  if (!m) return null;
+  const k = 1 - (s.p2p_fee ?? 0);
+  const cap = s.settings.capital;
+  let best: Deal | null = null;
+  for (const b of m.BUY.filter(trusted)) {
+    for (const v of m.SELL.filter(trusted)) {
+      const ratio = (v.price * k * k) / b.price - 1 - s.settings.gmf;
+      if (ratio <= 0 || (best && ratio <= best.ratio)) continue;
+      const c = (v.price * k) / b.price; // pesos que vale en el anuncio de venta cada peso que pagas
+      const lo = Math.ceil(Math.max(b.min, v.min / c));
+      const hi = Math.floor(Math.min(b.max, v.max / c, b.available ? b.available * b.price : Infinity, v.available ? (v.available * b.price) / k : Infinity));
+      if (!(lo <= hi)) continue;
+      const amount = Math.min(Math.max(cap, lo), hi);
+      best = { asset, buy: b, sell: v, lo, hi, ratio, per_usd: perDollar(ratio, s), amount, fitsCapital: amount === cap };
+    }
+  }
+  return best;
+}

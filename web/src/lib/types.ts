@@ -221,6 +221,8 @@ export interface Alert {
   kind: AlertKind;
   title: string;
   body: string;
+  /** Enlaces directos a Binance: el anunciante de cada paso, el par de Spot o la billetera. */
+  links?: { label: string; url: string }[] | null;
 }
 
 export interface State {

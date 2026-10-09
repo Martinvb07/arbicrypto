@@ -19,6 +19,8 @@ import threading
 import time
 import webbrowser
 
+from urllib.parse import quote
+
 import requests
 
 import storage
@@ -78,6 +80,7 @@ WATCH_MAX = 10                    # maximo de monedas en la lista por usuario
 WATCH_PER_STEP = 2                # en cada vuelta se revisan las 2 que llevan mas tiempo sin revisar (cupo de Binance)
 WATCH_SPOT_EXTRA = 0.001          # si hay que cambiar en Spot antes de vender, se exige 0,1 % mas (el cambio toma tiempo)
 WATCH_CONFIRM_DELAY = 2           # antes de avisar se vuelve a consultar a los 2 s: la oferta debe seguir ahi
+WALLET_URL = "https://www.binance.com/es/my/wallet/account/main"  # P2P vende desde la Billetera de Fondos
 FIXED = {"fiat": FIAT, "p2p_assets": P2P_ASSETS, "max_profit": MAX_PROFIT, "p2p_interval": P2P_INTERVAL,
          "min_orders": MIN_ORDERS, "min_finish": MIN_FINISH,
          "safe_p2p": SAFE_P2P, "safe_spot": SAFE_SPOT, "spot_slippage": engine.SPOT_SLIPPAGE}
@@ -282,29 +285,35 @@ def alert_visible(a, user):
     return user["name"] in audience
 
 
-def raise_alert(key, kind, title, body, capital=None, user=None, telegram_too=True, users=None):
+def raise_alert(key, kind, title, body, capital=None, user=None, telegram_too=True, users=None, links=()):
+    """links: [(texto, url)] para ir directo a Binance desde el aviso (anunciante, par de Spot...)."""
     now = time.time()
     audience = list(users) if users is not None else [user] if user else [ADMINS]
+    links = [{"label": label, "url": url} for label, url in links if url]
     with lock:
         if now - last_alert.get(key, 0) < ALERT_COOLDOWN:
             return
         last_alert[key] = now
         alert_id = db.add_alert(now, kind, title, body, audience)
         state["alerts"].insert(0, {"id": alert_id, "t": now, "kind": kind, "title": title, "body": body,
-                                   "capital": capital, "user": user, "users": users, "audience": audience})
+                                   "capital": capital, "user": user, "users": users, "audience": audience, "links": links})
         del state["alerts"][200:]
     icon = {"p2p": "💰", "spot": "⚡", "system": "⚠️", "sell": "🎯"}.get(kind, "✅")
     if telegram_too:
-        telegram.send_async(f"<b>{icon} {html.escape(title)}</b>\n{html.escape(body)}\n\n<i>Confirma el precio en Binance antes de pagar.</i>")
+        buttons = "\n" + "".join(f'\n👉 <a href="{html.escape(l["url"])}">{html.escape(l["label"])}</a>' for l in links) if links else ""
+        telegram.send_async(f"<b>{icon} {html.escape(title)}</b>\n{html.escape(body)}{buttons}"
+                            "\n\n<i>Confirma el precio en Binance antes de pagar.</i>")
     publish("alert")
 
 
 def sync_alerts(group, current, **extra):
-    """Avisa solo cuando aparece una oportunidad NUEVA; no repite mientras siga igual."""
+    """Avisa solo cuando aparece una oportunidad NUEVA; no repite mientras siga igual.
+    current: {clave: (tipo, titulo, cuerpo[, enlaces])}."""
     fresh = [k for k in current if k not in active_alerts.setdefault(group, set())]
     active_alerts[group] = set(current)
     for key in fresh:
-        raise_alert(key, *current[key], **extra)
+        kind, title, body, *links = current[key]
+        raise_alert(key, kind, title, body, links=links[0] if links else (), **extra)
 
 
 def p2p_fee():
@@ -355,6 +364,27 @@ def cached_depth(symbol):
     book = engine.depth(symbol)
     depth_cache[symbol] = (time.time(), book)
     return book
+
+
+def advertiser_url(ad):
+    """Perfil del anunciante en Binance P2P: ahi estan sus anuncios para comprarle o venderle."""
+    return f"https://p2p.binance.com/es/advertiserDetail?advertiserNo={quote(str(ad['user']))}" if ad.get("user") else None
+
+
+def spot_url(pair):
+    return f"https://www.binance.com/es/trade/{pair[0]}_{pair[1]}?type=spot" if pair else None
+
+
+def route_links(route):
+    """Un enlace por paso de la ruta: el anunciante en P2P o el par en Spot."""
+    links = []
+    for st in route["steps"]:
+        if st["venue"] == "Spot":
+            links.append((f"Abrir {st['symbol']} en Spot", spot_url(st.get("pair"))))
+        else:
+            links.append((f"{'Comprar' if st['kind'] == 'buy' else 'Vender'} {st['asset']} a {st['ad']['nick']}",
+                          advertiser_url(st["ad"])))
+    return links
 
 
 def route_text(route):
@@ -441,7 +471,8 @@ def spot_step():
         sync_alerts(f"spot@{minimum}", {f"{o['id']}@{minimum}": (
             "spot", f"{per_usd(o['per_usd'])} dentro de Binance" + (" · JUSTA, actúa rápido" if o["tight"] else ""),
             f"{' → '.join(o['tri']['path'])}\nCon {num(o['amount_usdt'])} USDT en Spot: {money(o['gain'])} · 3 cambios seguidos, dura segundos\n"
-            "Precio real según tu monto, con comisiones, redondeo y colchón · usa órdenes de MERCADO, NO Convertir")
+            "Precio real según tu monto, con comisiones, redondeo y colchón · usa órdenes de MERCADO, NO Convertir",
+            [(f"Abrir {sym} en Spot", spot_url(pair)) for sym, pair in zip(o["tri"]["symbols"], o["tri"].get("pairs") or [])])
             for o in found if o["per_usd"] >= minimum}, users=names, telegram_too=main_name in names)
     ids = frozenset(o["id"] for o in found)
     if ids != spot_meta["opp_ids"] or now - spot_meta["published"] >= PUBLISH_EVERY:
@@ -530,7 +561,8 @@ def p2p_step():
             tag = f"{cap}@{gmf}@{minimum}"
             sync_alerts(f"p2p@{tag}", {f"{o['id']}@{tag}": (
                 "p2p", f"{per_usd(o['per_usd'])} en P2P" + (" · JUSTA, actúa rápido" if o["tight"] else ""),
-                f"{route_text(o['route'])}\nCon {money(cap)}: {money(o['gain'])} de ganancia\n{costs_txt}")
+                f"{route_text(o['route'])}\nCon {money(cap)}: {money(o['gain'])} de ganancia\n{costs_txt}",
+                route_links(o["route"]))
                 for o in found if o["per_usd"] >= minimum}, capital=cap, users=who, telegram_too=main_name in who)
     publish("p2p")
 
@@ -599,7 +631,11 @@ def watch_alert(w, o):
             " (ya con comisiones y 4x1000)\n" + "\n".join(lines) + "\nEstas ofertas duran poco: hazlo ya y confirma el precio.")
     # la clave cambia con cada aparicion: si la oferta se va y vuelve, avisa de nuevo
     # Telegram es uno solo (el del equipo): ahi solo van las ventas del administrador principal
-    raise_alert(f"sell:{w['id']}:{w['alerts']}", "sell", title, body, user=w["user"], telegram_too=w["user"] == main_user())
+    links = [(f"Abrir {h['symbol']} en Spot", spot_url(h.get("pair"))) for h in o.get("hops") or []]
+    links.append(("Pasar a Fondos (gratis)", WALLET_URL))
+    links.append((f"Vender {o['to']} a {ad['nick']}", advertiser_url(ad)))
+    raise_alert(f"sell:{w['id']}:{w['alerts']}", "sell", title, body, user=w["user"], telegram_too=w["user"] == main_user(),
+                links=links)
 
 
 def watch_step():

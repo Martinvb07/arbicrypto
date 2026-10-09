@@ -198,6 +198,9 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
           const n = new Notification(a.title, { body: a.body, tag: `cj-${a.id}`, icon: "/icons/web-app-manifest-192x192.png", requireInteraction: a.kind !== "test" });
           n.onclick = () => {
             window.focus();
+            // directo a donde está el paso a paso con los botones a Binance
+            if (a.kind === "p2p" || a.kind === "spot") window.location.hash = "inicio";
+            else if (a.kind === "sell") window.location.hash = "vender";
             n.close();
           };
         } catch {

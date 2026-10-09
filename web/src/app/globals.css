@@ -271,6 +271,40 @@ table.clickable tbody tr { cursor: pointer; }
 .steps-list li::before { content: counter(st); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); font-weight: 750; font-size: 13px; color: var(--text-2); }
 .step-main { font-size: 14.5px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .step-sub { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+/* botones de cada paso: ir directo a Binance y copiar el monto para pegarlo allá */
+.step-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.go-btn { max-width: 100%; min-width: 0; }
+.go-btn > svg { flex: none; }
+.go-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.go-txt b { font-weight: 720; }
+.go-btn:not(.btn-brand) > svg { color: var(--muted); transition: color .15s; }
+.go-btn:not(.btn-brand):hover { border-color: var(--accent); color: var(--accent); }
+.go-btn:not(.btn-brand):hover > svg { color: var(--accent); }
+.copy-btn { font-variant-numeric: tabular-nums; }
+.copy-btn > svg { flex: none; color: var(--muted); }
+.copy-btn.done { color: var(--up); border-color: var(--up-line); }
+.copy-btn.done > svg { color: var(--up); }
+/* también gana con otro monto */
+.other-amounts { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); display: grid; gap: 8px; }
+.other-head .mini-title { display: flex; align-items: center; gap: 7px; margin-bottom: 2px; color: var(--text); }
+.other-head .mini-title svg { color: var(--up); }
+.deal { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.deal.open { border-color: var(--up-line); }
+.deal-row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 0; background: none; cursor: pointer;
+  font: inherit; color: inherit; text-align: left; border-radius: 12px; }
+.deal-row:hover { background: var(--hover); }
+.deal-what { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.deal-what b { font-weight: 650; font-size: 14px; }
+.deal-what small { color: var(--text-2); font-size: 12.5px; }
+.deal-row .link-btn { flex: none; }
+.deal-steps { padding: 0 12px 12px; }
+.alert-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+@media (max-width: 640px) {
+  .deal-row { flex-wrap: wrap; gap: 6px 10px; }
+  .deal-row > :first-child { margin-right: auto; }
+  .deal-what { order: 3; flex-basis: 100%; }
+  .deal-steps { padding: 0 10px 10px; }
+}
 
 /* ---------- monedas ---------- */
 .coin { width: 20px; height: 20px; border-radius: 50%; flex: none; vertical-align: middle; }

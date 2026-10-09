@@ -271,6 +271,56 @@ export function ExtLink({ href, children }: { href?: string; children: ReactNode
   );
 }
 
+/** Botón que abre Binance en otra pestaña (anunciante, par de Spot, billetera). `strong` = resaltado en amarillo. */
+export function GoButton({ href, icon, strong, title, className = "", children }: {
+  href?: string; icon: IconName; strong?: boolean; title?: string; className?: string; children: ReactNode;
+}) {
+  if (!href) return null;
+  return (
+    <a className={`btn btn-sm go-btn ${strong ? "btn-brand" : ""} ${className}`} href={href} target="_blank" rel="noopener noreferrer" title={title}>
+      <Icon name={icon} size={15} />
+      <span className="go-txt">{children}</span>
+      <Icon name="external" size={13} />
+    </a>
+  );
+}
+
+/** Copia un monto para pegarlo en Binance. Sin portapapeles moderno (HTTP en la red local) usa el método antiguo. */
+export function CopyButton({ text, title, children }: { text: string; title?: string; children: ReactNode }) {
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.setAttribute("readonly", "");
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.select();
+      try {
+        ok = document.execCommand("copy");
+      } catch {
+        ok = false;
+      }
+      el.remove();
+    }
+    if (ok) {
+      setDone(true);
+      setTimeout(() => setDone(false), 1600);
+    }
+  };
+  return (
+    <button type="button" className={`btn btn-sm copy-btn ${done ? "done" : ""}`} onClick={() => void copy()} title={title ?? `Copiar ${text} para pegarlo en Binance`}>
+      <Icon name={done ? "check" : "copy"} size={14} />
+      {done ? "Copiado" : children}
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------- botones de opción con deslizado
 
 /** Mide el botón elegido dentro de `ref` para que un fondo lo siga deslizándose (botones de opción y pestañas). */

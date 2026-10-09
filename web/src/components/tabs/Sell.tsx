@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import { advertiserUrl, COIN_NAMES, isDollar, spotUrl } from "@/lib/calc";
+import { advertiserUrl, COIN_NAMES, copyQty, isDollar, spotUrl } from "@/lib/calc";
 import { money, num, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { ExitOption, Watch } from "@/lib/types";
 import { ask, Select, Sheet } from "../overlay";
-import { Asset, Coin, ExtLink, Icon } from "../ui";
+import { Asset, Coin, CopyButton, GoButton, Icon } from "../ui";
 
 /** Cantidad de cripto: acepta 0,0021 o 0.0021. */
 const parseQty = (v: string) => Number(v.trim().replace(/\s/g, "").replace(",", "."));
@@ -51,10 +51,14 @@ function SellSteps({ asset, qty: have, o }: { asset: string; qty: number; o: Pic
             <div className="step-sub">
               {hops.map((h, k) => (
                 <span key={h.symbol}>
-                  {k > 0 && " y luego "}Par <ExtLink href={spotUrl(h.pair)}>{h.symbol}</ExtLink>
+                  {k > 0 && " y luego "}Par <b>{h.symbol}</b>
                 </span>
               ))}
               {hops.length > 0 && " · "}orden de <b>Mercado</b>, <b>NO Convertir</b> · te deben llegar mínimo <b>{amount(o.to, o.qty)}</b>
+            </div>
+            <div className="step-actions">
+              {hops.map((h) => <GoButton key={h.symbol} href={spotUrl(h.pair)} icon="swap">Abrir <b>{h.symbol}</b> en Spot</GoButton>)}
+              <CopyButton text={copyQty(have, asset)}>Copiar {isDollar(asset) ? num(have, 2) : qty(have)} {asset}</CopyButton>
             </div>
           </div>
         </li>
@@ -62,19 +66,25 @@ function SellSteps({ asset, qty: have, o }: { asset: string; qty: number; o: Pic
       <li>
         <div>
           <div className="step-main">Pasa {amount(o.to, o.qty)} a <b>Fondos</b></div>
-          <div className="step-sub">
-            P2P vende desde Fondos · <ExtLink href="https://www.binance.com/es/my/wallet/account/main">Transferir (gratis)</ExtLink>
+          <div className="step-sub">P2P vende desde Fondos · la transferencia es gratis</div>
+          <div className="step-actions">
+            <GoButton href="https://www.binance.com/es/my/wallet/account/main" icon="wallet">Pasar a Fondos</GoButton>
+            <CopyButton text={copyQty(o.qty, o.to)}>Copiar {isDollar(o.to) ? num(o.qty, 2) : qty(o.qty)} {o.to}</CopyButton>
           </div>
         </div>
       </li>
       <li>
         <div>
           <div className="step-main">
-            Vende a <ExtLink href={advertiserUrl(o.ad)}><b>{o.ad.nick}</b></ExtLink> a <b>{money(o.ad.price)}</b> {isDollar(o.to) ? "cada dólar" : `por ${o.to}`}
+            Vende a <b>{o.ad.nick}</b> a <b>{money(o.ad.price)}</b> {isDollar(o.to) ? "cada dólar" : `por ${o.to}`}
             <span className="muted"> · recibes {money(o.received, 0)}</span>
           </div>
           <div className="step-sub">
             <span className="muted">({num(o.ad.orders, 0)} órdenes, {num(o.ad.finish * 100, 0)} %)</span> · {o.ad.methods.slice(0, 3).join(", ")} · confirma el precio antes de vender
+          </div>
+          <div className="step-actions">
+            <GoButton href={advertiserUrl(o.ad)} icon="handCoins" strong>Vender {o.to} a <b>{o.ad.nick}</b></GoButton>
+            <CopyButton text={copyQty(o.qty, o.to)}>Copiar {isDollar(o.to) ? num(o.qty, 2) : qty(o.qty)} {o.to}</CopyButton>
           </div>
         </div>
       </li>

@@ -1,14 +1,14 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { advertiserUrl, COIN_NAMES, effBuy, gmfOf, isDollar, isMine, roundTrip, spotUrl, usdtPrices } from "@/lib/calc";
+import { advertiserUrl, bestDeal, COIN_NAMES, copyQty, effBuy, gmfOf, isDollar, isMine, roundTrip, spotUrl, usdtPrices, type Deal } from "@/lib/calc";
 import { money, num, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
-import type { Conversion, Route, State, Triangle } from "@/lib/types";
+import type { Ad, Conversion, Route, State, Triangle } from "@/lib/types";
 import { CapitalField, CostsNote, GmfToggle } from "../controls";
 import type { TabId } from "../Header";
 import { Select, Sheet } from "../overlay";
-import { Ago, Asset, Coin, CoinPath, ExtLink, Icon, Segmented, Skeleton, Usd } from "../ui";
+import { Ago, Asset, Coin, CoinPath, CopyButton, GoButton, Icon, Segmented, Skeleton, Usd } from "../ui";
 
 /** COP → BTC → USDT → COP: el camino de la plata en una ruta P2P. */
 function routePath(r: Route): string[] {
@@ -155,6 +155,24 @@ function SafetyNote() {
   );
 }
 
+/** "155,52 USDT" o "0,004123 BTC": lo que se copia para pegar en Binance. */
+const amountTxt = (q: number, asset: string) => `${isDollar(asset) ? num(q, 2) : qty(q)} ${asset}`;
+
+/** Botones de un paso P2P: abrir al anunciante en Binance y copiar el monto (pesos al comprar, cripto al vender). */
+function P2PActions({ kind, asset, ad, qty: q, pay, strong }: { kind: "buy" | "sell"; asset: string; ad: Ad; qty: number; pay: number; strong?: boolean }) {
+  return (
+    <div className="step-actions">
+      <GoButton href={advertiserUrl(ad)} icon={kind === "buy" ? "cart" : "handCoins"} strong={strong}
+        title={`Abre el perfil de ${ad.nick} en Binance P2P`}>
+        {kind === "buy" ? "Comprar" : "Vender"} {asset} a <b>{ad.nick}</b>
+      </GoButton>
+      {kind === "buy"
+        ? <CopyButton text={String(Math.round(pay))}>Copiar {money(pay, 0)}</CopyButton>
+        : <CopyButton text={copyQty(q, asset)}>Copiar {amountTxt(q, asset)}</CopyButton>}
+    </div>
+  );
+}
+
 export function Steps({ row, s }: { row: Row; s: State }) {
   if (row.kind === "spot") {
     const t = row.tri;
@@ -163,7 +181,12 @@ export function Steps({ row, s }: { row: Row; s: State }) {
         <ol className="steps-list">
           {[0, 1, 2].map((i) => (
             <li key={i}>
-              <div className="step-main">Cambia <Asset s={t.path[i]} size={18} /> por <Asset s={t.path[i + 1]} size={18} /> · <ExtLink href={spotUrl(t.pairs?.[i])}>{t.symbols[i]}</ExtLink></div>
+              <div>
+                <div className="step-main">Cambia <Asset s={t.path[i]} size={18} /> por <Asset s={t.path[i + 1]} size={18} /></div>
+                <div className="step-actions">
+                  <GoButton href={spotUrl(t.pairs?.[i])} icon="swap" strong={row.opp}>Abrir <b>{t.symbols[i]}</b> en Spot</GoButton>
+                </div>
+              </div>
             </li>
           ))}
         </ol>
@@ -187,8 +210,12 @@ export function Steps({ row, s }: { row: Row; s: State }) {
                   por {isDollar(st.to) ? <>dólares <Asset s={st.to} size={18} /></> : <Asset s={st.to} size={18} />} en Binance Spot
                 </div>
                 <div className="step-sub">
-                  Par <ExtLink href={spotUrl(st.pair)}>{st.symbol}</ExtLink> · orden de <b>Mercado</b>, <b>NO Convertir</b> · te deben llegar mínimo{" "}
+                  Par <b>{st.symbol}</b> · orden de <b>Mercado</b>, <b>NO Convertir</b> · te deben llegar mínimo{" "}
                   <b>{isDollar(st.to) ? `${num(st.qty, 2)} dólares (${st.to})` : `${qty(st.qty)} ${st.to}`}</b> (si llega menos, no vendas)
+                </div>
+                <div className="step-actions">
+                  <GoButton href={spotUrl(st.pair)} icon="swap" strong={row.opp}>Abrir <b>{st.symbol}</b> en Spot</GoButton>
+                  {steps[i - 1] && <CopyButton text={copyQty(steps[i - 1].qty, st.from)}>Copiar {amountTxt(steps[i - 1].qty, st.from)}</CopyButton>}
                 </div>
               </div>
             ) : (
@@ -203,9 +230,10 @@ export function Steps({ row, s }: { row: Row; s: State }) {
                   </span>
                 </div>
                 <div className="step-sub">
-                  <ExtLink href={advertiserUrl(st.ad)}><b>{st.ad.nick}</b></ExtLink>{" "}
+                  <b>{st.ad.nick}</b>{" "}
                   <span className="muted">({num(st.ad.orders, 0)} órdenes, {num(st.ad.finish * 100, 0)} %)</span> · {st.ad.methods.slice(0, 3).join(", ")}
                 </div>
+                <P2PActions kind={st.kind} asset={st.asset} ad={st.ad} qty={st.qty} pay={row.route.paid} strong={row.opp} />
               </div>
             )}
           </li>
@@ -214,6 +242,90 @@ export function Steps({ row, s }: { row: Row; s: State }) {
       <Breakdown route={row.route} />
       {steps.some((st) => st.venue === "Spot") && <SafetyNote />}
     </>
+  );
+}
+
+/** Comprar y vender con anunciantes recomendables que no aceptan tu capital: los pasos con el monto que sí aceptan. */
+export function DealSteps({ d, s }: { d: Deal; s: State }) {
+  const k = 1 - (s.p2p_fee ?? 0);
+  const got = (d.amount / d.buy.price) * k;
+  const received = got * d.sell.price * k;
+  const gmf = gmfOf(d.amount, s);
+  const unit = isDollar(d.asset) ? "cada dólar" : `por cada ${d.asset}`;
+  const who = (ad: Ad) => (
+    <div className="step-sub">
+      <b>{ad.nick}</b> <span className="muted">({num(ad.orders, 0)} órdenes, {num(ad.finish * 100, 0)} %)</span> · {ad.methods.slice(0, 3).join(", ")}
+      {" "}· acepta {money(ad.min, 0)} – {money(ad.max, 0)}
+    </div>
+  );
+  return (
+    <>
+      <ol className="steps-list">
+        <li>
+          <div>
+            <div className="step-main">
+              Compra {amountTxt(got, d.asset)} a <b>{money(d.buy.price)}</b> {unit}
+              <span className="muted"> · pagas {money(d.amount, 0)}{gmf > 0 ? ` + 4x1000 ${money(gmf, 0)}` : ""} · confirma el precio antes de pagar</span>
+            </div>
+            {who(d.buy)}
+            <P2PActions kind="buy" asset={d.asset} ad={d.buy} qty={got} pay={d.amount} strong />
+          </div>
+        </li>
+        <li>
+          <div>
+            <div className="step-main">
+              Vende {amountTxt(got, d.asset)} a <b>{money(d.sell.price)}</b> {unit}
+              <span className="muted"> · recibes {money(received, 0)}</span>
+            </div>
+            {who(d.sell)}
+            <P2PActions kind="sell" asset={d.asset} ad={d.sell} qty={got} pay={d.amount} strong />
+          </div>
+        </li>
+      </ol>
+      <div className="breakdown">
+        <div><small>Pagas</small><b>{money(d.amount, 0)}</b></div>
+        <div><small>Recibes</small><b>{money(received, 0)}</b></div>
+        {gmf >= 0.5 && <div className="cost"><small>4x1000</small><b>−{money(gmf, 0)}</b></div>}
+        <div className="net"><small>Te queda</small><b className={`val ${tone(d.amount * d.ratio)}`}>{signedMoney(d.amount * d.ratio)}</b></div>
+      </div>
+    </>
+  );
+}
+
+/** Lo que gana en P2P directo con anunciantes recomendables pero con otro monto: no cabe tu capital, igual se muestra. */
+function OtherAmounts({ s }: { s: State }) {
+  const [open, setOpen] = useState("");
+  const deals = s.settings.p2p_assets
+    .map((a) => bestDeal(s, a))
+    .filter((d): d is Deal => !!d && !d.fitsCapital)
+    .sort((a, b) => b.per_usd - a.per_usd);
+  if (!deals.length) return null;
+  return (
+    <div className="other-amounts">
+      <div className="other-head">
+        <h3 className="mini-title"><Icon name="sparkle" size={16} /> También gana con otro monto</h3>
+        <p className="sub">Anunciantes recomendables que no aceptan {money(s.settings.capital, 0)}: el monto sugerido es el más cercano a tu capital que aceptan los dos</p>
+      </div>
+      {deals.map((d) => {
+        const id = d.asset;
+        const tight = d.ratio < s.settings.safe_p2p;
+        return (
+          <div key={id} className={`deal ${open === id ? "open" : ""}`}>
+            <button type="button" className="deal-row" onClick={() => setOpen(open === id ? "" : id)} aria-expanded={open === id}>
+              <Asset s={d.asset} size={22} />
+              <span className="deal-what">
+                <b>Compra a {money(d.buy.price)} · vende a {money(d.sell.price)}</b>
+                <small>Aceptan entre {money(d.lo, 0)} y {money(d.hi, 0)} · con {money(d.amount, 0)} ganas {signedMoney(d.amount * d.ratio)}</small>
+              </span>
+              <Usd v={d.per_usd} />
+              {tight && <span className="badge warn hide-sm" title="Gana poco: si un precio cambia mientras operas, puede volverse pérdida">Justa</span>}
+              <span className="link-btn">{open === id ? "Ocultar" : "Pasos"}</span>
+            </button>
+            {open === id && <div className="deal-steps"><DealSteps d={d} s={s} /></div>}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -433,6 +545,7 @@ function Arbitrage({ s }: { s: State }) {
           <button className="btn btn-ghost btn-sm" onClick={() => setAll(!all)}>{all ? "Ver menos" : `Ver todas las rutas (${rows.length})`}</button>
         </div>
       ) : null}
+      <OtherAmounts s={s} />
       <CostBar s={s} />
     </div>
   );
@@ -548,6 +661,15 @@ function AlertsCard({ s }: { s: State }) {
             <div>
               <div className="alert-title">{a.title}</div>
               <div className="alert-body">{a.body}</div>
+              {a.links && a.links.length > 0 && (
+                <div className="alert-links">
+                  {a.links.map((l) => (
+                    <GoButton key={l.url + l.label} href={l.url} icon={l.label.startsWith("Comprar") ? "cart" : l.label.startsWith("Vender") ? "handCoins" : l.label.startsWith("Abrir") ? "swap" : "wallet"}>
+                      {l.label}
+                    </GoButton>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="sub"><Ago t={a.t} /></div>
           </div>

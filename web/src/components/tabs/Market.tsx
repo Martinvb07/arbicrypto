@@ -1,25 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { advertiserUrl, COIN_NAMES, dayStats, effBuy, isDollar, perDollar, roundTrip, series } from "@/lib/calc";
+import { advertiserUrl, bestDeal, COIN_NAMES, dayStats, effBuy, GOOD_FINISH, GOOD_ORDERS, isDollar, perDollar, roundTrip, series } from "@/lib/calc";
 import { money, num, pct, pctPlain, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, P2PStep, Route, Side, State } from "@/lib/types";
-import { p2pRow, RouteStatus, Steps } from "./Home";
+import { DealSteps, p2pRow, RouteStatus, Steps } from "./Home";
 import { PriceChart } from "../PriceChart";
-import { Ago, Coin, EmptyBox, ExtLink, Icon, Segmented, Skeleton, Usd, type IconName } from "../ui";
+import { Ago, Coin, EmptyBox, ExtLink, GoButton, Icon, Segmented, Skeleton, Usd, type IconName } from "../ui";
 import { CapitalField, CostsNote, GmfToggle } from "../controls";
 
 // Verde: precio casi igual al mejor y anunciante confiable. Rojo: lo contrario.
 const NEAR_BEST = 0.001; // hasta 0,1 % peor que el mejor precio (unos $3 por dólar)
-const MIN_ORDERS = 50;
-const MIN_FINISH = 0.97;
 
 function judge(ad: Ad, best: number, side: Side, s: State) {
   const gap = Math.max(0, side === "BUY" ? ad.price / best - 1 : 1 - ad.price / best);
   const usd = perDollar(gap, s);
-  const ordersOk = ad.orders >= MIN_ORDERS;
-  const finishOk = ad.finish >= MIN_FINISH;
+  const ordersOk = ad.orders >= GOOD_ORDERS;
+  const finishOk = ad.finish >= GOOD_FINISH;
   const priceOk = gap <= NEAR_BEST;
   let label: string;
   if (gap === 0) label = "Mejor precio";
@@ -105,10 +103,12 @@ function WinCard({ s, asset, onCoin }: { s: State; asset: string; onCoin: (a: st
     .filter((x) => x.steps.length === 2 && x.profit_fiat > 0 && x.id !== `${asset}>${asset}`)
     .sort((a, b) => b.per_usd - a.per_usd);
   const wins = r && r.profit_fiat > 0;
-  if (!wins && !others.length) return null;
+  const found = wins ? null : bestDeal(s, asset);
+  const deal = found && !found.fitsCapital ? found : null; // con otro monto: anunciantes recomendables que no aceptan tu capital
+  if (!wins && !deal && !others.length) return null;
   const row = r && p2pRow(s, r);
   return (
-    <section className={`card mkt-win ${wins ? "on" : ""}`}>
+    <section className={`card mkt-win ${wins || deal ? "on" : ""}`}>
       {wins && row ? (
         <>
           <div className="mkt-sec-head">
@@ -122,6 +122,23 @@ function WinCard({ s, asset, onCoin }: { s: State; asset: string; onCoin: (a: st
             <RouteStatus r={row} />
           </div>
           <Steps row={row} s={s} />
+        </>
+      ) : deal ? (
+        <>
+          <div className="mkt-sec-head">
+            <div className="mkt-sec-title">
+              <span className="sec-ico green"><Icon name="trend" /></span>
+              <div>
+                <h2>Gana con otro monto en {asset}: <span className="up">{perUsd(deal.per_usd)}</span> por dólar</h2>
+                <p className="sub">
+                  Tu capital ({money(s.settings.capital, 0)}) no cabe en sus límites · aceptan entre {money(deal.lo, 0)} y {money(deal.hi, 0)} ·
+                  ya descuenta comisión P2P y el 4x1000
+                </p>
+              </div>
+            </div>
+            {deal.ratio < s.settings.safe_p2p && <span className="badge warn" title="Gana poco: si un precio cambia mientras operas, puede volverse pérdida">Justa · actúa rápido</span>}
+          </div>
+          <DealSteps d={deal} s={s} />
         </>
       ) : (
         <div className="mkt-win-none"><Icon name="info" size={16} /> Comprar y vender {asset} ya no gana con {money(s.settings.capital, 0)}.</div>
@@ -196,12 +213,10 @@ function AdRow({ ad, asset, best, side, s, i }: { ad: Ad; asset: string; best: n
       </footer>
 
       {url && (
-        <a className={`btn ad-go ${top ? "btn-brand" : ""}`} href={url} target="_blank" rel="noopener noreferrer"
+        <GoButton className="ad-go" href={url} icon={side === "BUY" ? "cart" : "handCoins"} strong={j.good}
           title={`Abre el perfil de ${ad.nick} en Binance P2P para ${side === "BUY" ? "comprarle" : "venderle"} ${asset}`}>
-          <Icon name={side === "BUY" ? "cart" : "handCoins"} size={16} />
-          <span className="ad-go-txt">{side === "BUY" ? "Comprar" : "Vender"} {asset} a <b>{ad.nick}</b></span>
-          <Icon name="external" size={14} />
-        </a>
+          {side === "BUY" ? "Comprar" : "Vender"} {asset} a <b>{ad.nick}</b>
+        </GoButton>
       )}
     </article>
   );
