@@ -296,14 +296,19 @@ function ChatPop({ m, onOpen, onClose }: { m: Incoming; onOpen: () => void; onCl
   const { toast } = useLive();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const typing = text.trim().length > 0;
+  const close = useCallback(() => {
+    setLeaving(true); // animación de salida y luego se quita
+    window.setTimeout(onClose, 200);
+  }, [onClose]);
 
   // se va sola a los 15 s, salvo que estés escribiendo la respuesta
   useEffect(() => {
     if (typing) return;
-    const t = window.setTimeout(onClose, 15000);
+    const t = window.setTimeout(close, 15000);
     return () => window.clearTimeout(t);
-  }, [m.id, typing, onClose]);
+  }, [m.id, typing, close]);
 
   const reply = async () => {
     const body = text.trim();
@@ -314,7 +319,7 @@ function ChatPop({ m, onOpen, onClose }: { m: Incoming; onOpen: () => void; onCl
       void api.chatRead(m.peer, m.id).catch(() => undefined);
       refreshChat(true);
       toast("Respuesta enviada", m.peer ? `A ${m.peer}` : "En General", "good", 2500);
-      onClose();
+      close();
     } catch (e) {
       toast("No se envió", (e as Error).message, "bad");
     } finally {
@@ -324,7 +329,7 @@ function ChatPop({ m, onOpen, onClose }: { m: Incoming; onOpen: () => void; onCl
 
   const title = m.peer ? `${m.from} · privado` : `${m.from} en General`;
   return (
-    <div className="chat-pop" role="status" aria-live="polite">
+    <div className={`chat-pop ${leaving ? "leaving" : ""}`} role="status" aria-live="polite">
       <button className="chat-pop-main" onClick={onOpen} title="Abrir la conversación">
         <Avatar name={m.peer ? m.from : "General"} general={!m.peer} />
         <span className="chat-ch-txt">
@@ -332,7 +337,7 @@ function ChatPop({ m, onOpen, onClose }: { m: Incoming; onOpen: () => void; onCl
           <span className="chat-pop-body">{m.body.length > 160 ? `${m.body.slice(0, 160)}…` : m.body}</span>
         </span>
       </button>
-      <button className="icon-btn chat-pop-x" onClick={onClose} aria-label="Cerrar"><Icon name="x" size={15} /></button>
+      <button className="icon-btn chat-pop-x" onClick={close} aria-label="Cerrar"><Icon name="x" size={15} /></button>
       <form className="chat-pop-reply" onSubmit={(e) => { e.preventDefault(); void reply(); }}>
         <input value={text} maxLength={MAX} onChange={(e) => setText(e.target.value)} placeholder={m.peer ? `Responder a ${m.from}…` : "Responder en General…"}
           aria-label="Respuesta rápida" />
@@ -351,7 +356,14 @@ export function ChatDock({ hidden, onFull }: { hidden: boolean; onFull: (peer: s
   const [peer, setPeer] = useState("");
   const [conv, setConv] = useState(false); // dentro del flotante: lista o conversación
   const [pop, setPop] = useState<Incoming | null>(null);
+  const [shown, setShown] = useState(false); // sigue montado mientras corre la animación de cierre
   const seen = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (open) return setShown(true);
+    const t = window.setTimeout(() => setShown(false), 200);
+    return () => window.clearTimeout(t);
+  }, [open]);
 
   const openConv = useCallback((p: string) => {
     setPeer(p);
@@ -406,8 +418,8 @@ export function ChatDock({ hidden, onFull }: { hidden: boolean; onFull: (peer: s
 
   return (
     <>
-      {open && (
-        <div className="chat-dock" role="dialog" aria-label="Chat del equipo">
+      {shown && (
+        <div className={`chat-dock ${open ? "" : "leaving"}`} role="dialog" aria-label="Chat del equipo" aria-hidden={!open}>
           <header className="chat-dock-head">
             <span className="chat-dock-title">
               <b>Chat del equipo</b>
@@ -425,10 +437,11 @@ export function ChatDock({ hidden, onFull }: { hidden: boolean; onFull: (peer: s
         </div>
       )}
       {pop && !open && <ChatPop key={pop.id} m={pop} onOpen={() => openConv(pop.peer)} onClose={closePop} />}
-      <button className={`chat-fab ${open ? "on" : ""}`} onClick={() => { setOpen((o) => !o); setPop(null); }}
+      <button className={`chat-fab ${open ? "on" : ""} ${!open && unread > 0 ? "has-unread" : ""}`} onClick={() => { setOpen((o) => !o); setPop(null); }}
         aria-label={open ? "Cerrar chat" : unread ? `Abrir chat, ${unread} sin leer` : "Abrir chat"} aria-expanded={open}>
-        <Icon name={open ? "x" : "chat"} size={24} />
-        {!open && unread > 0 && <span className="count">{unread > 99 ? "99+" : unread}</span>}
+        <span className="fab-ico fab-chat"><Icon name="chat" size={25} /></span>
+        <span className="fab-ico fab-x"><Icon name="x" size={25} /></span>
+        {!open && unread > 0 && <span className="count" key={unread}>{unread > 99 ? "99+" : unread}</span>}
       </button>
     </>
   );
