@@ -626,6 +626,9 @@ def friendly_error(e):
         return "Sin conexión con Binance (revisa el internet de este PC)"
     if "429" in msg or "rate limit" in msg:
         return "Binance pidió esperar por demasiadas consultas"
+    if "451" in msg or "restricted location" in msg:
+        return ("Binance no permite cuentas desde el país donde está el servidor (por ejemplo, EE. UU.). "
+                "Los precios siguen funcionando; para conectar cuentas el panel debe correr en un servidor de otro país.")
     return msg
 
 
@@ -1107,7 +1110,8 @@ def api_connect():
                                  "Crea una llave nueva marcando únicamente 'Habilitar lectura'."), 400
         snap = acc.snapshot()
     except (requests.RequestException, engine.BinanceError) as e:
-        return jsonify(error=f"Binance rechazó la llave: {e}"), 400
+        msg = friendly_error(e)
+        return jsonify(error=msg if msg != str(e) else f"Binance rechazó la llave: {e}"), 400
     name = g.user["name"]
     vault.save(name, key, secret)
     db.save_orders(name, snap["orders"])
