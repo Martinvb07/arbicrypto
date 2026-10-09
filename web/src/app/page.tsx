@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Header, Nav, TABS, type TabId } from "@/components/Header";
 import { Logo } from "@/components/ui";
 import { Account } from "@/components/tabs/Account";
-import { Chat, ChatWatcher } from "@/components/tabs/Chat";
+import { Chat, ChatDock } from "@/components/tabs/Chat";
 import { History } from "@/components/tabs/History";
 import { Home } from "@/components/tabs/Home";
 import { Journal } from "@/components/tabs/Journal";
@@ -55,7 +55,6 @@ function App() {
   return (
     <>
       <ConfirmHost />
-      <ChatWatcher active={tab === "chat"} onOpen={() => go("chat")} />
       <Header onTab={go} />
       <Nav tab={tab} onTab={go} />
       <main className="wrap">
@@ -69,6 +68,14 @@ function App() {
         {tab === "cuenta" && <Account />}
         {tab === "equipo" && <Team />}
       </main>
+      <ChatDock hidden={tab === "chat"} onFull={(p) => {
+        try {
+          sessionStorage.setItem("cj-chat-peer", p); // el chat completo abre la misma conversación
+        } catch {
+          /* sin almacenamiento */
+        }
+        go("chat");
+      }} />
       <footer className="wrap foot">
         <Logo size={22} />
         <span>ArbiCrypto · datos en vivo de Binance · confirma el precio antes de pagar</span>

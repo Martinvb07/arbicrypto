@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { refreshChat, useChat } from "@/lib/chat";
+import { chatUnread, refreshChat, useChat } from "@/lib/chat";
 import { hhmm } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { ChatMessage, ChatSummary } from "@/lib/types";
@@ -282,13 +282,86 @@ export function Chat() {
   );
 }
 
-// ---------------------------------------------------------------- aviso de mensajes nuevos en cualquier pestaña
+// ---------------------------------------------------------------- chat flotante (en todas las pestañas)
 
-export function ChatWatcher({ active, onOpen }: { active: boolean; onOpen: () => void }) {
-  const { summary } = useChat();
-  const { toast, beep, prefs } = useLive();
+interface Incoming {
+  peer: string;
+  from: string;
+  body: string;
+  id: number;
+}
+
+/** Vista previa del mensaje que llegó, con respuesta rápida ahí mismo. */
+function ChatPop({ m, onOpen, onClose }: { m: Incoming; onOpen: () => void; onClose: () => void }) {
+  const { toast } = useLive();
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const typing = text.trim().length > 0;
+
+  // se va sola a los 15 s, salvo que estés escribiendo la respuesta
+  useEffect(() => {
+    if (typing) return;
+    const t = window.setTimeout(onClose, 15000);
+    return () => window.clearTimeout(t);
+  }, [m.id, typing, onClose]);
+
+  const reply = async () => {
+    const body = text.trim();
+    if (!body || busy) return;
+    setBusy(true);
+    try {
+      await api.chatSend(m.peer, body);
+      void api.chatRead(m.peer, m.id).catch(() => undefined);
+      refreshChat(true);
+      toast("Respuesta enviada", m.peer ? `A ${m.peer}` : "En General", "good", 2500);
+      onClose();
+    } catch (e) {
+      toast("No se envió", (e as Error).message, "bad");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const title = m.peer ? `${m.from} · privado` : `${m.from} en General`;
+  return (
+    <div className="chat-pop" role="status" aria-live="polite">
+      <button className="chat-pop-main" onClick={onOpen} title="Abrir la conversación">
+        <Avatar name={m.peer ? m.from : "General"} general={!m.peer} />
+        <span className="chat-ch-txt">
+          <b>{title}</b>
+          <span className="chat-pop-body">{m.body.length > 160 ? `${m.body.slice(0, 160)}…` : m.body}</span>
+        </span>
+      </button>
+      <button className="icon-btn chat-pop-x" onClick={onClose} aria-label="Cerrar"><Icon name="x" size={15} /></button>
+      <form className="chat-pop-reply" onSubmit={(e) => { e.preventDefault(); void reply(); }}>
+        <input value={text} maxLength={MAX} onChange={(e) => setText(e.target.value)} placeholder={m.peer ? `Responder a ${m.from}…` : "Responder en General…"}
+          aria-label="Respuesta rápida" />
+        <button className="btn btn-brand" type="submit" disabled={busy || !typing} aria-label="Enviar"><Icon name="send" size={16} /></button>
+      </form>
+    </div>
+  );
+}
+
+/** Burbuja de chat flotante: abre el chat sin salir de la pestaña, avisa de mensajes nuevos y deja responder ahí.
+ *  En la pestaña Chat no se muestra (ahí ya está el chat completo), pero sigue sonando y notificando. */
+export function ChatDock({ hidden, onFull }: { hidden: boolean; onFull: (peer: string) => void }) {
+  const { summary, rev } = useChat();
+  const { beep, prefs } = useLive();
+  const [open, setOpen] = useState(false);
+  const [peer, setPeer] = useState("");
+  const [conv, setConv] = useState(false); // dentro del flotante: lista o conversación
+  const [pop, setPop] = useState<Incoming | null>(null);
   const seen = useRef<number | null>(null);
 
+  const openConv = useCallback((p: string) => {
+    setPeer(p);
+    setConv(true);
+    setOpen(true);
+    setPop(null);
+  }, []);
+  const closePop = useCallback(() => setPop(null), []);
+
+  // mensajes nuevos: sonido, vista previa con respuesta rápida y notificación si la página está oculta
   useEffect(() => {
     if (!summary) return;
     const fresh = Object.entries(summary.channels)
@@ -296,26 +369,67 @@ export function ChatWatcher({ active, onOpen }: { active: boolean; onOpen: () =>
     const max = Math.max(seen.current ?? 0, ...Object.values(summary.channels).map((c) => c.last.id));
     const first = seen.current === null;
     seen.current = max;
-    if (first || !fresh.length || (active && !document.hidden)) return;
+    if (first || !fresh.length) return;
+    const [p, c] = fresh[fresh.length - 1];
+    const looking = !document.hidden && (hidden || (open && conv && peer === p));
+    if (looking) return;
     beep("chat");
-    for (const [peer, c] of fresh.slice(-3)) {
-      const title = peer ? `Mensaje privado de ${c.last.from}` : `${c.last.from} en General`;
-      const body = c.last.body.length > 140 ? `${c.last.body.slice(0, 140)}…` : c.last.body;
-      if (!active) toast(title, body, "info", 6000);
-      if (document.hidden && prefs.desktop && "Notification" in window && Notification.permission === "granted") {
-        try {
-          const n = new Notification(title, { body, tag: `cj-chat-${peer}`, icon: "/icons/web-app-manifest-192x192.png" });
-          n.onclick = () => {
-            window.focus();
-            onOpen();
-            n.close();
-          };
-        } catch {
-          /* algunos navegadores solo notifican desde un service worker */
-        }
+    if (!hidden && !(open && conv && peer === p)) setPop({ peer: p, from: c.last.from, body: c.last.body, id: c.last.id });
+    if (document.hidden && prefs.desktop && "Notification" in window && Notification.permission === "granted") {
+      try {
+        const title = p ? `Mensaje privado de ${c.last.from}` : `${c.last.from} en General`;
+        const n = new Notification(title, { body: c.last.body.slice(0, 140), tag: `cj-chat-${p}`, icon: "/icons/web-app-manifest-192x192.png" });
+        n.onclick = () => {
+          window.focus();
+          if (hidden) onFull(p);
+          else openConv(p);
+          n.close();
+        };
+      } catch {
+        /* algunos navegadores solo notifican desde un service worker */
       }
     }
   }, [summary]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return null;
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [open]);
+
+  if (hidden || !summary) return null;
+  const unread = chatUnread(summary);
+  const online = summary.users.filter((u) => u.online).length;
+  const valid = peer === "" || summary.users.some((u) => u.name === peer) || summary.channels[peer];
+  const cur = valid ? peer : "";
+
+  return (
+    <>
+      {open && (
+        <div className="chat-dock" role="dialog" aria-label="Chat del equipo">
+          <header className="chat-dock-head">
+            <span className="chat-dock-title">
+              <b>Chat del equipo</b>
+              <span className="sub"><span className="chat-dot-inline on" />{online + 1} {online ? "conectados" : "conectado (tú)"}</span>
+            </span>
+            <button className="icon-btn" onClick={() => { setOpen(false); onFull(cur); }} title="Abrir en pantalla completa" aria-label="Abrir en pantalla completa">
+              <Icon name="expand" size={16} />
+            </button>
+            <button className="icon-btn" onClick={() => setOpen(false)} title="Cerrar (Esc)" aria-label="Cerrar chat"><Icon name="x" size={17} /></button>
+          </header>
+          <div className={`chat-dock-body ${conv ? "open" : ""}`}>
+            <Channels s={summary} peer={cur} onPick={openConv} />
+            <Conversation s={summary} peer={cur} rev={rev} onBack={() => setConv(false)} />
+          </div>
+        </div>
+      )}
+      {pop && !open && <ChatPop key={pop.id} m={pop} onOpen={() => openConv(pop.peer)} onClose={closePop} />}
+      <button className={`chat-fab ${open ? "on" : ""}`} onClick={() => { setOpen((o) => !o); setPop(null); }}
+        aria-label={open ? "Cerrar chat" : unread ? `Abrir chat, ${unread} sin leer` : "Abrir chat"} aria-expanded={open}>
+        <Icon name={open ? "x" : "chat"} size={24} />
+        {!open && unread > 0 && <span className="count">{unread > 99 ? "99+" : unread}</span>}
+      </button>
+    </>
+  );
 }

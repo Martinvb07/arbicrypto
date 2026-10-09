@@ -150,25 +150,30 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), ms);
   }, []);
 
-  // Oportunidad: tres tonos que suben (dos veces). Precio y pruebas: dos tonos cortos.
+  // Oportunidad: tres tonos que suben (dos veces), fuerte. Mensaje de chat: "tun-tun" suave que baja,
+  // como las apps de mensajería, para distinguirlo sin mirar. Pruebas: dos tonos cortos.
   const beep = useCallback((kind: string = "test") => {
     const ctx = audio.current;
     if (!ctx || !prefsRef.current.sound) return;
     const t = ctx.currentTime;
-    const notes = kind === "p2p" || kind === "spot" || kind === "sell" ? [784, 1047, 1319, 0, 784, 1047, 1319] : [880, 1320];
+    const chat = kind === "chat";
+    const notes = kind === "p2p" || kind === "spot" || kind === "sell" ? [784, 1047, 1319, 0, 784, 1047, 1319] : chat ? [1175, 880] : [880, 1320];
+    const step = chat ? 0.11 : 0.12;
+    const peak = chat ? 0.18 : 0.3;
+    const len = chat ? 0.16 : 0.2;
     notes.forEach((f, i) => {
       if (!f) return;
       const o = ctx.createOscillator();
       const g = ctx.createGain();
-      const at = t + i * 0.12;
-      o.type = "triangle";
+      const at = t + i * step;
+      o.type = chat ? "sine" : "triangle";
       o.frequency.value = f;
       g.gain.setValueAtTime(0.0001, at);
-      g.gain.exponentialRampToValueAtTime(0.3, at + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.2);
+      g.gain.exponentialRampToValueAtTime(peak, at + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + len);
       o.connect(g).connect(ctx.destination);
       o.start(at);
-      o.stop(at + 0.22);
+      o.stop(at + len + 0.02);
     });
   }, []);
 

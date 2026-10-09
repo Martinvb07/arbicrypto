@@ -22,6 +22,7 @@ import {
   MessageCircle,
   SendHorizontal,
   ArrowLeft,
+  Maximize2,
   type LucideIcon,
 } from "lucide-react";
 import { ago, pct, perUsd, tone } from "@/lib/format";
@@ -96,6 +97,7 @@ const ICONS = {
   chat: MessageCircle,
   send: SendHorizontal,
   back: ArrowLeft,
+  expand: Maximize2,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;
