@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { dateTime, hhmm, money, pct } from "@/lib/format";
 
+/** Verde si comprar y vender gana, rojo si pierde. */
+const sign = (v: number) => (v > 0 ? "up" : v < 0 ? "down" : "");
+
 const H = 210;
 
 function niceStep(range: number, n: number) {
@@ -127,7 +130,7 @@ export function PriceChart({ points, gapSeconds, label = "Precio" }: { points: P
             <div className="when">{dateTime(hp.t * 1000)}</div>
             <div className="row"><span><i className="key" style={{ ["--c" as string]: "var(--s1)" }} />Compra</span><b>{money(hp.buy)}</b></div>
             <div className="row"><span><i className="key" style={{ ["--c" as string]: "var(--s2)" }} />Venta</span><b>{money(hp.sell)}</b></div>
-            <div className="row"><span>Diferencia</span><b>{pct((hp.buy - hp.sell) / hp.sell)}</b></div>
+            <div className="row"><span>Comprar y vender</span><b className={sign(hp.sell / hp.buy - 1)}>{pct(hp.sell / hp.buy - 1)}</b></div>
           </div>
         )}
       </div>
@@ -135,14 +138,14 @@ export function PriceChart({ points, gapSeconds, label = "Precio" }: { points: P
         <summary>Ver datos en tabla</summary>
         <div className="table-wrap" style={{ marginTop: 8 }}>
           <table className="t">
-            <thead><tr><th>Hora</th><th className="num">Compra</th><th className="num">Venta</th><th className="num">Diferencia</th></tr></thead>
+            <thead><tr><th>Hora</th><th className="num">Compra</th><th className="num">Venta</th><th className="num">Comprar y vender</th></tr></thead>
             <tbody>
               {points.slice(-12).reverse().map((p) => (
                 <tr key={p.t}>
                   <td>{dateTime(p.t * 1000)}</td>
                   <td className="num">{money(p.buy)}</td>
                   <td className="num">{money(p.sell)}</td>
-                  <td className="num">{pct((p.buy - p.sell) / p.sell)}</td>
+                  <td className={`num ${sign(p.sell / p.buy - 1)}`}>{pct(p.sell / p.buy - 1)}</td>
                 </tr>
               ))}
             </tbody>

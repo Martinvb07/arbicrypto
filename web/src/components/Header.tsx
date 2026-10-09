@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { perUsd } from "@/lib/format";
+import { chatUnread, useChat } from "@/lib/chat";
 import { useLive } from "@/lib/live";
 import { Menu, Modal, Sheet } from "./overlay";
 import { Ago, Brand, Icon, PasswordInput, useThumb, type IconName } from "./ui";
 
-export type TabId = "inicio" | "vender" | "mercado" | "historial" | "bitacora" | "cuenta" | "equipo";
+export type TabId = "inicio" | "vender" | "mercado" | "historial" | "bitacora" | "chat" | "cuenta" | "equipo";
 
 export const TABS: { id: TabId; label: string; icon: IconName; admin?: boolean }[] = [
   { id: "inicio", label: "Arbitraje", icon: "bolt" },
@@ -15,7 +16,8 @@ export const TABS: { id: TabId; label: string; icon: IconName; admin?: boolean }
   { id: "mercado", label: "Precios P2P", icon: "chart" },
   { id: "historial", label: "Historial", icon: "clock" },
   { id: "bitacora", label: "Bitácora", icon: "book" },
-  { id: "cuenta", label: "Mi Binance", icon: "wallet", admin: true },
+  { id: "chat", label: "Chat", icon: "chat" },
+  { id: "cuenta", label: "Mi Binance", icon: "wallet" },
   { id: "equipo", label: "Equipo", icon: "users", admin: true },
 ];
 
@@ -222,12 +224,14 @@ export function Header({ onTab }: { onTab: (t: TabId) => void }) {
 export function Nav({ tab, onTab }: { tab: TabId; onTab: (t: TabId) => void }) {
   const { state } = useLive();
   const admin = state?.user?.role === "admin";
-  // Mi Binance: solo quien conectó la cuenta (o un administrador si todavía no hay cuenta conectada)
-  const tabs = TABS.filter((t) => (t.id === "cuenta" ? admin && (!state?.connected || state?.account_mine) : !t.admin || admin));
+  // Mi Binance es de todos: cada usuario ve solo su propia cuenta
+  const tabs = TABS.filter((t) => !t.admin || admin);
   const nav = useRef<HTMLElement>(null);
   const [menu, setMenu] = useState(false);
   const cur = tabs.find((t) => t.id === tab) ?? tabs[0];
   const thumb = useThumb(nav, tabs.findIndex((t) => t.id === tab));
+  const unread = chatUnread(useChat().summary);
+  const count = (t: TabId) => (t === "chat" && unread > 0 ? <span className="count" aria-label={`${unread} sin leer`}>{unread > 99 ? "99+" : unread}</span> : null);
   useEffect(() => {
     nav.current?.querySelector<HTMLElement>("button.on")?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
   }, [tab]);
@@ -239,6 +243,7 @@ export function Nav({ tab, onTab }: { tab: TabId; onTab: (t: TabId) => void }) {
           <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => onTab(t.id)} aria-current={tab === t.id ? "page" : undefined}>
             <Icon name={t.icon} size={17} />
             {t.label}
+            {count(t.id)}
           </button>
         ))}
       </nav>
@@ -247,6 +252,7 @@ export function Nav({ tab, onTab }: { tab: TabId; onTab: (t: TabId) => void }) {
         <button className="nav-burger" onClick={() => setMenu(true)} aria-label="Abrir menú de secciones" aria-expanded={menu}>
           <Icon name="menu" size={20} />
           <span className="nav-burger-cur"><Icon name={cur.icon} size={17} /> {cur.label}</span>
+          {cur.id !== "chat" && count("chat")}
           <Icon name="chevronDown" size={16} />
         </button>
       </div>
@@ -256,6 +262,7 @@ export function Nav({ tab, onTab }: { tab: TabId; onTab: (t: TabId) => void }) {
             {tabs.map((t) => (
               <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => { onTab(t.id); setMenu(false); }}>
                 <Icon name={t.icon} size={19} /> {t.label}
+                {count(t.id)}
                 {tab === t.id && <Icon name="check" size={16} className="drawer-check" />}
               </button>
             ))}

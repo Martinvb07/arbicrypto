@@ -189,3 +189,18 @@
 .mkt-top > *, .mkt-top-row > * { min-width: 0; }
 .mkt-sec-title > div { min-width: 0; }
 .mkt-sec-title .sub { white-space: normal; }
+
+/* ---------- precios netos y "gana ahora" ---------- */
+.mkt-net-note { display: flex; align-items: center; gap: 6px; margin: -4px 2px 0; font-size: 12.5px; color: var(--muted); }
+.mkt-net-note svg { flex: none; }
+.mkt-win { display: grid; gap: 14px; animation: mkt-win-in .35s ease both; }
+.mkt-win.on { border-color: color-mix(in srgb, var(--up) 45%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--up) 18%, transparent), 0 8px 28px -12px color-mix(in srgb, var(--up) 40%, transparent); }
+.mkt-win h2 { font-size: 17px; }
+.mkt-win-none { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13.5px; }
+.mkt-win-others { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.mkt-win-others small { color: var(--muted); margin-right: 2px; }
+.mkt-win-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface-2); color: inherit; font: inherit; font-size: 13px; cursor: pointer; transition: border-color .15s, transform .15s; }
+.mkt-win-chip:hover { border-color: var(--up); transform: translateY(-1px); }
+@keyframes mkt-win-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (max-width: 640px) { .mkt-win .mkt-sec-head { flex-direction: column; align-items: flex-start; gap: 8px; } }

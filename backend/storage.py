@@ -243,6 +243,26 @@ def read_env_file(path):
     return env
 
 
+def import_local(sql, store, data_dir):
+    """Primera vez con MySQL vacio: copia lo que haya en backend/data (archivos y SQLite). No borra nada."""
+    if store.load("users", None) is not None or not os.path.exists(os.path.join(data_dir, "users.json")):
+        return
+    db_path = os.path.join(data_dir, "cryptojesus.db")
+    if os.path.exists(db_path):
+        src = SQL(sqlite_path=db_path)
+        for t in [r["name"] for r in src.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")]:
+            rows = src.all(f'SELECT * FROM "{t}"')
+            if rows:
+                sql.many(sql.insert_ignore(t, [f'"{c}"' for c in rows[0]]), [tuple(r.values()) for r in rows])
+    files = Store(data_dir)
+    names = sorted((f[:-5] for f in os.listdir(data_dir) if f.endswith(".json")), key=lambda n: n == "users")
+    for name in names:  # "users" al final: si se corta a mitad, la proxima vez se vuelve a copiar
+        data = files.load(name, None)
+        if data is not None:
+            store.save(name, data)
+    print("  Se copiaron los datos de backend/data a MySQL (backend/data queda igual, como respaldo).")
+
+
 def from_env(env, data_dir):
     """Arma la base SQL, el almacen y Redis segun backend/.env."""
     url = os.environ.get("DATABASE_URL") or env.get("DATABASE_URL", "")

@@ -1,4 +1,4 @@
-import type { ExitResult, HistPoint, HourBest, Invite, JournalEntry, Order, PastOpp, Settings, State, TeamUser } from "./types";
+import type { ChatMessage, ChatSummary, ExitResult, HistPoint, HourBest, Invite, JournalEntry, Order, PastOpp, Settings, State, TeamUser } from "./types";
 
 async function getJson<T>(url: string): Promise<T> {
   const r = await fetch(url, { cache: "no-store" });
@@ -54,4 +54,10 @@ export const api = {
   updateWatch: (id: string, patch: { asset?: string; qty?: number; cost?: number; target?: number; alert?: boolean }) =>
     post("/api/watches/update", { id, ...patch }),
   deleteWatch: (id: string) => post("/api/watches/delete", { id }),
+  chat: () => getJson<ChatSummary>("/api/chat"),
+  chatMessages: (peer: string, before = 0) =>
+    getJson<{ messages: ChatMessage[] }>(`/api/chat/messages?peer=${encodeURIComponent(peer)}${before ? `&before=${before}` : ""}`),
+  chatSend: (peer: string, body: string) => post<{ ok: boolean; message: ChatMessage }>("/api/chat/send", { peer, body }),
+  chatRead: (peer: string, id: number) => post("/api/chat/read", { peer, id }),
+  chatDelete: (id: number) => post("/api/chat/delete", { id }),
 };

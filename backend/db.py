@@ -1,7 +1,7 @@
 """Almacenamiento permanente de ArbiCrypto: SQLite (backend/data/cryptojesus.db) o MySQL si hay DATABASE_URL.
 
-Guarda: oportunidades detectadas, mejor ganancia por hora, avisos, bitacora de operaciones
-y las ordenes P2P de la cuenta de Binance.
+Guarda: oportunidades detectadas, mejor ganancia por hora, avisos, bitacora de operaciones,
+las ordenes P2P de la cuenta de Binance de cada usuario y el chat del equipo.
 """
 import csv
 import io
@@ -52,7 +52,22 @@ CREATE TABLE IF NOT EXISTS p2p_orders (
   id {keytext} PRIMARY KEY,
   side TEXT, asset TEXT, fiat TEXT,
   amount {real}, price {real}, total {real},
-  status TEXT, time {bigint}, counterpart TEXT
+  status TEXT, time {bigint}, counterpart TEXT,
+  "user" {keytext}
+);
+CREATE TABLE IF NOT EXISTS messages (
+  id {serial},
+  t {real} NOT NULL,
+  sender {keytext} NOT NULL,
+  recipient {keytext},
+  body TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_msg_pair ON messages(recipient, sender);
+CREATE TABLE IF NOT EXISTS chat_reads (
+  "user" {keytext} NOT NULL,
+  peer {keytext} NOT NULL,
+  last_id {bigint} NOT NULL,
+  PRIMARY KEY ("user", peer)
 );
 """
 
@@ -153,16 +168,81 @@ class DB:
 
     def rename_user(self, old, new):
         self._run('UPDATE journal SET "user" = ? WHERE "user" = ?', (new, old))
+        self._run('UPDATE p2p_orders SET "user" = ? WHERE "user" = ?', (new, old))
+        self._run("UPDATE messages SET sender = ? WHERE sender = ?", (new, old))
+        self._run("UPDATE messages SET recipient = ? WHERE recipient = ?", (new, old))
+        self._run('UPDATE chat_reads SET "user" = ? WHERE "user" = ?', (new, old))
+        self._run("UPDATE chat_reads SET peer = ? WHERE peer = ?", (new, old))
 
     def delete_journal(self, entry_id):
         self._run("DELETE FROM journal WHERE id = ?", (entry_id,))
 
     # ------------------------------------------------------------ ordenes P2P de Binance
 
-    def save_orders(self, orders):
+    def save_orders(self, user, orders):
         cols = ("id", "side", "asset", "fiat", "amount", "price", "total", "status", "time", "counterpart")
-        self.sql.many(self.sql.upsert("p2p_orders", cols, ("id",), {"status": "new"}),
-                      [tuple(o.get(c) for c in cols) for o in orders if o.get("id")])
+        self.sql.many(self.sql.upsert("p2p_orders", cols + ('"user"',), ("id",), {"status": "new"}),
+                      [tuple(o.get(c) for c in cols) + (user,) for o in orders if o.get("id")])
 
-    def orders(self):
-        return self._all("SELECT * FROM p2p_orders ORDER BY time DESC")
+    def orders(self, user):
+        """Solo las ordenes de la cuenta de Binance de ese usuario."""
+        return self._all('SELECT * FROM p2p_orders WHERE "user" = ? ORDER BY time DESC', (user,))
+
+    # ------------------------------------------------------------ chat del equipo
+    # recipient NULL = canal general; si no, mensaje privado. En chat_reads, peer "" = canal general.
+
+    @staticmethod
+    def _msg(r):
+        return {"id": r["id"], "t": r["t"], "from": r["sender"], "to": r["recipient"], "body": r["body"]}
+
+    def add_message(self, sender, recipient, body):
+        t = time.time()
+        msg_id = self._run("INSERT INTO messages (t, sender, recipient, body) VALUES (?, ?, ?, ?)",
+                           (t, sender, recipient, body), returning=True)
+        return {"id": msg_id, "t": t, "from": sender, "to": recipient, "body": body}
+
+    def messages(self, user, peer, before=None, limit=60):
+        """Los ultimos mensajes de una conversacion (antes de `before` para cargar los viejos), del mas viejo al mas nuevo."""
+        if peer:
+            where, args = "((sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?))", [user, peer, peer, user]
+        else:
+            where, args = "recipient IS NULL", []
+        if before:
+            where += " AND id < ?"
+            args.append(before)
+        rows = self._all(f"SELECT * FROM messages WHERE {where} ORDER BY id DESC LIMIT ?", (*args, limit))
+        return [self._msg(r) for r in reversed(rows)]
+
+    def message(self, msg_id):
+        rows = self._all("SELECT * FROM messages WHERE id = ?", (msg_id,))
+        return self._msg(rows[0]) if rows else None
+
+    def delete_message(self, msg_id):
+        self._run("DELETE FROM messages WHERE id = ?", (msg_id,))
+
+    def mark_read(self, user, peer, last_id):
+        self._run(self.sql.upsert("chat_reads", ('"user"', "peer", "last_id"), ('"user"', "peer"), {"last_id": "max"}),
+                  (user, peer, last_id))
+
+    def chat_summary(self, user):
+        """{peer: {"last": mensaje, "unread": n}} de cada conversacion de este usuario ("" = canal general)."""
+        reads = {r["peer"]: r["last_id"] for r in self._all('SELECT peer, last_id FROM chat_reads WHERE "user" = ?', (user,))}
+        out = {}
+        rows = self._all("SELECT * FROM messages WHERE recipient IS NULL ORDER BY id DESC LIMIT 1")
+        if rows:
+            n = self._all("SELECT COUNT(*) AS n FROM messages WHERE recipient IS NULL AND id > ? AND sender <> ?",
+                          (reads.get("", 0), user))[0]["n"]
+            out[""] = {"last": self._msg(rows[0]), "unread": n}
+        last = self._all(
+            "SELECT * FROM messages WHERE id IN (SELECT MAX(id) FROM messages WHERE recipient IS NOT NULL "
+            "AND (sender = ? OR recipient = ?) GROUP BY CASE WHEN sender = ? THEN recipient ELSE sender END)",
+            (user, user, user))
+        for r in last:
+            peer = r["recipient"] if r["sender"] == user else r["sender"]
+            out[peer] = {"last": self._msg(r), "unread": 0}
+        for r in self._all('SELECT m.sender, COUNT(*) AS n FROM messages m LEFT JOIN chat_reads r '
+                           'ON r."user" = m.recipient AND r.peer = m.sender '
+                           "WHERE m.recipient = ? AND m.id > COALESCE(r.last_id, 0) GROUP BY m.sender", (user,)):
+            if r["sender"] in out:
+                out[r["sender"]]["unread"] = r["n"]
+        return out

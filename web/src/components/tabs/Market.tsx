@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { advertiserUrl, COIN_NAMES, dayStats, effBuy, isDollar, perDollar, roundTrip, series } from "@/lib/calc";
-import { money, num, pct, perUsd, qty, tone } from "@/lib/format";
+import { money, num, pct, pctPlain, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
-import type { Ad, Side, State } from "@/lib/types";
+import type { Ad, P2PStep, Route, Side, State } from "@/lib/types";
+import { p2pRow, RouteStatus, Steps } from "./Home";
 import { PriceChart } from "../PriceChart";
 import { Ago, Coin, EmptyBox, ExtLink, Icon, Segmented, Skeleton, Usd, type IconName } from "../ui";
 import { CapitalField, CostsNote, GmfToggle } from "../controls";
@@ -92,6 +93,56 @@ function Kpi({ icon, kind, label, value, hint, i }: { icon: IconName; kind: stri
   );
 }
 
+// ---------------------------------------------------------------- comprar y vender ya
+
+/** Ruta directa de tu capital: comprar y vender la misma cripto en P2P (la calcula el servidor con comisiones y 4x1000). */
+const directRoute = (s: State, asset: string) => s.p2p?.routes?.find((r) => r.id === `${asset}>${asset}`);
+
+/** Cuando comprar y vender gana: el paso a paso, igual que en Inicio. Abajo, las otras criptos que también ganan. */
+function WinCard({ s, asset, onCoin }: { s: State; asset: string; onCoin: (a: string) => void }) {
+  const r = directRoute(s, asset);
+  const others = (s.p2p?.routes ?? [])
+    .filter((x) => x.steps.length === 2 && x.profit_fiat > 0 && x.id !== `${asset}>${asset}`)
+    .sort((a, b) => b.per_usd - a.per_usd);
+  const wins = r && r.profit_fiat > 0;
+  if (!wins && !others.length) return null;
+  const row = r && p2pRow(s, r);
+  return (
+    <section className={`card mkt-win ${wins ? "on" : ""}`}>
+      {wins && row ? (
+        <>
+          <div className="mkt-sec-head">
+            <div className="mkt-sec-title">
+              <span className="sec-ico green"><Icon name="trend" /></span>
+              <div>
+                <h2>Gana ahora con {asset}: <span className="up">{signedMoney(r.profit_fiat)}</span></h2>
+                <p className="sub">Con {money(s.settings.capital, 0)} · ya descuenta comisión P2P y 4x1000 sobre la ganancia</p>
+              </div>
+            </div>
+            <RouteStatus r={row} />
+          </div>
+          <Steps row={row} s={s} />
+        </>
+      ) : (
+        <div className="mkt-win-none"><Icon name="info" size={16} /> Comprar y vender {asset} ya no gana con {money(s.settings.capital, 0)}.</div>
+      )}
+      {others.length > 0 && (
+        <div className="mkt-win-others">
+          <small>{wins ? "También gana:" : "Sí gana con:"}</small>
+          {others.slice(0, 6).map((o) => {
+            const a = o.id.split(">")[0];
+            return (
+              <button key={a} type="button" className="mkt-win-chip" onClick={() => onCoin(a)}>
+                <Coin s={a} size={18} /> {a} <b className="up">{signedMoney(o.profit_fiat)}</b>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ---------------------------------------------------------------- anuncio P2P
 
 function AdRow({ ad, asset, best, side, s, i }: { ad: Ad; asset: string; best: number; side: Side; s: State; i: number }) {
@@ -159,7 +210,7 @@ function CoinChart({ asset, s }: { asset: string; s: State }) {
           <span className="sec-ico blue"><Icon name="chart" /></span>
           <div>
             <h2>Precio de {asset}</h2>
-            <p className="sub">Mejor compra y mejor venta en P2P, en pesos</p>
+            <p className="sub">El mejor anuncio de cada lado, de cualquier monto (antes de costos)</p>
           </div>
         </div>
         <Segmented label="Rango del gráfico" value={prefs.range} onChange={(r) => setPrefs({ range: r })}
@@ -196,7 +247,13 @@ export function Market() {
   const sellAd = m?.SELL[0];
   const buy = buyAd?.price;
   const sell = sellAd?.price;
-  const rt = roundTrip(state, asset);
+  // precios netos con tu capital: lo que de verdad pagas y recibes por cada unidad (comisión P2P incluida)
+  const route: Route | undefined = directRoute(state, asset);
+  const [bStep, sStep] = (route?.steps ?? []) as P2PStep[];
+  const netBuy = route && bStep ? route.paid / bStep.qty : effBuy(buy, state);
+  const netSell = route && sStep ? route.received / sStep.qty : sell;
+  const rt = route ? route.per_usd : roundTrip(state, asset);
+  const cap = money(st.capital, 0);
   const side = (k: Side) => (k === "BUY" ? `Comprar ${asset}` : `Vender ${asset}`);
 
   return (
@@ -220,15 +277,22 @@ export function Market() {
       ) : (
         <>
           <div className="mkt-kpis" key={asset}>
-            <Kpi i={0} icon="cart" kind="buy" label="Mejor compra" value={money(effBuy(buy, state))}
-              hint={buyAd ? <>Te vende <b>{buyAd.nick}</b></> : "Sin anuncios"} />
-            <Kpi i={1} icon="handCoins" kind="sell" label="Mejor venta" value={money(sell)}
-              hint={sellAd ? <>Te compra <b>{sellAd.nick}</b></> : "Sin anuncios"} />
+            <Kpi i={0} icon="cart" kind="buy" label="Te cuesta comprar" value={money(netBuy)}
+              hint={bStep ? <>Te vende <b>{bStep.ad.nick}</b>{netBuy !== bStep.price && <> · anuncio {money(bStep.price)}</>}</>
+                : buyAd ? <>Ninguno acepta {cap} · mejor: <b>{buyAd.nick}</b></> : "Sin anuncios"} />
+            <Kpi i={1} icon="handCoins" kind="sell" label="Recibes al vender" value={money(netSell)}
+              hint={sStep ? <>Te compra <b>{sStep.ad.nick}</b>{netSell !== sStep.price && <> · anuncio {money(sStep.price)}</>}</>
+                : sellAd ? <>Ninguno acepta {cap} · mejor: <b>{sellAd.nick}</b></> : "Sin anuncios"} />
             <Kpi i={2} icon="swap" kind={`rt ${tone(rt)}`} label="Comprar y vender ya" value={<Usd v={rt} suffix="por dólar" />}
-              hint={buy && sell ? <>Diferencia compra–venta <b>{pct((buy - sell) / sell)}</b></> : undefined} />
+              hint={route ? <>Con {cap}: <b className={tone(route.profit_fiat) === "up" ? "up" : "down"}>{signedMoney(route.profit_fiat)}</b> neto</>
+                : buy && sell ? <>Comprar y vender: <b className={sell > buy ? "up" : sell < buy ? "down" : ""}>{pct(sell / buy - 1)}</b> (antes de costos)</> : undefined} />
             <Kpi i={3} icon="clock" kind="ago" label="Actualizado" value={<span className="mkt-ago"><span className="pulse" /><Ago t={state.p2p?.t} /></span>}
               hint={`Se revisa cada ${every(st.p2p_interval)}`} />
           </div>
+
+          <p className="mkt-net-note"><Icon name="info" size={14} /> Precios netos con tu capital: incluyen comisión P2P{(state.p2p_fee ?? 0) > 0 ? ` (${pctPlain(state.p2p_fee, 2)})` : " (hoy 0 %)"} y el 4x1000 sobre la ganancia{state.settings.gmf > 0 ? "" : " (apagado)"}.</p>
+
+          <WinCard s={state} asset={asset} onCoin={(a) => setPrefs({ asset: a })} />
 
           <CoinChart asset={asset} s={state} />
 

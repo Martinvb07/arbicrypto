@@ -73,19 +73,22 @@ function Kpis({ s }: { s: State }) {
 // ---------------------------------------------------------------- arbitraje en vivo
 
 /** Una ruta de arbitraje: P2P (con o sin Spot) o 3 cambios dentro de Spot. */
-type Row =
+export type Row =
   | { id: string; kind: "p2p"; route: Route; per_usd: number; gain: number; opp: boolean; tight: boolean; since?: number }
   | { id: string; kind: "spot"; tri: Triangle; per_usd: number; gain: number; opp: boolean; tight: boolean; since?: number };
+
+/** Una ruta P2P como fila; "opp" = el servidor ya la confirmó como oportunidad. */
+export function p2pRow(s: State, r: Route, since = new Map(s.opps.map((o) => [o.id, o.since]))): Row {
+  const id = `p2p:${r.id}`;
+  return { id, kind: "p2p", route: r, per_usd: r.per_usd, gain: r.profit_fiat, opp: since.has(id), tight: r.profit < s.settings.safe_p2p, since: since.get(id) };
+}
 
 /** Todas las rutas, rentables o no, ordenadas de mejor a peor. Las rentables vienen confirmadas por el servidor. */
 function arbitrageRows(s: State): Row[] {
   const since = new Map(s.opps.map((o) => [o.id, o.since]));
   const ref = s.usd_ref ?? 0;
   const rows: Row[] = [
-    ...(s.p2p?.routes ?? []).map((r) => {
-      const id = `p2p:${r.id}`;
-      return { id, kind: "p2p" as const, route: r, per_usd: r.per_usd, gain: r.profit_fiat, opp: since.has(id), tight: r.profit < s.settings.safe_p2p, since: since.get(id) };
-    }),
+    ...(s.p2p?.routes ?? []).map((r) => p2pRow(s, r, since)),
     ...(s.spot?.top ?? [])
       .filter((t) => t.profit <= s.settings.max_profit) // lo demasiado bueno casi siempre es un precio viejo
       .map((t) => {
@@ -105,7 +108,7 @@ const pctTxt = (v: number) => `${num(v * 100, v * 100 < 1 ? 2 : 1).replace(/,?0+
 function CostBar({ s }: { s: State }) {
   const gmf = s.settings.gmf > 0;
   const items: [string, string, boolean, string][] = [
-    ["Comisión Spot", pctTxt(s.fee), true, s.account ? "Tu comisión real de Binance" : "Comisión estándar (conecta tu cuenta para usar la tuya)"],
+    ["Comisión Spot", pctTxt(s.fee), true, "Comisión estándar de Binance (la más alta): si pagas menos, ganas un poco más"],
     ["Redondeo Binance", "", true, "Binance redondea las cantidades hacia abajo; el sobrante queda suelto"],
     ["Colchón", pctTxt(s.settings.spot_slippage), true, "Por si el precio se mueve mientras haces el cambio en Spot"],
     ["Comisión P2P", pctTxt(s.p2p_fee ?? 0), (s.p2p_fee ?? 0) > 0, "Tomada de tus órdenes P2P; Binance normalmente no cobra al que toma un anuncio"],
@@ -152,7 +155,7 @@ function SafetyNote() {
   );
 }
 
-function Steps({ row, s }: { row: Row; s: State }) {
+export function Steps({ row, s }: { row: Row; s: State }) {
   if (row.kind === "spot") {
     const t = row.tri;
     return (
@@ -209,7 +212,7 @@ function Steps({ row, s }: { row: Row; s: State }) {
         ))}
       </ol>
       <Breakdown route={row.route} />
-      <SafetyNote />
+      {steps.some((st) => st.venue === "Spot") && <SafetyNote />}
     </>
   );
 }
@@ -218,7 +221,7 @@ const SHOWN = 10;
 
 type Filter = "todas" | "p2p" | "directo" | "spot";
 
-function RouteStatus({ r }: { r: Row }) {
+export function RouteStatus({ r }: { r: Row }) {
   if (r.opp) {
     return r.tight
       ? <span className="badge warn" title="Gana poco: si un precio cambia mientras operas, puede volverse pérdida">Justa · actúa rápido · <Ago t={r.since} /></span>

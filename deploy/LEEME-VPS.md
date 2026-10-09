@@ -56,11 +56,11 @@ Si la clave tiene caracteres como `@`, `:` o `/`, escríbelos en la URL como `%4
 ```bash
 sudo mkdir -p /opt/arbicrypto && sudo chown $USER /opt/arbicrypto
 cd /opt/arbicrypto
-git clone <tu-repositorio> .          # o súbelo con scp/WinSCP (sin node_modules)
+git clone https://github.com/Martinvb07/arbicrypto.git .
 mkdir -p logs
 ```
 
-**Nunca** subas `backend/.env` ni `backend/data/` a git. Si vas a traer tus datos actuales, cópialos aparte (paso 6).
+**Nunca** subas `backend/.env` ni `backend/data/` a git (el repositorio es público). Si vas a traer tus datos actuales, cópialos aparte (paso 6).
 
 ## 4. Backend (Python)
 
@@ -76,10 +76,13 @@ Crea `backend/.env` con:
 DATABASE_URL=mysql://arbicrypto:CLAVE-SEGURA@127.0.0.1:3306/arbicrypto
 # REDIS_URL=redis://127.0.0.1:6379/0      ← solo si instalaste Redis
 COOKIE_SECURE=1      # la sesión solo viaja por HTTPS
-REMOTE_ADMIN=1       # permite conectar la cuenta de Binance desde el navegador (en el VPS no hay "PC local")
+REMOTE_ADMIN=1       # cada usuario conecta SU cuenta de Binance desde su navegador (por HTTPS)
+# APP_SECRET=...     # lo crea el panel solo la primera vez: cifra las llaves de Binance de todos
 ```
 
 Protégelo: `chmod 600 .env`
+
+Si traes tus datos del PC, copia también la línea `APP_SECRET` de tu `.env`: sin ella no se pueden descifrar las llaves de Binance ya guardadas (cada quien tendría que conectar su cuenta otra vez).
 
 ## 5. Interfaz (Next.js)
 
@@ -92,13 +95,7 @@ npm run build          # genera web/out, que sirve el backend
 ## 6. Tus datos
 
 - **Empezar de cero:** crea el administrador con `cd /opt/arbicrypto/backend && .venv/bin/python auth.py` (opción 1).
-- **Traer lo que ya tienes:** copia tu carpeta `backend/data/` del PC al VPS (misma ruta) y ejecuta:
-
-  ```bash
-  cd /opt/arbicrypto/backend && .venv/bin/python migrate.py
-  ```
-
-  Pasa usuarios, monedas, bitácora, historial, avisos y órdenes a MySQL. No borra nada de `data/`.
+- **Traer lo que ya tienes:** copia tu carpeta `backend/data/` del PC al VPS (misma ruta) y la línea `APP_SECRET` de tu `.env`. La primera vez que el panel arranca con MySQL vacío, copia solo todo (usuarios, llaves cifradas, monedas, bitácora, historial, avisos y órdenes). No borra nada de `data/`.
 
 ## 7. Encenderlo con PM2
 
@@ -143,19 +140,40 @@ El puerto **8787 nunca se abre** a internet: solo nginx habla con el panel.
 
 ## 10. Binance
 
-En Binance → Gestión de API, restringe la llave de **solo lectura** a la **IP del VPS**. Luego conéctala desde **Mi Binance** en el panel (con HTTPS).
+Cada persona crea en Binance → Gestión de API una llave de **solo lectura**, la restringe a la **IP del VPS** y la conecta desde **Mi Binance** con su propio usuario (por HTTPS). Cada quien solo ve su cuenta.
 
 ---
 
-## Actualizar a una versión nueva
+## Actualizar: automático con cada push (CI/CD)
+
+Igual que en ReservaTuCancha: cada `git push` a `main` dispara **GitHub Actions** (`.github/workflows/deploy.yml`):
+
+1. **CI**: instala todo, revisa errores del backend, comprueba que la app carga, revisa los tipos y compila la interfaz. Si algo falla, **no se despliega**.
+2. **Deploy**: entra al VPS por SSH, deja el código en esa versión, instala dependencias, compila la interfaz y recarga PM2.
+3. **Verificación**: espera a que `http://127.0.0.1:8787/login` responda. Si no responde, **vuelve sola a la versión anterior**.
+
+`backend/.env`, `backend/data`, `.venv`, `node_modules` y `logs` nunca se tocan.
+
+### Configurarlo (una sola vez)
+
+En el VPS, con el usuario que corre PM2, crea una llave SSH solo para el deploy:
 
 ```bash
-cd /opt/arbicrypto
-git pull
-backend/.venv/bin/pip install -r backend/requirements.txt
-cd web && npm ci && npm run build && cd ..
-pm2 restart arbicrypto
+ssh-keygen -t ed25519 -f ~/.ssh/github_deploy -N "" -C "deploy-arbicrypto"
+cat ~/.ssh/github_deploy.pub >> ~/.ssh/authorized_keys
+cat ~/.ssh/github_deploy          # esta es la PRIVADA: va a GitHub y luego puedes borrarla del VPS
 ```
+
+En GitHub → repositorio **arbicrypto** → *Settings → Secrets and variables → Actions*, crea estos secretos (o en *Environments → produccion*):
+
+| Secreto | Valor |
+|---|---|
+| `VPS_SSH_KEY` | la llave **privada** que mostró el último comando (todo, con las líneas BEGIN/END) |
+| `VPS_HOST` | la IP o dominio del VPS |
+| `VPS_USER` | el usuario del VPS (el mismo que corre PM2) |
+| `VPS_PATH` | `/opt/arbicrypto` |
+
+Listo: el próximo push a `main` se despliega solo. También puedes lanzarlo a mano en *Actions → CI y Deploy a VPS → Run workflow*. El primer arranque (pasos 1 a 9) sí se hace a mano.
 
 ## Copias de seguridad
 
@@ -163,15 +181,15 @@ pm2 restart arbicrypto
 mysqldump -u arbicrypto -p arbicrypto > respaldo-$(date +%F).sql
 ```
 
-Guarda también `backend/.env` en un lugar seguro: tiene la llave de Binance y el token de Telegram.
+Guarda también `backend/.env` en un lugar seguro: tiene `APP_SECRET` (descifra las llaves de Binance de todos) y el token de Telegram. El respaldo de MySQL trae las llaves **cifradas**: sin `APP_SECRET` no sirven.
 
 ## En tu PC con Windows
 
-Funciona igual que siempre con `iniciar.bat`. Para que use MySQL, crea la base y el usuario (paso 2) y agrega a `backend\.env`:
+Se prende con PM2 igual que aquí (ver LEEME.md). Para que use MySQL, crea la base y el usuario (paso 2) y agrega a `backend\.env`:
 
 ```ini
 DATABASE_URL=mysql://arbicrypto:CLAVE-SEGURA@127.0.0.1:3306/arbicrypto
 ```
 
-Luego, con el panel apagado: `python migrate.py` (dentro de `backend`) para pasar tus datos, y vuelve a abrir el panel.
+Reinicia el panel (`pm2 restart arbicrypto`): la primera vez copia solo tus datos de `backend\data` a MySQL.
 Sin `DATABASE_URL` sigue usando SQLite y los archivos de `backend\data`.

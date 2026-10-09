@@ -1,12 +1,12 @@
 """ArbiCrypto: arbitraje en Binance (P2P en pesos + Spot) en vivo, para ti y tu equipo.
 
-    python app.py            solo este PC      -> http://127.0.0.1:8787
-    python app.py --equipo   red local (Wi-Fi) -> http://IP-de-este-PC:8787
+Se enciende con PM2 (ver LEEME.md):
+    pm2 start deploy/ecosystem.config.js                 solo este PC      -> http://127.0.0.1:8787
+    pm2 start deploy/ecosystem.config.js --env equipo    red local (Wi-Fi) -> http://IP-de-este-PC:8787
 """
 import asyncio
 import functools
 import html
-import json
 import logging
 import mimetypes
 import os
@@ -27,6 +27,7 @@ from httpkit import App, Response, abort, asgi, g, jsonify, redirect, request, s
 import engine
 from auth import Auth, AuthError
 from db import DB, to_csv
+from keys import Vault
 from notify import Telegram, TelegramError
 from stream import LiveBook
 
@@ -34,17 +35,17 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(ROOT, "data")
 WEB_DIR = os.path.normpath(os.path.join(ROOT, "..", "web", "out"))
 ENV_FILE = os.path.join(ROOT, ".env")
-ENV_KEYS = ["BINANCE_API_KEY", "BINANCE_API_SECRET", "BINANCE_OWNER", "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT", "TELEGRAM_CHAT_ID", "TELEGRAM_CHAT_NAME"]
+ENV_KEYS = ["APP_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT", "TELEGRAM_CHAT_ID", "TELEGRAM_CHAT_NAME"]
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 PREFS_FILE = os.path.join(DATA_DIR, "prefs.json")  # capital de cada usuario
 HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 WATCH_FILE = os.path.join(DATA_DIR, "watches.json")
-TEAM = "--equipo" in sys.argv
-HOST, PORT = ("0.0.0.0" if TEAM else os.environ.get("HOST", "127.0.0.1")), int(os.environ.get("PORT", 8787))
 _ENV0 = storage.read_env_file(ENV_FILE)
 _flag = lambda k: (os.environ.get(k) or _ENV0.get(k, "")).strip().lower() in ("1", "true", "si", "yes")
+TEAM = "--equipo" in sys.argv or _flag("EQUIPO")  # EQUIPO=1: abierto en la red Wi-Fi
+HOST, PORT = ("0.0.0.0" if TEAM else os.environ.get("HOST", "127.0.0.1")), int(os.environ.get("PORT", 8787))
 SECURE_COOKIE = _flag("COOKIE_SECURE")  # VPS con HTTPS: la cookie de sesion solo viaja cifrada
-REMOTE_ADMIN = _flag("REMOTE_ADMIN")    # VPS: conectar la cuenta de Binance desde el navegador
+REMOTE_ADMIN = _flag("REMOTE_ADMIN")    # VPS (HTTPS): cada usuario conecta su cuenta de Binance desde su navegador
 LOOPBACK = ("127.0.0.1", "::1")
 COOKIE = "cj_session"
 BOOT = time.time()
@@ -93,23 +94,29 @@ mimetypes.add_type("application/manifest+json", ".webmanifest")  # manifiesto de
 app = App()  # FastAPI; el tamano maximo de cada peticion lo controla httpkit
 # MySQL si hay DATABASE_URL en backend/.env; si no, SQLite y archivos en backend/data. Redis opcional (REDIS_URL).
 sql, store, redis = storage.from_env(storage.read_env_file(ENV_FILE), DATA_DIR)
-auth = Auth(store=store, redis=redis)
 db = DB(sql)
+if sql.mysql:
+    storage.import_local(sql, store, DATA_DIR)  # primera vez con MySQL: trae lo que haya en backend/data
+auth = Auth(store=store, redis=redis)
 live = LiveBook()
 telegram = Telegram()
 lock = threading.RLock()
 wake = {name: threading.Event() for name in ("spot", "p2p", "account", "watch")}
 subscribers = []
+online = {}  # {usuario: pestañas abiertas}: quien esta conectado ahora (para el chat)
+chat_sent = {}  # {usuario: [momentos de sus ultimos mensajes]} para frenar el spam
 
 settings = dict(DEFAULTS)
-account = None
-binance_owner = None  # usuario que conecto la cuenta de Binance: es su cuenta personal, nadie mas la ve
+vault = None     # llaves de Binance cifradas (se abre en main con APP_SECRET)
+accounts = {}    # {usuario: engine.Account}: cada persona conecta SU cuenta y solo ella la ve
+acc_state = {}   # {usuario: saldos, comision y ordenes de su cuenta}
+acc_errors = {}  # {usuario: {"t", "msg"}} si su cuenta no se pudo leer
 graph = {}
 history = []
 p2p_cache = {"market": {}, "turn": 0}  # ultimos anuncios de cada cripto
 prefs = {}  # {usuario: {"capital": pesos}}
 by_capital = {}  # {capital: {"routes", "conversions", "found"}} calculado en cada escaneo P2P
-state = {"spot": None, "p2p": None, "account": None, "alerts": [], "errors": {}}
+state = {"spot": None, "p2p": None, "alerts": [], "errors": {}}
 opps = {"spot": []}
 streak = {}
 first_seen = {}
@@ -179,7 +186,8 @@ def read_env():
 
 
 def update_env(**changes):
-    env = dict(read_env(), **changes)
+    """Cambia claves de backend/.env; con valor None la clave se borra."""
+    env = {k: v for k, v in dict(read_env(), **changes).items() if v is not None}
     with open(ENV_FILE, "w", encoding="utf-8") as f:
         f.write("# Llaves privadas de ArbiCrypto (Binance SOLO LECTURA y Telegram). No compartas este archivo.\n")
         for k in ENV_KEYS + [k for k in env if k not in ENV_KEYS]:
@@ -201,8 +209,6 @@ def load_history():
     for p in load_json(HISTORY_FILE, []):
         if p.get("t", 0) <= cutoff:
             continue
-        if "buy" in p:  # formato viejo: solo USDT
-            p = {"t": p["t"], "p": {"USDT": [p["buy"], p["sell"]]}}
         out.append(p)
     return out
 
@@ -262,16 +268,18 @@ def sync_alerts(group, current, **extra):
 
 
 def p2p_fee():
-    """Comision P2P real segun tus ordenes completadas (Binance casi nunca cobra al que toma un anuncio)."""
-    acc = state["account"]
-    rates = sorted(o["commission"] / o["amount"] for o in (acc or {}).get("orders", [])
+    """Comision P2P real segun las ordenes completadas de todas las cuentas conectadas
+    (Binance casi nunca cobra al que toma un anuncio)."""
+    rates = sorted(o["commission"] / o["amount"] for snap in list(acc_state.values()) for o in snap.get("orders", [])
                    if o.get("status") == "COMPLETED" and o.get("amount") and o.get("commission"))
     return min(rates[len(rates) // 2], 0.01) if rates else 0.0
 
 
+STD_FEE = 0.001  # comision Spot estandar de Binance (0,1 %): la mas alta, asi el calculo nunca promete de mas
+
+
 def current_fee():
-    acc = state["account"]
-    return acc["taker"] if acc else 0.001
+    return STD_FEE
 
 
 def best_price(asset, side):
@@ -346,8 +354,7 @@ def spot_step():
         t["pairs"] = [pairs["data"].get(sym) for sym in t["symbols"]]
 
     ref = usd_ref()
-    acc = account
-    fee_for = (lambda sym: acc.symbol_fee(sym, fee)) if acc else (lambda sym: fee)
+    fee_for = lambda sym: fee  # el escaner es de todos: comision estandar
     found, alive, checked = [], set(), 0
     for t in res["top"]:
         if t["profit"] <= REAL_PRICE_NEAR or not ref:
@@ -579,14 +586,20 @@ def watch_view(user):
 
 
 def account_step():
-    acc = account
-    if not acc:
-        return
-    snap = engine.Account.snapshot(acc)
-    db.save_orders(snap["orders"])
-    with lock:
-        if account is acc:
-            state["account"] = dict(snap, t=time.time())
+    """Lee la cuenta de Binance de cada usuario conectado. Si una falla, las demas siguen."""
+    for user, acc in list(accounts.items()):
+        try:
+            snap = acc.snapshot()
+        except Exception as e:  # llave borrada en Binance, IP no permitida, sin internet...
+            with lock:
+                if accounts.get(user) is acc:
+                    acc_errors[user] = {"t": time.time(), "msg": friendly_error(e)}
+            continue
+        db.save_orders(user, snap["orders"])
+        with lock:
+            if accounts.get(user) is acc:
+                acc_state[user] = dict(snap, t=time.time())
+                acc_errors.pop(user, None)
     publish("account")
 
 
@@ -626,18 +639,23 @@ PUBLIC_PATHS = {"/login", "/login.html", "/favicon.ico", "/api/auth/login", "/ap
 PUBLIC_PREFIXES = ("/_next/", "/coins/", "/brand/", "/icons/")
 
 
-def is_owner():
-    """¿La cuenta de Binance conectada es de quien hace la peticion?"""
-    return account is not None and g.user is not None and g.user["name"] == binance_owner
+def has_account():
+    """¿Quien hace la peticion tiene conectada SU cuenta de Binance?"""
+    return g.user is not None and g.user["name"] in accounts
 
 
-def owner_only(fn):
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not is_owner():
-            return jsonify(error="La cuenta de Binance es personal: solo la ve quien la conectó."), 403
-        return fn(*args, **kwargs)
-    return wrapper
+def can_connect():
+    """Las llaves solo viajan desde este PC, o por HTTPS en el VPS (REMOTE_ADMIN=1)."""
+    return is_local() or REMOTE_ADMIN
+
+
+def forget_account(user):
+    """Borra la cuenta de Binance de un usuario: llaves cifradas, saldos y errores (las ordenes guardadas quedan)."""
+    vault.remove(user)
+    with lock:
+        accounts.pop(user, None)
+        acc_state.pop(user, None)
+        acc_errors.pop(user, None)
 
 
 def is_local():
@@ -754,19 +772,18 @@ def api_team_revoke():
 @app.post("/api/team/delete-user")
 @admin_only
 def api_team_delete():
-    if account is not None and body().get("username") == binance_owner:
-        return jsonify(error=f"{binance_owner} tiene conectada su cuenta de Binance; primero debe desconectarla."), 400
+    name = str(body().get("username", ""))
     try:
-        auth.delete_user(str(body().get("username", "")), g.user["name"])
+        auth.delete_user(name, g.user["name"])
     except AuthError as e:
         return jsonify(error=str(e)), 400
+    forget_account(name)  # su llave de Binance se borra con el usuario
     return jsonify(ok=True)
 
 
 @app.post("/api/team/rename")
 @admin_only
 def api_team_rename():
-    global binance_owner
     b = body()
     old = str(b.get("username", ""))
     try:
@@ -784,9 +801,11 @@ def api_team_rename():
                     w["user"] = new
             save_json(WATCH_FILE, watches)
         db.rename_user(old, new)
-        if binance_owner == old:
-            binance_owner = new
-            update_env(BINANCE_OWNER=new)
+        vault.rename(old, new)
+        with lock:
+            for d in (accounts, acc_state, acc_errors):
+                if old in d:
+                    d[new] = d.pop(old)
     publish("watch")
     return jsonify(ok=True, username=new)
 
@@ -795,8 +814,6 @@ def api_team_rename():
 @admin_only
 def api_team_role():
     b = body()
-    if account is not None and b.get("username") == binance_owner and b.get("role") != "admin":
-        return jsonify(error=f"{binance_owner} tiene conectada su cuenta de Binance; primero debe desconectarla."), 400
     try:
         auth.set_role(str(b.get("username", "")), str(b.get("role", "")), g.user["name"])
     except AuthError as e:
@@ -854,8 +871,8 @@ def api_tg_disconnect():
 
 # ---------------------------------------------------------------- datos
 
-def account_view():
-    acc = state["account"]
+def account_view(user):
+    acc = acc_state.get(user)
     if not acc:
         return None
     usdt_fiat = best_price("USDT", "SELL")
@@ -1001,7 +1018,7 @@ def api_watch_delete():
 @app.get("/api/state")
 def api_state():
     with lock:
-        admin = g.user["role"] == "admin"  # saldos y llave de Binance: solo el administrador
+        name = g.user["name"]  # saldos, ordenes y llave de Binance: solo los de su propia cuenta
         cap = user_capital(g.user)
         mine = by_capital.get(cap)
         p2p = state["p2p"]
@@ -1016,13 +1033,13 @@ def api_state():
             p2p = {**p2p, "routes": (mine or {}).get("routes", []), "conversions": (mine or {}).get("conversions")}
         return jsonify({
             "boot": BOOT, "now": time.time(), "settings": public_settings(g.user), "fee": current_fee(), "p2p_fee": p2p_fee(),
-            "spot": state["spot"], "p2p": p2p, "account": account_view() if is_owner() else None,
+            "spot": state["spot"], "p2p": p2p, "account": account_view(name),
             "opps": sorted((mine or {}).get("found", []) + opps["spot"], key=lambda o: -o["per_usd"]),
-            "connected": account is not None, "key_hint": account.hint() if is_owner() else None,
-            "account_mine": is_owner(), "account_owner": binance_owner if admin and account else None,
-            "local": is_local(), "team": TEAM, "user": g.user, "telegram": telegram.info(), "usd_ref": usd_ref(),
+            "connected": name in accounts, "key_hint": accounts[name].hint() if name in accounts else None,
+            "can_connect": can_connect(), "local": is_local(), "team": TEAM, "user": g.user, "telegram": telegram.info(), "usd_ref": usd_ref(),
             "alerts_at_boot": alerts_at_boot,
-            "alerts": state["alerts"][:100], "errors": state["errors"], "watches": watch_view(g.user),
+            "alerts": state["alerts"][:100], "watches": watch_view(g.user),
+            "errors": {**state["errors"], **({"account": acc_errors[name]} if name in acc_errors else {})},
         })
 
 
@@ -1054,13 +1071,10 @@ def api_settings():
 
 
 @app.post("/api/connect")
-@admin_only
 def api_connect():
-    global account, binance_owner
-    if account is not None and not is_owner():
-        return jsonify(error=f"Ya hay una cuenta de Binance conectada ({binance_owner}). Solo esa persona puede cambiarla."), 403
-    if not is_local() and not REMOTE_ADMIN:
-        return jsonify(error="Por seguridad, la cuenta solo se conecta desde el PC donde corre el panel."), 403
+    """Cada usuario conecta SU cuenta (solo lectura); reemplaza la que tuviera antes."""
+    if not can_connect():
+        return jsonify(error="Por seguridad, las llaves solo se ingresan desde el PC donde corre el panel (o por HTTPS en el servidor)."), 403
     key, secret = str(body().get("key", "")).strip(), str(body().get("secret", "")).strip()
     if not key or not secret:
         return jsonify(error="Pega la API Key y la Secret Key."), 400
@@ -1077,30 +1091,24 @@ def api_connect():
         snap = acc.snapshot()
     except (requests.RequestException, engine.BinanceError) as e:
         return jsonify(error=f"Binance rechazó la llave: {e}"), 400
-    update_env(BINANCE_API_KEY=key, BINANCE_API_SECRET=secret, BINANCE_OWNER=g.user["name"])
+    name = g.user["name"]
+    vault.save(name, key, secret)
+    db.save_orders(name, snap["orders"])
     with lock:
-        account = acc
-        binance_owner = g.user["name"]
-        state["account"] = dict(snap, t=time.time())
-        state["errors"].pop("account", None)
-    wake["spot"].set()  # recalcula con la comision real de la cuenta
-    wake["p2p"].set()
+        accounts[name] = acc
+        acc_state[name] = dict(snap, t=time.time())
+        acc_errors.pop(name, None)
+    wake["p2p"].set()  # la comision P2P real sale de las ordenes
     publish("account")
     return jsonify(ok=True)
 
 
 @app.post("/api/disconnect")
-@owner_only
 def api_disconnect():
-    global account, binance_owner
-    if not is_local() and not REMOTE_ADMIN:
-        return jsonify(error="Solo se puede desconectar desde el PC donde corre el panel."), 403
-    update_env(BINANCE_API_KEY="", BINANCE_API_SECRET="", BINANCE_OWNER="")
-    with lock:
-        account = None
-        binance_owner = None
-        state["account"] = None
-        state["errors"].pop("account", None)
+    """Desconecta SOLO la cuenta de quien lo pide (nadie puede desconectar la de otro)."""
+    if not has_account():
+        return jsonify(error="No tienes una cuenta de Binance conectada."), 400
+    forget_account(g.user["name"])
     publish("account")
     return jsonify(ok=True)
 
@@ -1130,6 +1138,10 @@ def api_events():
     q = queue.Queue(maxsize=100)
     subscribers.append(q)
     req = request._r  # para saber cuando el navegador se va
+    name = g.user["name"]
+    with lock:
+        online[name] = online.get(name, 0) + 1
+    publish("presence", remote=False)
 
     async def stream():
         try:
@@ -1148,8 +1160,95 @@ def api_events():
         finally:
             if q in subscribers:
                 subscribers.remove(q)
+            with lock:
+                online[name] = online.get(name, 1) - 1
+                if online[name] <= 0:
+                    online.pop(name, None)
+            publish("presence", remote=False)
 
     return Response(stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+# ---------------------------------------------------------------- chat del equipo
+# Canal general (peer "") y mensajes privados entre dos usuarios. El evento "chat" solo dice que hay
+# algo nuevo: cada quien pide despues lo suyo, asi un privado nunca viaja a otra persona.
+
+CHAT_MAX = 2000           # caracteres por mensaje
+CHAT_BURST = (12, 20)     # maximo 12 mensajes cada 20 s por usuario
+
+
+def chat_peer(raw, must_exist=True):
+    peer = str(raw or "")
+    if peer and (peer == g.user["name"] or (must_exist and peer not in auth.users)):
+        abort(400)
+    return peer
+
+
+@app.get("/api/chat")
+def api_chat():
+    me = g.user["name"]
+    with lock:
+        now_online = set(online)
+    users = [{"name": u["username"], "role": u["role"], "online": u["username"] in now_online}
+             for u in auth.list_users() if u["username"] != me]
+    return jsonify(me=me, users=users, channels=db.chat_summary(me))
+
+
+@app.get("/api/chat/messages")
+def api_chat_messages():
+    peer = chat_peer(request.args.get("peer"), must_exist=False)
+    before = request.args.get("before", 0, type=int)
+    return jsonify(messages=db.messages(g.user["name"], peer, before or None))
+
+
+@app.post("/api/chat/send")
+def api_chat_send():
+    b = body()
+    me = g.user["name"]
+    peer = chat_peer(b.get("peer"))
+    text = str(b.get("body") or "").strip()
+    if not text:
+        return jsonify(error="Escribe un mensaje."), 400
+    if len(text) > CHAT_MAX:
+        return jsonify(error=f"Máximo {CHAT_MAX} caracteres por mensaje."), 400
+    now = time.time()
+    with lock:
+        recent = [t for t in chat_sent.get(me, []) if now - t < CHAT_BURST[1]]
+        if len(recent) >= CHAT_BURST[0]:
+            return jsonify(error="Vas muy rápido. Espera unos segundos."), 429
+        chat_sent[me] = recent + [now]
+    msg = db.add_message(me, peer or None, text)
+    db.mark_read(me, peer, msg["id"])
+    publish("chat")
+    return jsonify(ok=True, message=msg)
+
+
+@app.post("/api/chat/read")
+def api_chat_read():
+    b = body()
+    peer = chat_peer(b.get("peer"), must_exist=False)
+    try:
+        last_id = int(b.get("id") or 0)
+    except (TypeError, ValueError):
+        abort(400)
+    if last_id > 0:
+        db.mark_read(g.user["name"], peer, last_id)
+    return jsonify(ok=True)
+
+
+@app.post("/api/chat/delete")
+def api_chat_delete():
+    try:
+        msg = db.message(int(body().get("id") or 0))
+    except (TypeError, ValueError):
+        abort(400)
+    me = g.user
+    # cada quien borra lo suyo; el administrador tambien puede borrar del canal general
+    if not msg or not (msg["from"] == me["name"] or (msg["to"] is None and me["role"] == "admin")):
+        return jsonify(error="Solo puedes borrar tus propios mensajes."), 403
+    db.delete_message(msg["id"])
+    publish("chat")
+    return jsonify(ok=True)
 
 
 # ---------------------------------------------------------------- vigilante: avisa si el escaner se detiene
@@ -1190,10 +1289,10 @@ def api_history_stats():
     return jsonify(opps=opps_rows, hours=hours, days=days)
 
 
-def auto_operations():
-    """Bitacora automatica: arma cada operacion con tus ordenes P2P completadas (compras seguidas de ventas).
+def auto_operations(user):
+    """Bitacora automatica: arma cada operacion con las ordenes P2P completadas del usuario (compras seguidas de ventas).
     Pagaste = suma de las compras; recibiste = suma de las ventas, ya con el 4x1000 sobre la ganancia."""
-    done = sorted((o for o in db.orders() if o["status"] == "COMPLETED" and o["total"]), key=lambda o: o["time"])
+    done = sorted((o for o in db.orders(user) if o["status"] == "COMPLETED" and o["total"]), key=lambda o: o["time"])
     ops, buys, sells = [], [], []
 
     def close():
@@ -1201,7 +1300,7 @@ def auto_operations():
             paid, got = sum(o["total"] for o in buys), sum(o["total"] for o in sells)
             gross = got - paid
             names = lambda rows: " + ".join(dict.fromkeys(f"{num(o['amount'], 2 if o['amount'] >= 1 else 8)} {o['asset']}" for o in rows))
-            ops.append({"id": "auto:" + str(buys[0]["id"]), "auto": True, "user": "Binance", "t": buys[0]["time"] / 1000,
+            ops.append({"id": "auto:" + str(buys[0]["id"]), "auto": True, "user": user, "t": buys[0]["time"] / 1000,
                         "kind": "p2p", "description": f"Compraste {names(buys)} → vendiste {names(sells)}",
                         "invested": paid, "received": got - (gross * settings["gmf"] if gross > 0 else 0),
                         "estimated": None, "note": None})
@@ -1221,9 +1320,8 @@ def auto_operations():
 
 def journal_rows():
     rows = db.journal(None if g.user["role"] == "admin" else g.user["name"])
-    if is_owner():  # las ordenes son de la cuenta de Binance de quien la conecto
-        rows = sorted(rows + auto_operations(), key=lambda e: -e["t"])
-    return rows
+    # las operaciones automaticas salen de la cuenta de Binance de cada quien: solo las propias
+    return sorted(rows + auto_operations(g.user["name"]), key=lambda e: -e["t"])
 
 
 @app.get("/api/journal")
@@ -1270,16 +1368,14 @@ def api_journal_csv():
 
 
 @app.get("/api/orders")
-@owner_only
 def api_orders():
-    return jsonify(orders=db.orders())
+    return jsonify(orders=db.orders(g.user["name"]))
 
 
 @app.get("/api/orders.csv")
-@owner_only
 def api_orders_csv():
     rows = [(local_time(o["time"] / 1000), "Compra" if o["side"] == "BUY" else "Venta", o["asset"], o["amount"], o["price"],
-             o["total"], o["fiat"], o["status"], o["counterpart"] or "", o["id"]) for o in db.orders()]
+             o["total"], o["fiat"], o["status"], o["counterpart"] or "", o["id"]) for o in db.orders(g.user["name"])]
     return csv_response(to_csv(["Fecha", "Tipo", "Cripto", "Cantidad", "Precio", "Total", "Moneda", "Estado",
                                 "Contraparte", "Orden"], rows), "ordenes-p2p-binance.csv")
 
@@ -1290,8 +1386,8 @@ def api_orders_csv():
 @app.get("/<path:path>")
 def web(path=""):
     if not os.path.isdir(WEB_DIR):
-        return ("<h1>Falta compilar la interfaz</h1><p>Abre <b>iniciar.bat</b>: compila la interfaz "
-                "automaticamente la primera vez.</p>"), 503
+        return ("<h1>Falta compilar la interfaz</h1><p>En la carpeta <b>web</b> ejecuta <b>npm run build</b> "
+                "y reinicia el panel (pm2 restart arbicrypto).</p>"), 503
     target = path or "index.html"
     for candidate in (target, f"{target}.html", f"{target}/index.html"):
         full = safe_join(WEB_DIR, candidate)
@@ -1303,17 +1399,21 @@ def web(path=""):
 # ---------------------------------------------------------------- arranque
 
 def main():
-    global settings, history, account, alerts_at_boot, binance_owner
+    global settings, history, alerts_at_boot, vault
     os.makedirs(DATA_DIR, exist_ok=True)
     state["alerts"] = db.recent_alerts()
     alerts_at_boot = state["alerts"][0]["id"] if state["alerts"] else 0
     settings = clean_settings(load_json(SETTINGS_FILE, {}))
     history = load_history()
     env = read_env()
-    if env.get("BINANCE_API_KEY") and env.get("BINANCE_API_SECRET"):
-        account = engine.Account(env["BINANCE_API_KEY"], env["BINANCE_API_SECRET"])
-        admins = sorted((u["created"], n) for n, u in auth.users.items() if u["role"] == "admin")
-        binance_owner = env.get("BINANCE_OWNER") or (admins[0][1] if admins else None)
+    secret = os.environ.get("APP_SECRET") or env.get("APP_SECRET")
+    if not secret:  # primera vez: clave para cifrar las llaves de Binance (vive solo en .env)
+        secret = Vault.new_secret()
+        update_env(APP_SECRET=secret)
+    vault = Vault(store, secret)
+    for user, (key, sec) in vault.all().items():
+        if user in auth.users:
+            accounts[user] = engine.Account(key, sec)
     telegram.token, telegram.bot = env.get("TELEGRAM_BOT_TOKEN", ""), env.get("TELEGRAM_BOT", "")
     telegram.chat_id, telegram.chat_name = env.get("TELEGRAM_CHAT_ID", ""), env.get("TELEGRAM_CHAT_NAME", "")
 
@@ -1338,7 +1438,7 @@ def main():
         print("  Cada persona entra con su propio usuario (crealo con un codigo de invitacion).")
         print("  Usalo solo en redes de confianza (casa u oficina), no en Wi-Fi publicas.")
         print("  Si Windows pregunta por el firewall, permite el acceso en 'redes privadas'.")
-    print("\n  Cierra esta ventana (o Ctrl+C) para apagar el panel.\n")
+    print("\n  Para apagarlo: pm2 stop arbicrypto (o Ctrl+C si lo abriste a mano).\n")
     if "--no-browser" not in sys.argv:
         threading.Timer(1.5, webbrowser.open, (url,)).start()
     try:  # el puerto debe estar libre antes de arrancar uvicorn
@@ -1346,7 +1446,7 @@ def main():
             probe.bind((HOST, PORT))
     except OSError:
         print(f"  El puerto {PORT} esta ocupado: el panel probablemente ya esta abierto en {url}")
-        sys.exit(3)  # iniciar.bat no reintenta en este caso
+        sys.exit(3)
     import uvicorn
     # proxy_headers: detras de nginx se ve la IP real del visitante (solo se confia en el nginx local)
     uvicorn.run(asgi(app), host=HOST, port=PORT, proxy_headers=True, forwarded_allow_ips="127.0.0.1",

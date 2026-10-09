@@ -127,43 +127,35 @@ function SavedOrders({ refreshKey }: { refreshKey: number }) {
 export function Account() {
   const { state, refresh, toast } = useLive();
   if (!state) return <Skeleton rows={10} />;
-  const admin = state.user.role === "admin";
   const fiat = state.settings.fiat;
 
-  if (state.connected && !state.account_mine) {
-    return <EmptyBox icon="lock" title="Esta cuenta de Binance es personal">La conectó {state.account_owner ?? "otro usuario"} y solo esa persona ve sus saldos y órdenes.</EmptyBox>;
-  }
   if (!state.connected) {
     return (
       <div className="card connect">
         <div>
           <h2>Conecta tu cuenta de Binance</h2>
-          <p>Solo <b>lee</b> tu cuenta (saldos, comisión y órdenes P2P). No puede operar ni retirar.</p>
+          <p>Solo <b>lee</b> tu cuenta (saldos, comisión y órdenes P2P). No puede operar ni retirar. Es <b>personal</b>: nadie más del equipo ve tus saldos, órdenes ni tu llave, y se guarda cifrada.</p>
           <ol className="num-steps">
             <li><span>En Binance entra a <b>Perfil → Gestión de API → Crear API</b> y elige <b>“Generada por el sistema”</b>. <a href="https://www.binance.com/es/my/settings/api-management" target="_blank" rel="noopener noreferrer">Abrir Gestión de API</a></span></li>
             <li><span>En permisos deja <b>solo “Habilitar lectura”</b>. Si tiene trading, retiros o transferencias, el panel la rechaza.</span></li>
-            <li><span>Recomendado: en “Restringir acceso a IP” pon la IP de este PC.</span></li>
+            <li><span>Recomendado: en “Restringir acceso a IP” pon la IP del PC o servidor donde corre el panel.</span></li>
             <li><span>Copia la <b>API Key</b> y la <b>Secret Key</b> y pégalas aquí.</span></li>
           </ol>
         </div>
-        {admin && state.local ? (
+        {state.can_connect ? (
           <ConnectForm />
         ) : (
-          <EmptyBox icon="lock" title={admin ? "Conéctala desde el PC principal" : "Solo el administrador conecta la cuenta"}>
-            Por seguridad, las llaves de Binance solo se ingresan en el PC donde corre el panel{admin ? "" : ", con el usuario administrador"}.
+          <EmptyBox icon="lock" title="Conéctala desde el PC principal">
+            Por seguridad, las llaves de Binance no viajan por el Wi-Fi sin cifrar: entra con tu usuario en el PC donde corre el panel y conéctala ahí.
           </EmptyBox>
         )}
       </div>
     );
   }
 
-  if (!admin) {
-    return <EmptyBox icon="lock" title="La cuenta de Binance solo la ve el administrador">Las oportunidades y los precios los ves completos en Inicio y Precios P2P.</EmptyBox>;
-  }
-
   const a = state.account;
   const disconnect = async () => {
-    if (!(await ask({ title: "¿Desconectar tu cuenta de Binance?", body: "Se borran las llaves guardadas en este PC. Dejarás de ver saldos, órdenes y la bitácora automática hasta que la conectes otra vez.",
+    if (!(await ask({ title: "¿Desconectar tu cuenta de Binance?", body: "Se borran tus llaves guardadas. Dejarás de ver saldos, órdenes y la bitácora automática hasta que la conectes otra vez.",
       confirm: "Desconectar", tone: "danger", icon: "key" }))) return;
     try {
       await api.disconnect();
@@ -178,7 +170,7 @@ export function Account() {
     return (
       <div className="card">
         {state.errors.account ? <EmptyBox icon="alert" title="No se pudo leer la cuenta">{state.errors.account.msg}</EmptyBox> : <Skeleton rows={6} />}
-        {admin && state.local && <button className="btn btn-sm btn-danger" style={{ marginTop: 12 }} onClick={() => void disconnect()}>Desconectar</button>}
+        <button className="btn btn-sm btn-danger" style={{ marginTop: 12 }} onClick={() => void disconnect()}>Desconectar</button>
       </div>
     );
   }
@@ -204,7 +196,7 @@ export function Account() {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn btn-sm" onClick={() => void api.refresh().then(() => toast("Actualizando…", undefined, "info", 2000))}><Icon name="refresh" size={15} /> Actualizar</button>
-            {admin && state.local && <button className="btn btn-sm btn-danger" onClick={() => void disconnect()}>Desconectar</button>}
+            <button className="btn btn-sm btn-danger" onClick={() => void disconnect()}>Desconectar</button>
           </div>
         </div>
         <div className="facts">

@@ -223,9 +223,6 @@ export interface Alert {
 
 export interface State {
   watches: Watch[];
-  /** La cuenta de Binance conectada es mía (es personal: solo la ve quien la conectó). */
-  account_mine?: boolean;
-  account_owner?: string | null;
   boot: number;
   now: number;
   settings: Settings;
@@ -235,8 +232,11 @@ export interface State {
   p2p: P2PState | null;
   account: AccountState | null;
   opps: Opportunity[];
+  /** Tengo MI cuenta de Binance conectada (cada usuario conecta la suya; nadie ve la de otro). */
   connected: boolean;
   key_hint: string | null;
+  /** Desde aquí se pueden ingresar llaves: el PC del panel, o el servidor con HTTPS. */
+  can_connect: boolean;
   local: boolean;
   team: boolean;
   user: User;
@@ -307,4 +307,28 @@ export interface JournalEntry {
   received: number;
   estimated: number | null;
   note: string | null;
+}
+
+// ---------------------------------------------------------------- chat del equipo
+
+/** to = null: canal general; si no, mensaje privado. */
+export interface ChatMessage {
+  id: number;
+  t: number;
+  from: string;
+  to: string | null;
+  body: string;
+}
+
+export interface ChatUser {
+  name: string;
+  role: "admin" | "user";
+  online: boolean;
+}
+
+/** channels[""] es el canal general; las demás llaves son el otro usuario del privado. */
+export interface ChatSummary {
+  me: string;
+  users: ChatUser[];
+  channels: Record<string, { last: ChatMessage; unread: number }>;
 }

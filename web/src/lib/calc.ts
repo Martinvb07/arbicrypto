@@ -38,7 +38,8 @@ export function roundTrip(s: State, asset: string): number | null {
   const buy = bestAd(s, asset, "BUY")?.price;
   const sell = bestAd(s, asset, "SELL")?.price;
   if (!buy || !sell) return null;
-  return perDollar(afterGmf(sell / buy - 1, s), s);
+  const keep = 1 - (s.p2p_fee ?? 0); // comisión P2P al comprar y al vender
+  return perDollar(afterGmf((sell * keep * keep) / buy - 1, s), s);
 }
 
 /** Serie de precios de una cripto (el 4x1000 no cambia el precio, solo la ganancia). */

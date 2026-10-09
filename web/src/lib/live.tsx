@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "./api";
+import { refreshChat } from "./chat";
 import { isMine } from "./calc";
 import type { Alert, HistPoint, Settings, State } from "./types";
 
@@ -73,6 +74,7 @@ interface Live {
   setPrefs: (p: Partial<Prefs>) => void;
   refresh: () => void;
   toast: (title: string, body?: string, tone?: Tone, ms?: number) => void;
+  beep: (kind?: string) => void;
   unread: number;
   clearUnread: () => void;
   saveSettings: (p: Partial<Settings>) => Promise<boolean>;
@@ -261,11 +263,19 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   // Tiempo real: el servidor avisa por SSE cada vez que termina un escaneo o hay una alerta
   useEffect(() => {
     refresh();
+    refreshChat();
     const es = new EventSource("/api/events");
-    es.onmessage = () => refresh();
-    es.onopen = () => refresh();
+    // el chat solo recarga el chat: no hace falta volver a pedir todo el panel
+    es.onmessage = (e: MessageEvent<string>) => (e.data === "chat" || e.data === "presence" ? refreshChat(e.data === "chat") : refresh());
+    es.onopen = () => {
+      refresh();
+      refreshChat(true);
+    };
     es.onerror = () => setOffline(true);
-    const poll = setInterval(refresh, 15000);
+    const poll = setInterval(() => {
+      refresh();
+      refreshChat();
+    }, 15000);
     const onVisible = () => {
       if (!document.hidden) setUnread(0);
     };
@@ -320,6 +330,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     setPrefs,
     refresh,
     toast,
+    beep,
     unread,
     clearUnread: () => setUnread(0),
     saveSettings,

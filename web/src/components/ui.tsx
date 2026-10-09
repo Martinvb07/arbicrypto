@@ -19,6 +19,9 @@ import {
   Info,
   BadgeCheck,
   CreditCard,
+  MessageCircle,
+  SendHorizontal,
+  ArrowLeft,
   type LucideIcon,
 } from "lucide-react";
 import { ago, pct, perUsd, tone } from "@/lib/format";
@@ -90,6 +93,9 @@ const ICONS = {
   info: Info,
   badgeCheck: BadgeCheck,
   card: CreditCard,
+  chat: MessageCircle,
+  send: SendHorizontal,
+  back: ArrowLeft,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

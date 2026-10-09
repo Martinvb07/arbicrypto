@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Header, Nav, TABS, type TabId } from "@/components/Header";
 import { Logo } from "@/components/ui";
 import { Account } from "@/components/tabs/Account";
+import { Chat, ChatWatcher } from "@/components/tabs/Chat";
 import { History } from "@/components/tabs/History";
 import { Home } from "@/components/tabs/Home";
 import { Journal } from "@/components/tabs/Journal";
@@ -54,6 +55,7 @@ function App() {
   return (
     <>
       <ConfirmHost />
+      <ChatWatcher active={tab === "chat"} onOpen={() => go("chat")} />
       <Header onTab={go} />
       <Nav tab={tab} onTab={go} />
       <main className="wrap">
@@ -63,6 +65,7 @@ function App() {
         {tab === "mercado" && <Market />}
         {tab === "historial" && <History />}
         {tab === "bitacora" && <Journal />}
+        {tab === "chat" && <Chat />}
         {tab === "cuenta" && <Account />}
         {tab === "equipo" && <Team />}
       </main>

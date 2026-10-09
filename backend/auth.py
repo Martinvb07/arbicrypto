@@ -16,7 +16,6 @@ from storage import Store
 from storage import from_env as storage_from_env
 
 ITERATIONS = 600_000  # recomendacion OWASP para PBKDF2-SHA256
-LEGACY_ITERATIONS = 240_000
 SESSION_DAYS = 30
 INVITE_DAYS = 7
 MAX_FAILS = 8
@@ -92,7 +91,7 @@ class Auth:
         if not user:
             _hash_password(password, "00" * 16)  # tarda lo mismo exista o no el usuario
             return False
-        return hmac.compare_digest(user["hash"], _hash_password(password, user["salt"], user.get("iter", LEGACY_ITERATIONS)))
+        return hmac.compare_digest(user["hash"], _hash_password(password, user["salt"], user["iter"]))
 
     def set_password(self, username, password):
         self.check_password(password)
@@ -207,7 +206,7 @@ class Auth:
         self.fails.pop(ip, None)
         if self.redis is not None:
             self.redis.clear_fails(ip)
-        if self.users[username].get("iter", LEGACY_ITERATIONS) < ITERATIONS:
+        if self.users[username]["iter"] < ITERATIONS:
             self._upgrade_hash(username, password)
         return self._new_session(username)
 

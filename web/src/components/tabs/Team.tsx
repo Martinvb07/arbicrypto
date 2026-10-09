@@ -172,7 +172,7 @@ export function Team() {
           </div>
         )}
         {!state.team && (
-          <p className="sub" style={{ marginTop: 10 }}>Para que entren desde otros celulares o PCs, abre el panel con <b>iniciar_equipo.bat</b>.</p>
+          <p className="sub" style={{ marginTop: 10 }}>Para que entren desde otros celulares o PCs, enciende el panel en modo equipo: <b>pm2 start deploy/ecosystem.config.js --env equipo</b>.</p>
         )}
       </div>
 
