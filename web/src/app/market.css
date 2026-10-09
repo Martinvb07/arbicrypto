@@ -1,0 +1,191 @@
+/* ---------------------------------------------------------------- precios P2P (pestaña #mercado) */
+.mkt { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.mkt > * { min-width: 0; }
+.mkt h2 { font-size: 18px; }
+.mkt-sec-head, .mkt-top-row { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
+.mkt-sec-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.mkt-sec-title .sec-ico { width: 40px; height: 40px; border-radius: 12px; }
+.mkt-sec-title .sub { margin-top: 2px; }
+
+/* cabecera: título, capital y monedas */
+.mkt-top { display: grid; gap: 18px; padding-bottom: 16px;
+  background: radial-gradient(520px 160px at 0 0, var(--brand-soft), transparent 70%), var(--surface); }
+.mkt-tools { gap: 10px; }
+.mkt-tools .inline-field input { height: 38px; width: 136px; border-radius: 10px; font-size: 14px; }
+.mkt-tools .toggle { height: 38px; padding: 0 12px 0 7px; font-size: 13.5px; }
+
+.mkt-coins { position: relative; margin: 0 -4px; }
+.mkt-coins::before, .mkt-coins::after { content: ""; position: absolute; top: 0; bottom: 0; width: 36px; pointer-events: none; z-index: 1;
+  opacity: 0; transition: opacity .2s ease; }
+.mkt-coins::before { left: 0; background: linear-gradient(90deg, var(--surface), transparent); }
+.mkt-coins::after { right: 0; background: linear-gradient(270deg, var(--surface), transparent); }
+.mkt-coins.fade-l::before, .mkt-coins.fade-r::after { opacity: 1; }
+.mkt-coins-in { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 4px; scroll-snap-type: x proximity; scroll-padding: 0 24px; }
+.mkt-coins-in::-webkit-scrollbar { display: none; }
+.mkt-coin { flex: none; scroll-snap-align: start; display: inline-flex; align-items: center; gap: 10px; min-height: 52px; padding: 7px 16px 7px 9px;
+  border-radius: 14px; border: 1px solid var(--border-2); background: var(--surface); color: var(--text); cursor: pointer; text-align: left;
+  transition: border-color .18s, background-color .18s, box-shadow .18s, transform .18s; }
+.mkt-coin:hover { border-color: color-mix(in srgb, var(--brand) 45%, var(--border-2)); transform: translateY(-1px); }
+.mkt-coin:active { transform: translateY(0) scale(.98); }
+.mkt-coin:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.mkt-coin.on { border-color: var(--brand); background: linear-gradient(180deg, var(--brand-soft), transparent 140%);
+  box-shadow: 0 0 0 3px var(--brand-soft), 0 6px 16px rgba(240, 180, 41, .12); }
+.mkt-coin .coin { width: 26px; height: 26px; }
+.mkt-coin-txt { display: grid; line-height: 1.2; }
+.mkt-coin-txt b { font-size: 14.5px; font-weight: 720; }
+.mkt-coin-txt small { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.mkt-coin.on .mkt-coin-txt small { color: var(--brand-text); }
+
+/* indicadores */
+.mkt-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.mkt-kpi { position: relative; display: grid; gap: 6px; align-content: start; min-width: 0; padding: 16px 18px; border-radius: 16px; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); --k: var(--muted); --k-soft: var(--surface-3);
+  animation: card-in .45s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 60ms); transition: border-color .2s, transform .2s; }
+.mkt-kpi:hover { border-color: var(--border-2); transform: translateY(-1px); }
+.mkt-kpi::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--k); opacity: .85; }
+.mkt-kpi.buy { --k: var(--s1); --k-soft: color-mix(in srgb, var(--s1) 14%, transparent); }
+.mkt-kpi.sell { --k: var(--s2); --k-soft: color-mix(in srgb, var(--s2) 14%, transparent); }
+.mkt-kpi.rt.up { --k: var(--up); --k-soft: var(--up-soft); background: linear-gradient(150deg, var(--up-soft), var(--surface) 65%); border-color: var(--up-line); }
+.mkt-kpi.rt.down { --k: var(--down); --k-soft: var(--down-soft); }
+.mkt-kpi.ago { --k: var(--accent); --k-soft: var(--accent-soft); }
+.mkt-kpi-top { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.mkt-kpi-top small { font-size: 12.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mkt-kpi-ico { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; flex: none; background: var(--k-soft); color: var(--k); }
+.mkt-kpi-val { font-size: 24px; font-weight: 760; letter-spacing: -.02em; line-height: 1.2; font-variant-numeric: tabular-nums; min-width: 0; }
+.mkt-kpi-val .val { font-size: inherit; font-weight: inherit; white-space: normal; }
+.mkt-kpi-val .val-suffix { font-size: 12.5px; letter-spacing: 0; white-space: nowrap; }
+.mkt-kpi-hint { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mkt-kpi-hint b { color: var(--text-2); font-weight: 650; }
+.mkt-ago { display: inline-flex; align-items: center; gap: 10px; }
+.mkt-ago .pulse { color: var(--up); }
+
+/* gráfico */
+.mkt-chart { display: grid; gap: 14px; }
+.mkt-series { display: flex; flex-wrap: wrap; gap: 8px; }
+.mkt-serie { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--surface-2);
+  border: 1px solid var(--border); font-size: 13px; }
+.mkt-serie .key { background: var(--c); width: 14px; height: 4px; }
+.mkt-serie b { font-weight: 650; }
+.mkt-serie small { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.mkt-chart .chart { height: 230px; }
+.mkt-chart details.data { margin-top: 0; }
+.mkt-chart details.data summary { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; padding: 4px 0; }
+.mkt-chart details.data summary:hover { color: var(--text); }
+
+/* libro de anuncios */
+.mkt-book { display: grid; gap: 16px; }
+.mkt-book-bar { display: grid; gap: 12px; }
+.mkt-switch { display: none; }
+.mkt-switch-opt { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.mkt-legend { display: flex; gap: 8px 12px; flex-wrap: wrap; font-size: 13px; color: var(--text-2); }
+.mkt-legend > span { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+.mkt-legend b { color: var(--text); }
+.mkt .book { gap: 24px; align-items: start; }
+.mkt-col { display: grid; gap: 12px; min-width: 0; }
+.mkt-col-head { display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.mkt-col-head > div { flex: 1; min-width: 0; }
+.mkt-col-head h3 { font-size: 16px; font-weight: 680; }
+.mkt-col-head .sub { margin-top: 1px; }
+.mkt-col-ico { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none; }
+.mkt-col-ico.BUY { background: color-mix(in srgb, var(--s1) 14%, transparent); color: var(--s1); }
+.mkt-col-ico.SELL { background: color-mix(in srgb, var(--s2) 14%, transparent); color: var(--s2); }
+.mkt-count { flex: none; font-size: 12px; font-weight: 650; color: var(--text-2); padding: 4px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
+.mkt-ads { display: grid; gap: 12px; }
+.mkt .note { margin-top: 0; }
+
+/* tarjeta de anuncio */
+.mkt .ad { margin: 0; gap: 14px; padding: 16px 18px 14px 20px; border-radius: 16px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 55%, var(--surface)), var(--surface) 60%);
+  animation: card-in .42s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 45ms);
+  transition: border-color .2s, box-shadow .2s, transform .2s; }
+.mkt .ad:hover { border-color: var(--border-2); box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+.mkt .ad::before { top: 16px; bottom: 16px; width: 4px; }
+.mkt .ad.top { border-color: color-mix(in srgb, var(--up) 45%, var(--border)); box-shadow: 0 0 0 3px var(--up-soft);
+  background: linear-gradient(180deg, var(--up-soft), var(--surface) 55%); }
+.mkt .ad.top:hover { box-shadow: 0 0 0 3px var(--up-soft), var(--shadow-lg); }
+.mkt .ad-head { gap: 8px 12px; }
+.mkt .ad-avatar { position: relative; width: 36px; height: 36px; font-size: 15px; }
+.ad-avatar-badge { position: absolute; right: -4px; bottom: -4px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface); color: var(--accent); box-shadow: 0 0 0 1px var(--border); }
+.mkt .ad-who { font-size: 14.5px; }
+.mkt .ad-who a { color: var(--text); font-weight: 680; }
+.mkt .ad-who a:hover { color: var(--accent); text-decoration: none; }
+.mkt .ad-who a svg { color: var(--muted); transition: transform .18s, color .18s; }
+.mkt .ad-who a:hover svg { color: var(--accent); transform: translate(1px, -1px); }
+.mkt .verdict { font-size: 12px; padding: 4px 10px; }
+.mkt .ad-price-row { gap: 10px; }
+.mkt .ad-price { font-size: 26px; letter-spacing: -.02em; line-height: 1.1; }
+.mkt .ad-unit { font-size: 13px; }
+.mkt .ad-stats { gap: 8px; }
+.mkt .ad-stats > div { padding: 9px 11px; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--border); }
+.mkt .ad-stats dt { display: flex; align-items: center; gap: 5px; font-size: 11.5px; }
+.mkt .ad-stats dt svg { color: var(--muted); }
+.mkt .ad-stats dd { margin-top: 3px; font-size: 14px; }
+.mkt .ad-stats .warn { background: var(--down-soft); border-color: color-mix(in srgb, var(--down) 22%, transparent); }
+.mkt .ad-stats .warn dt svg { color: var(--down); }
+.mkt .ad-foot { gap: 10px 14px; padding-top: 12px; }
+.mkt .ad-limit { gap: 8px; padding: 6px 11px 6px 9px; border-radius: 11px; font-size: 13.5px; }
+.mkt .ad-limit.ok { background: var(--up-soft); color: var(--text); }
+.mkt .ad-limit.no { background: var(--warn-soft); color: var(--text-2); }
+.ad-limit-txt { display: grid; line-height: 1.25; }
+.ad-limit-txt small { font-size: 11px; font-weight: 600; color: var(--muted); }
+.mkt .ad-limit.ok .ad-limit-txt small { color: var(--up); }
+.mkt .ad-limit.no .ad-limit-txt small { color: var(--warn); }
+.mkt .ad-methods { align-items: center; gap: 6px; }
+.mkt .ad-methods > svg { color: var(--muted); }
+.mkt .ad-methods .tag { font-size: 12px; padding: 3px 9px; border-radius: 8px; }
+.mkt .empty-box { justify-content: center; }
+
+/* tablet: un lado del libro a la vez, con interruptor fijo arriba */
+@media (max-width: 1080px) {
+  .mkt-switch { display: block; position: sticky; top: 68px; z-index: 6; margin: -4px -6px 0; padding: 6px;
+    border-radius: 14px; background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px); }
+  .mkt-switch .seg { display: flex; width: 100%; }
+  .mkt-switch .seg button { flex: 1; padding: 9px 12px; font-size: 14px; }
+  .mkt-book.show-BUY .mkt-col.SELL, .mkt-book.show-SELL .mkt-col.BUY { display: none; }
+  .mkt-book-bar { order: -1; }
+  .mkt-col { animation: fade-in .2s ease-out; }
+}
+@media (max-width: 900px) {
+  .mkt-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* celular */
+@media (max-width: 640px) {
+  .mkt { gap: 14px; }
+  .mkt h2 { font-size: 17px; }
+  .mkt-top { gap: 14px; }
+  .mkt-tools { width: 100%; flex-wrap: wrap; }
+  .mkt-tools .inline-field { flex: 1 1 200px; min-width: 0; }
+  .mkt-tools .inline-field input { width: 100%; min-width: 0; }
+  .mkt-coins { margin: 0 -16px; }
+  .mkt-coins-in { padding: 4px 16px; scroll-padding: 0 16px; }
+  .mkt-coins::before, .mkt-coins::after { width: 40px; }
+  .mkt-coin { min-height: 46px; padding: 6px 14px 6px 8px; }
+  .mkt-coin-txt small { display: none; }
+  .mkt-kpis { gap: 10px; }
+  .mkt-kpi { padding: 13px 14px; border-radius: 14px; }
+  .mkt-kpi-val { font-size: 19px; }
+  .mkt-kpi-ico { width: 26px; height: 26px; border-radius: 8px; }
+  .mkt-kpi-hint { white-space: normal; font-size: 12px; }
+  .mkt-legend > span { width: 100%; align-items: flex-start; }
+  .mkt-legend .sw { margin-top: 4px; }
+  .mkt-chart .chart { height: 210px; }
+  .mkt .ad { padding: 14px 14px 12px 16px; gap: 12px; }
+  .mkt .ad-head .verdict { margin-left: 0; order: 3; }
+  .mkt .ad-price { font-size: 24px; }
+  .mkt .ad-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mkt .ad-limit { width: 100%; }
+  .mkt .ad-methods { margin-left: 0; }
+  .mkt-switch { top: 62px; }
+}
+@media (max-width: 380px) {
+  .mkt-kpi-val { font-size: 17px; }
+  .mkt-kpi-top small { white-space: normal; }
+  .mkt-col-head { flex-wrap: wrap; }
+}
+
+/* nada se sale de la tarjeta de arriba (capital, 4x1000 y el texto se acomodan) */
+.mkt-top > *, .mkt-top-row > * { min-width: 0; }
+.mkt-sec-title > div { min-width: 0; }
+.mkt-sec-title .sub { white-space: normal; }

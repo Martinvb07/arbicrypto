@@ -1,0 +1,7 @@
+fastapi==0.143.0
+uvicorn==0.54.0
+requests==2.34.2
+websocket-client==1.9.2
+PyMySQL==2.2.8
+# opcional: Redis (REDIS_URL)
+redis==8.1.0
