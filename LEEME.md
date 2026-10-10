@@ -34,7 +34,7 @@ Cada `git push` a `main` se **despliega solo en el VPS** (GitHub Actions: revisa
 - Administrador: **jesuscrypto**. Cambia la contraseña en el menú de tu usuario (arriba a la derecha) → *Cambiar contraseña*.
 - Invitar a alguien: pestaña **Equipo → Generar código** (sirve una sola vez y vence en 7 días). La persona toca *“Tengo un código de invitación”* y crea su usuario.
 - **Cada usuario pone su propio capital** (Arbitraje → Capital) y ve las rutas y avisos para su monto.
-- **Cada usuario conecta SU cuenta de Binance** en *Mi Binance* (llave de solo lectura). Solo esa persona ve sus saldos, órdenes y bitácora automática; ni los administradores las ven, y nadie puede desconectar la cuenta de otro. Si un administrador borra un usuario, su llave se borra con él.
+- **Cada usuario conecta SU cuenta de Binance** en *Mi Binance* (llave de solo lectura). Solo esa persona ve sus saldos y órdenes; ni los administradores las ven, y nadie puede desconectar la cuenta de otro. Si un administrador borra un usuario, su llave se borra con él.
 - Los administradores cambian 4x1000 y avisos, invitan gente y **cambian la contraseña de cualquier usuario** (Equipo → Contraseña).
 - ¿Olvidaste la contraseña? Apaga el panel (`pm2 stop arbicrypto`) y en la carpeta `backend` ejecuta `python auth.py` → opción 2.
 
@@ -44,7 +44,6 @@ Cada `git push` a `main` se **despliega solo en el VPS** (GitHub Actions: revisa
 - **¿Dónde vendo? (Mis monedas)**: agrega cada moneda que tienes (cuánto tienes y cuánto te costó). La lista muestra en vivo cuánto ganas o pierdes si vendes ya, a quién venderle, cuánto falta para tu meta y el paso a paso con botones a Binance. Cada moneda tiene un switch **Avisarme cuando gane** (sonido, Windows y Telegram), y se puede editar o quitar.
 - **Precios P2P**: lo que de verdad te cuesta comprar y recibes al vender con tu capital (comisión P2P y 4x1000 incluidos), gráfico del día y anuncios de cada cripto en verde (buen precio y anunciante confiable) o rojo. Si comprar y vender una cripto gana, con tu capital o con otro monto, aparece el **paso a paso** con los botones a Binance y las otras criptos que también ganan. Cada anuncio tiene su botón para comprarle o venderle (amarillo si es recomendable).
 - **Historial**: cuántas oportunidades hubo, cuánto duraron y a qué hora del día el mercado se acerca más a dar ganancia. Se llena solo mientras el panel está prendido.
-- **Bitácora**: anota tus operaciones reales (cuánto pagaste y cuánto recibiste) y compara contra lo que estimaba el panel. *Exportar a Excel* sirve como soporte (por ejemplo, para la DIAN).
 - **Mi Binance** (cada usuario, la suya): saldos y todas tus órdenes P2P guardadas (Binance solo entrega las últimas; el panel las va acumulando), con exportación a Excel.
 - **Equipo** (administrador): códigos de invitación y usuarios.
 - **Chat**: canal **General** para todo el equipo y **mensajes privados** entre dos personas (solo ellas los ven, ni siquiera el administrador). Muestra quién está conectado, cuenta los no leídos en la pestaña y avisa con sonido y notificación cuando llega un mensaje. Cada quien puede borrar sus mensajes; el administrador también puede borrar del General.

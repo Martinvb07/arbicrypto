@@ -512,11 +512,6 @@ label.chip:has(input:checked)::before { content: "✓"; font-weight: 800; color:
 .chart .bar.neg { fill: var(--down); opacity: .78; }
 .chart .bar.on { opacity: 1; filter: brightness(1.15); }
 
-/* ---------- bitacora ---------- */
-.journal-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 16px; }
-.journal-form .wide { grid-column: span 3; }
-.journal-form .login-field input { height: 40px; font-size: 14px; }
-
 /* ---------- indicadores ---------- */
 .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); display: grid; gap: 2px; min-width: 0; }
@@ -592,8 +587,6 @@ label.chip:has(input:checked)::before { content: "✓"; font-weight: 800; color:
   .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
-  .journal-form { grid-template-columns: minmax(0, 1fr); }
-  .journal-form .wide { grid-column: auto; }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid-2, .fields-2 { grid-template-columns: minmax(0, 1fr); }
   .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -299,20 +299,6 @@ export interface HourBest {
   best: number;
 }
 
-export interface JournalEntry {
-  id: number | string;
-  /** Armada sola con tus órdenes P2P de Binance (no se borra a mano). */
-  auto?: boolean;
-  user: string;
-  t: number;
-  kind: "p2p" | "spot" | "otro";
-  description: string;
-  invested: number;
-  received: number;
-  estimated: number | null;
-  note: string | null;
-}
-
 // ---------------------------------------------------------------- chat del equipo
 
 /** to = null: canal general; si no, mensaje privado. */

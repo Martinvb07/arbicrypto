@@ -7,7 +7,6 @@ import { Account } from "@/components/tabs/Account";
 import { Chat, ChatDock } from "@/components/tabs/Chat";
 import { History } from "@/components/tabs/History";
 import { Home } from "@/components/tabs/Home";
-import { Journal } from "@/components/tabs/Journal";
 import { Market } from "@/components/tabs/Market";
 import { Sell } from "@/components/tabs/Sell";
 import { Team } from "@/components/tabs/Team";
@@ -63,7 +62,6 @@ function App() {
         {tab === "vender" && <Sell />}
         {tab === "mercado" && <Market />}
         {tab === "historial" && <History />}
-        {tab === "bitacora" && <Journal />}
         {tab === "chat" && <Chat />}
         {tab === "cuenta" && <Account />}
         {tab === "equipo" && <Team />}
