@@ -41,6 +41,8 @@ class LiveBook:
             self._thread.start()
 
     def _on_open(self, ws):
+        with self._lock:  # bookTicker solo manda cambios: lo de antes de la caida puede ser viejo y no se volveria a pisar
+            self.book.clear()
         streams = [f"{s.lower()}@bookTicker" for s in self.symbols]
         for i in range(0, len(streams), CHUNK):
             ws.send(json.dumps({"method": "SUBSCRIBE", "params": streams[i:i + CHUNK], "id": i // CHUNK + 1}))
@@ -48,6 +50,9 @@ class LiveBook:
 
     def _on_message(self, _ws, raw):
         msg = json.loads(raw)
+        if msg.get("error"):  # Binance rechazo una suscripcion (par invalido, demasiados mensajes...)
+            print(f"  Precios en tiempo real: Binance respondió {msg['error']}")
+            return
         d = msg.get("data")
         if not d or "s" not in d:
             return

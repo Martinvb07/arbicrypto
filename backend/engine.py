@@ -5,7 +5,7 @@ import math
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import requests
 
@@ -15,6 +15,8 @@ MARKET = "https://data-api.binance.vision"
 P2P = "https://p2p.binance.com/bapi/c2c/v2"
 
 _local = threading.local()
+_wait = {}  # host -> (hasta cuando, HTTP 429/418): Binance pidio esperar y mientras tanto no se le consulta
+BAN_WAIT = 120  # un 418 (IP bloqueada) dura minimo 2 minutos si Binance no dice cuanto
 
 # Estimaciones conservadoras: lo que de verdad pasa al operar, no el caso perfecto
 SPOT_SLIPPAGE = 0.001  # colchon por cambio en Spot: el precio se mueve mientras haces la orden
@@ -22,14 +24,42 @@ LOT = {}  # simbolo -> (moneda base, paso minimo de cantidad): Binance redondea 
 
 
 class BinanceError(Exception):
-    pass
+    """code: codigo de error de Binance (-1021, -2015...); status: HTTP; wait: segundos que pidio esperar."""
+
+    def __init__(self, msg, code=None, status=None, wait=None):
+        super().__init__(msg)
+        self.code, self.status, self.wait = code, status, wait
+
+
+class _Session(requests.Session):
+    """Respeta el "espera" de Binance (429 o 418 con Retry-After): seguir consultando durante ese tiempo
+    hace que bloquee la IP del servidor (418) por mas tiempo, hasta dias."""
+
+    def request(self, method, url, *args, **kwargs):
+        host = urlsplit(url).hostname
+        until, status = _wait.get(host, (0, None))
+        left = until - time.time()
+        if left > 0:
+            raise BinanceError(f"Binance pidió esperar {math.ceil(left)} s por demasiadas consultas (HTTP {status})",
+                               status=status, wait=left)
+        r = super().request(method, url, *args, **kwargs)
+        if r.status_code in (418, 429):
+            try:
+                retry = float(r.headers.get("Retry-After") or 0)
+            except ValueError:
+                retry = 0
+            if r.status_code == 418:
+                retry = retry or BAN_WAIT
+            if retry > 0:
+                _wait[host] = (time.time() + min(retry, 3 * 86400), r.status_code)
+        return r
 
 
 def http():
     """Una sesion HTTP por hilo (requests.Session no es segura entre hilos)."""
     s = getattr(_local, "session", None)
     if s is None:
-        s = _local.session = requests.Session()
+        s = _local.session = _Session()
         s.headers["User-Agent"] = "Mozilla/5.0 (arb-panel local)"
     return s
 
@@ -38,10 +68,14 @@ def _json(r):
     try:
         data = r.json()
     except ValueError:
-        raise BinanceError(f"respuesta invalida de Binance (HTTP {r.status_code})")
+        raise BinanceError(f"respuesta invalida de Binance (HTTP {r.status_code})", status=r.status_code)
     if not r.ok:
-        msg = (data.get("msg") or data.get("message")) if isinstance(data, dict) else None
-        raise BinanceError(f"{msg or r.text[:200]} (HTTP {r.status_code})")
+        msg = code = None
+        if isinstance(data, dict):
+            msg, code = data.get("msg") or data.get("message"), data.get("code")
+        wait = _wait.get(urlsplit(r.url or "").hostname, (0,))[0] - time.time()
+        raise BinanceError(f"{msg or r.text[:200]} (HTTP {r.status_code})", code=code, status=r.status_code,
+                           wait=wait if wait > 0 else None)
     return data
 
 
@@ -248,6 +282,11 @@ def p2p_pay_methods(fiat):
     return [{"id": m["identifier"], "name": m.get("tradeMethodName") or m["identifier"]} for m in methods]
 
 
+# Hilos fijos para P2P: cada uno conserva su sesion y su conexion abierta con Binance. Con un grupo nuevo en cada
+# escaneo (cada segundo) se abrian conexiones nuevas todo el tiempo, y Binance frena antes a quien hace eso.
+_p2p_pool = ThreadPoolExecutor(8, thread_name_prefix="p2p")
+
+
 def p2p_market(assets, fiat, amount, pay_types, merchant, min_orders, min_finish):
     def run(job):
         asset, side = job
@@ -260,12 +299,11 @@ def p2p_market(assets, fiat, amount, pay_types, merchant, min_orders, min_finish
 
     market = {a: {"BUY": [], "SELL": [], "top": {}} for a in assets}
     errors = []
-    with ThreadPoolExecutor(8) as pool:
-        for (asset, side), ads, top, err in pool.map(run, [(a, s) for a in assets for s in ("BUY", "SELL")]):
-            market[asset][side] = ads
-            market[asset]["top"][side] = top
-            if err:
-                errors.append(err)
+    for (asset, side), ads, top, err in _p2p_pool.map(run, [(a, s) for a in assets for s in ("BUY", "SELL")]):
+        market[asset][side] = ads
+        market[asset]["top"][side] = top
+        if err:
+            errors.append(err)
     return market, errors
 
 
@@ -429,6 +467,17 @@ def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, mi
 
 # ---------------------------------------------------------------- cuenta (solo lectura)
 
+# Permisos de GET /sapi/v1/account/apiRestrictions que dejan a la llave hacer algo mas que leer
+RISKY = (("enableWithdrawals", "retiros"), ("enableSpotAndMarginTrading", "trading"), ("enableMargin", "margen"),
+         ("enableFutures", "futuros"), ("enableVanillaOptions", "opciones"),
+         ("enablePortfolioMarginTrading", "margen de portafolio"), ("enableFixApiTrade", "trading por FIX"),
+         ("enableInternalTransfer", "transferencias"), ("permitsUniversalTransfer", "transferencias"))
+
+
+def risky_permissions(perms):
+    return sorted({name for flag, name in RISKY if perms.get(flag)})
+
+
 class Account:
     def __init__(self, key, secret):
         self.key, self.secret = key.strip(), secret.strip()
@@ -440,16 +489,24 @@ class Account:
     def _timestamp(self):
         # Usa la hora del servidor de Binance para evitar el error -1021 si el reloj del PC esta corrido
         if time.time() - self._synced > 600:
+            sent = time.time()
             server = _json(http().get(f"{MARKET}/api/v3/time", timeout=10))["serverTime"]
-            self._offset, self._synced = server - int(time.time() * 1000), time.time()
+            now = time.time()
+            # la hora de Binance corresponde a la mitad del viaje de ida y vuelta
+            self._offset, self._synced = server - int((sent + now) / 2 * 1000), now
         return int(time.time() * 1000) + self._offset
 
     def call(self, method, path, **params):
-        params.update(recvWindow=10000, timestamp=self._timestamp())
-        query = urlencode(params)
-        sig = hmac.new(self.secret.encode(), query.encode(), hashlib.sha256).hexdigest()
-        return _json(http().request(method, f"{API}{path}?{query}&signature={sig}",
-                                    headers={"X-MBX-APIKEY": self.key}, timeout=15))
+        for attempt in (1, 2):
+            query = urlencode({**params, "recvWindow": 10000, "timestamp": self._timestamp()})
+            sig = hmac.new(self.secret.encode(), query.encode(), hashlib.sha256).hexdigest()
+            try:
+                return _json(http().request(method, f"{API}{path}?{query}&signature={sig}",
+                                            headers={"X-MBX-APIKEY": self.key}, timeout=15))
+            except BinanceError as e:
+                if e.code != -1021 or attempt == 2:
+                    raise
+                self._synced = 0  # el reloj del PC cambio (-1021): se toma otra vez la hora de Binance y se reintenta
 
     def permissions(self):
         return self.call("GET", "/sapi/v1/account/apiRestrictions")
@@ -473,17 +530,23 @@ class Account:
         acc = self.call("GET", "/api/v3/account", omitZeroBalances="true")
         spot = {b["asset"]: float(b["free"]) + float(b["locked"]) for b in acc["balances"]}
         notes = []
+        risky = risky_permissions(perms)
+        if risky:  # se conecto de solo lectura y despues le activaron mas permisos en Binance
+            notes.append(f"Tu llave ahora tiene permisos de {', '.join(risky)}. Quítalos en Binance (Gestión de API) "
+                         "y deja solo 'Habilitar lectura'.")
         try:
             funding = {f["asset"]: float(f["free"]) + float(f["locked"]) + float(f.get("freeze") or 0)
                        for f in self.call("POST", "/sapi/v1/asset/get-funding-asset")}
-        except BinanceError as e:
+        except (BinanceError, requests.RequestException) as e:
             funding = {}
             notes.append(f"Billetera de fondos no disponible: {e}")
         orders = []
         for side in ("BUY", "SELL"):
             try:
                 res = self.call("GET", "/sapi/v1/c2c/orderMatch/listUserOrderHistory", tradeType=side, rows=30)
-            except BinanceError as e:
+                if res.get("success") is False or res.get("code") not in (None, "000000"):
+                    raise BinanceError(res.get("message") or res.get("code") or "respuesta sin datos")
+            except (BinanceError, requests.RequestException) as e:
                 notes.append(f"Historial P2P no disponible: {e}")
                 break
             for o in res.get("data") or []:
