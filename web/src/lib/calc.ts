@@ -114,3 +114,48 @@ export function bestDeal(s: State, asset: string): Deal | null {
   }
   return best;
 }
+
+// ---------------------------------------------------------------- simular tus propios anuncios
+
+/** Comisión de anunciante de referencia mientras no tengas órdenes como anunciante (cámbiala por la tuya). */
+export const MAKER_FEE_REF = 0.0025;
+
+/** El anuncio acepta ese monto en pesos y tiene esa cripto disponible. */
+export const fitsAd = (ad: Ad, fiat: number, crypto: number) => ad.min <= fiat && fiat <= ad.max && (!ad.available || ad.available >= crypto);
+
+/** Puesto que tendría tu anuncio entre los que ya hay. BUY: tu anuncio compra y compite con los que compran (gana el más alto).
+ *  SELL: tu anuncio vende y compite con los que venden (gana el más bajo). */
+export function adRank(rivals: Ad[], price: number, side: Side) {
+  const better = (a: Ad) => (side === "BUY" ? a.price > price : a.price < price);
+  return { pos: rivals.filter(better).length + 1, ties: rivals.filter((a) => a.price === price).length, of: rivals.length };
+}
+
+export interface AdSimResult {
+  /** Cripto que te llega al comprar, ya sin la comisión. */
+  qty: number;
+  /** Pesos que recibes al vender, ya sin la comisión. */
+  received: number;
+  gmf: number;
+  /** Comisiones de compra y venta, en pesos. */
+  fees: number;
+  profit: number;
+  ratio: number;
+  /** Precio mínimo de venta para no perder, con tu precio de compra. */
+  breakevenSell: number;
+  /** Precio máximo de compra para no perder, con tu precio de venta. */
+  breakevenBuy: number;
+}
+
+/** Comprar cripto por `amount` pesos a `buy` y venderla a `sell`. Cada lado con su comisión: la de anunciante si es tu anuncio,
+ *  la P2P normal si tomas el de otro. El 4x1000 se paga sobre lo que le pagas al vendedor. */
+export function simulateAds(amount: number, buy: number, sell: number, buyFee: number, sellFee: number, gmf: number): AdSimResult {
+  const qty = (amount / buy) * (1 - buyFee);
+  const received = qty * sell * (1 - sellFee);
+  const g = amount * gmf;
+  const profit = received - amount - g;
+  return {
+    qty, received, gmf: g, fees: (amount / buy) * sell - received, profit, ratio: profit / amount,
+    breakevenSell: (amount + g) / (qty * (1 - sellFee)),
+    breakevenBuy: (sell * (1 - buyFee) * (1 - sellFee)) / (1 + gmf),
+  };
+}

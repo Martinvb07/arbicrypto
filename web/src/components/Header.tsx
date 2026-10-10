@@ -8,12 +8,13 @@ import { useLive } from "@/lib/live";
 import { Menu, Modal, Sheet } from "./overlay";
 import { Ago, Brand, Icon, PasswordInput, useThumb, type IconName } from "./ui";
 
-export type TabId = "inicio" | "vender" | "mercado" | "historial" | "chat" | "cuenta" | "equipo";
+export type TabId = "inicio" | "vender" | "mercado" | "anuncios" | "historial" | "chat" | "cuenta" | "equipo";
 
 export const TABS: { id: TabId; label: string; icon: IconName; admin?: boolean }[] = [
   { id: "inicio", label: "Arbitraje", icon: "bolt" },
   { id: "vender", label: "¿Dónde vendo?", icon: "target" },
   { id: "mercado", label: "Precios P2P", icon: "chart" },
+  { id: "anuncios", label: "Simular anuncios", icon: "megaphone" },
   { id: "historial", label: "Historial", icon: "clock" },
   { id: "chat", label: "Chat", icon: "chat" },
   { id: "cuenta", label: "Mi Binance", icon: "wallet" },

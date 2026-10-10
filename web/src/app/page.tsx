@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Header, Nav, TABS, type TabId } from "@/components/Header";
 import { Logo } from "@/components/ui";
 import { Account } from "@/components/tabs/Account";
+import { AdSim } from "@/components/tabs/AdSim";
 import { Chat, ChatDock } from "@/components/tabs/Chat";
 import { History } from "@/components/tabs/History";
 import { Home } from "@/components/tabs/Home";
@@ -61,6 +62,7 @@ function App() {
         {tab === "inicio" && <Home onTab={go} />}
         {tab === "vender" && <Sell />}
         {tab === "mercado" && <Market />}
+        {tab === "anuncios" && <AdSim />}
         {tab === "historial" && <History />}
         {tab === "chat" && <Chat />}
         {tab === "cuenta" && <Account />}

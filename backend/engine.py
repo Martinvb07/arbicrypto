@@ -555,7 +555,8 @@ class Account:
                                "price": float(o.get("unitPrice") or 0), "total": float(o.get("totalPrice") or 0),
                                "status": o.get("orderStatus"), "time": int(o.get("createTime") or 0),
                                "counterpart": o.get("counterPartNickName"),
-                               "commission": float(o.get("commission") or 0)})
+                               "commission": float(o.get("commission") or 0),
+                               "role": o.get("advertisementRole")})  # MAKER: era tu anuncio; TAKER: tomaste uno
         orders.sort(key=lambda o: -o["time"])
         rates = acc.get("commissionRates") or {}
         return {
