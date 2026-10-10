@@ -318,10 +318,18 @@ def sync_alerts(group, current, **extra):
 
 def p2p_fee():
     """Comision P2P real segun las ordenes completadas de todas las cuentas conectadas
-    (Binance casi nunca cobra al que toma un anuncio)."""
+    (Binance casi nunca cobra al que toma un anuncio). Las ordenes de anuncios propios no cuentan: pagan otra comision."""
     rates = sorted(o["commission"] / o["amount"] for snap in list(acc_state.values()) for o in snap.get("orders", [])
-                   if o.get("status") == "COMPLETED" and o.get("amount") and o.get("commission"))
+                   if o.get("status") == "COMPLETED" and o.get("amount") and o.get("commission") and o.get("role") != "MAKER")
     return min(rates[len(rates) // 2], 0.01) if rates else 0.0
+
+
+def maker_fee(user):
+    """Comision que le cobra Binance a un usuario por sus propios anuncios, segun sus ordenes completadas como
+    anunciante. None si no tiene: el simulador de anuncios usa una de referencia."""
+    rates = sorted(o["commission"] / o["amount"] for o in (acc_state.get(user) or {}).get("orders", [])
+                   if o.get("role") == "MAKER" and o.get("status") == "COMPLETED" and o.get("amount"))
+    return min(rates[len(rates) // 2], 0.02) if rates else None
 
 
 STD_FEE = 0.001  # comision Spot estandar de Binance (0,1 %): la mas alta, asi el calculo nunca promete de mas
@@ -1166,7 +1174,7 @@ def api_state():
             p2p = {**p2p, "routes": (mine or {}).get("routes", []), "conversions": (mine or {}).get("conversions")}
         return jsonify({
             "boot": BOOT, "now": time.time(), "settings": public_settings(g.user), "fee": current_fee(), "p2p_fee": p2p_fee(),
-            "spot": state["spot"], "p2p": p2p, "account": account_view(name),
+            "maker_fee": maker_fee(name), "spot": state["spot"], "p2p": p2p, "account": account_view(name),
             "opps": sorted([o for o in (mine or {}).get("found", []) + opps["spot"] if o["per_usd"] >= me["min_per_usd"]],
                            key=lambda o: -o["per_usd"]),
             "connected": name in accounts, "key_hint": accounts[name].hint() if name in accounts else None,

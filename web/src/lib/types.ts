@@ -124,6 +124,8 @@ export interface Order {
   status: string;
   time: number;
   counterpart: string | null;
+  /** MAKER: la orden salió de tu propio anuncio; TAKER: tomaste el anuncio de otro. */
+  role?: "MAKER" | "TAKER" | null;
 }
 
 /** Una forma de pasar tu cripto a pesos: (cambio en Spot) + venta P2P al mejor comprador que acepta el monto. */
@@ -232,6 +234,8 @@ export interface State {
   settings: Settings;
   fee: number;
   p2p_fee: number;
+  /** Lo que Binance te cobra por tus propios anuncios, sacado de tus órdenes como anunciante (null si no tienes). */
+  maker_fee: number | null;
   spot: SpotState | null;
   p2p: P2PState | null;
   account: AccountState | null;

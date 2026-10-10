@@ -33,7 +33,7 @@ const every = (sec: number) => (sec >= 60 ? `${num(sec / 60, sec % 60 ? 1 : 0)} 
 // ---------------------------------------------------------------- selector de moneda
 
 /** Fichas de monedas que se deslizan de lado en celular; los bordes se difuminan cuando hay más. */
-function CoinPicker({ assets, value, onChange }: { assets: string[]; value: string; onChange: (a: string) => void }) {
+export function CoinPicker({ assets, value, onChange }: { assets: string[]; value: string; onChange: (a: string) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const [fade, setFade] = useState({ l: false, r: false });
 
