@@ -117,8 +117,13 @@ export function bestDeal(s: State, asset: string): Deal | null {
 
 // ---------------------------------------------------------------- simular tus propios anuncios
 
-/** Comisión de anunciante de referencia mientras no tengas órdenes como anunciante (cámbiala por la tuya). */
-export const MAKER_FEE_REF = 0.0025;
+/** Comisión de anunciante sin ser comerciante verificado: Binance cobra de 0 % a 0,35 % según la moneda (los comerciantes
+ *  pagan 20 % menos). Se usa la más alta mientras no tengas órdenes como anunciante: así nunca promete de más. */
+export const MAKER_FEE_REF = 0.0035;
+
+/** Impuesto de renta sobre la ganancia: hacer trading seguido es renta ordinaria (tabla del 0 % al 39 % según lo que ganes
+ *  en el año). 19 % es el primer tramo que paga. */
+export const INCOME_TAX_REF = 0.19;
 
 /** El anuncio acepta ese monto en pesos y tiene esa cripto disponible. */
 export const fitsAd = (ad: Ad, fiat: number, crypto: number) => ad.min <= fiat && fiat <= ad.max && (!ad.available || ad.available >= crypto);
@@ -138,7 +143,13 @@ export interface AdSimResult {
   gmf: number;
   /** Comisiones de compra y venta, en pesos. */
   fees: number;
+  /** Ganancia antes del impuesto de renta. */
   profit: number;
+  /** Impuesto de renta sobre la ganancia (0 si pierdes). */
+  tax: number;
+  /** Lo que te queda: ganancia menos el impuesto de renta. */
+  net: number;
+  /** net / amount */
   ratio: number;
   /** Precio mínimo de venta para no perder, con tu precio de compra. */
   breakevenSell: number;
@@ -147,14 +158,15 @@ export interface AdSimResult {
 }
 
 /** Comprar cripto por `amount` pesos a `buy` y venderla a `sell`. Cada lado con su comisión: la de anunciante si es tu anuncio,
- *  la P2P normal si tomas el de otro. El 4x1000 se paga sobre lo que le pagas al vendedor. */
-export function simulateAds(amount: number, buy: number, sell: number, buyFee: number, sellFee: number, gmf: number): AdSimResult {
+ *  la P2P normal si tomas el de otro. El 4x1000 se paga sobre lo que le pagas al vendedor y la renta sobre la ganancia. */
+export function simulateAds(amount: number, buy: number, sell: number, buyFee: number, sellFee: number, gmf: number, incomeTax = 0): AdSimResult {
   const qty = (amount / buy) * (1 - buyFee);
   const received = qty * sell * (1 - sellFee);
   const g = amount * gmf;
   const profit = received - amount - g;
+  const tax = Math.max(profit, 0) * incomeTax;
   return {
-    qty, received, gmf: g, fees: (amount / buy) * sell - received, profit, ratio: profit / amount,
+    qty, received, gmf: g, fees: (amount / buy) * sell - received, profit, tax, net: profit - tax, ratio: (profit - tax) / amount,
     breakevenSell: (amount + g) / (qty * (1 - sellFee)),
     breakevenBuy: (sell * (1 - buyFee) * (1 - sellFee)) / (1 + gmf),
   };
