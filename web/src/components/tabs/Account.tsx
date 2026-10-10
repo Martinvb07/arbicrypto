@@ -155,7 +155,7 @@ export function Account() {
 
   const a = state.account;
   const disconnect = async () => {
-    if (!(await ask({ title: "¿Desconectar tu cuenta de Binance?", body: "Se borran tus llaves guardadas. Dejarás de ver saldos, órdenes y la bitácora automática hasta que la conectes otra vez.",
+    if (!(await ask({ title: "¿Desconectar tu cuenta de Binance?", body: "Se borran tus llaves guardadas. Dejarás de ver saldos y órdenes hasta que la conectes otra vez.",
       confirm: "Desconectar", tone: "danger", icon: "key" }))) return;
     try {
       await api.disconnect();

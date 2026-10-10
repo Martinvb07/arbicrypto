@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatSummary, ExitResult, HistPoint, HourBest, Invite, JournalEntry, Order, PastOpp, Settings, State, TeamUser } from "./types";
+import type { ChatMessage, ChatSummary, ExitResult, HistPoint, HourBest, Invite, Order, PastOpp, Settings, State, TeamUser } from "./types";
 
 async function getJson<T>(url: string): Promise<T> {
   const r = await fetch(url, { cache: "no-store" });
@@ -44,9 +44,6 @@ export const api = {
   tgDetect: () => post<{ ok: boolean; chat: string }>("/api/telegram/detect"),
   tgDisconnect: () => post("/api/telegram/disconnect"),
   stats: (days: number) => getJson<{ opps: PastOpp[]; hours: HourBest[]; days: number }>(`/api/history/stats?days=${days}`),
-  journal: () => getJson<{ entries: JournalEntry[] }>("/api/journal"),
-  addJournal: (e: Omit<JournalEntry, "id" | "user">) => post<{ ok: boolean; id: number }>("/api/journal", e),
-  deleteJournal: (id: number) => post("/api/journal/delete", { id }),
   orders: () => getJson<{ orders: Order[] }>("/api/orders"),
   exit: (asset: string, qty: number, cost: number) => post<ExitResult>("/api/exit", { asset, qty, cost }),
   addWatch: (asset: string, qty: number, cost: number, target: number, alert = true) =>

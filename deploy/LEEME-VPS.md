@@ -4,7 +4,7 @@ Cómo queda montado:
 
 ```
 Internet ──HTTPS──► nginx (443) ──► ArbiCrypto en 127.0.0.1:8787 (FastAPI + uvicorn, lo mantiene PM2)
-                                        ├─ MySQL   (usuarios, monedas, bitácora, historial…)
+                                        ├─ MySQL   (usuarios, monedas, historial…)
                                         └─ Redis   (opcional: eventos en vivo y límite de intentos de login)
 ```
 
@@ -95,7 +95,7 @@ npm run build          # genera web/out, que sirve el backend
 ## 6. Tus datos
 
 - **Empezar de cero:** crea el administrador con `cd /opt/arbicrypto/backend && .venv/bin/python auth.py` (opción 1).
-- **Traer lo que ya tienes:** copia tu carpeta `backend/data/` del PC al VPS (misma ruta) y la línea `APP_SECRET` de tu `.env`. La primera vez que el panel arranca con MySQL vacío, copia solo todo (usuarios, llaves cifradas, monedas, bitácora, historial, avisos y órdenes). No borra nada de `data/`.
+- **Traer lo que ya tienes:** copia tu carpeta `backend/data/` del PC al VPS (misma ruta) y la línea `APP_SECRET` de tu `.env`. La primera vez que el panel arranca con MySQL vacío, copia solo todo (usuarios, llaves cifradas, monedas, historial, avisos y órdenes). No borra nada de `data/`.
 
 ## 7. Encenderlo con PM2
 

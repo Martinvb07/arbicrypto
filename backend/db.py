@@ -164,23 +164,6 @@ class DB:
                 r["audience"] = None
         return rows
 
-    # ------------------------------------------------------------ bitacora
-
-    def add_journal(self, user, t, kind, description, invested, received, estimated, note):
-        return self._run(
-            'INSERT INTO journal ("user", t, kind, description, invested, received, estimated, note, created) '
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (user, t, kind, description, invested, received, estimated, note, time.time()),
-            returning=True)
-
-    def journal(self, user=None):
-        if user:
-            return self._all('SELECT * FROM journal WHERE "user" = ? ORDER BY t DESC', (user,))
-        return self._all("SELECT * FROM journal ORDER BY t DESC")
-
-    def journal_entry(self, entry_id):
-        rows = self._all("SELECT * FROM journal WHERE id = ?", (entry_id,))
-        return rows[0] if rows else None
-
     def rename_user(self, old, new):
         """Todo lo del usuario pasa al nombre nuevo en una sola transaccion: o se mueve todo o nada."""
         self.sql.transaction([(q, (new, old)) for q in (
@@ -191,9 +174,6 @@ class DB:
             'UPDATE chat_reads SET "user" = ? WHERE "user" = ?',
             "UPDATE chat_reads SET peer = ? WHERE peer = ?",
         )])
-
-    def delete_journal(self, entry_id):
-        self._run("DELETE FROM journal WHERE id = ?", (entry_id,))
 
     # ------------------------------------------------------------ ordenes P2P de Binance
 

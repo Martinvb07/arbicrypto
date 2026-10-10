@@ -1406,7 +1406,7 @@ def watchdog():
                 raise_alert(f"watchdog:{key}:{now}", "system", f"El escáner de {label} volvió a funcionar", "Todo normal otra vez.")
 
 
-# ---------------------------------------------------------------- historial, bitacora y exportaciones
+# ---------------------------------------------------------------- historial y exportaciones
 
 def csv_response(text, filename):
     return Response(text, mimetype="text/csv", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
@@ -1421,83 +1421,6 @@ def api_history_stats():
     days = min(max(request.args.get("days", 7, type=int), 1), 120)
     opps_rows, hours = db.stats(days)
     return jsonify(opps=opps_rows, hours=hours, days=days)
-
-
-def auto_operations(user):
-    """Bitacora automatica: arma cada operacion con las ordenes P2P completadas del usuario (compras seguidas de ventas).
-    Pagaste = suma de las compras + el 4x1000 que cobro tu banco al pagar; recibiste = suma de las ventas."""
-    done = sorted((o for o in db.orders(user) if o["status"] == "COMPLETED" and o["total"]), key=lambda o: o["time"])
-    ops, buys, sells = [], [], []
-
-    def close():
-        if buys and sells:
-            paid, got = sum(o["total"] for o in buys), sum(o["total"] for o in sells)
-            names = lambda rows: " + ".join(dict.fromkeys(f"{num(o['amount'], 2 if o['amount'] >= 1 else 8)} {o['asset']}" for o in rows))
-            ops.append({"id": "auto:" + str(buys[0]["id"]), "auto": True, "user": user, "t": buys[0]["time"] / 1000,
-                        "kind": "p2p", "description": f"Compraste {names(buys)} → vendiste {names(sells)}",
-                        "invested": paid_with_gmf(user, paid), "received": got,
-                        "estimated": None, "note": None})
-        buys.clear()
-        sells.clear()
-
-    for o in done:
-        if o["side"] == "BUY":
-            if sells:
-                close()
-            buys.append(o)
-        elif buys:
-            sells.append(o)
-    close()  # las compras sin venta todavia no son una operacion
-    return ops
-
-
-def journal_rows():
-    rows = db.journal(g.user["name"])  # privada: cada quien ve solo sus operaciones, tambien los administradores
-    # las operaciones automaticas salen de la cuenta de Binance de cada quien: solo las propias
-    return sorted(rows + auto_operations(g.user["name"]), key=lambda e: -e["t"])
-
-
-@app.get("/api/journal")
-def api_journal():
-    return jsonify(entries=journal_rows())
-
-
-@app.post("/api/journal")
-def api_journal_add():
-    b = body()
-    try:
-        invested, received = float(b.get("invested")), float(b.get("received"))
-        estimated = None if b.get("estimated") in (None, "") else float(b.get("estimated"))
-        t = float(b.get("t") or time.time())
-    except (TypeError, ValueError):
-        return jsonify(error="Revisa los montos: deben ser números."), 400
-    kind = b.get("kind") if b.get("kind") in ("p2p", "spot", "otro") else "otro"
-    description = str(b.get("description") or "").strip()[:200]
-    note = str(b.get("note") or "").strip()[:500]
-    if not description or not (0 < invested < 1e12) or not (0 <= received < 1e12) or not (0 < t < time.time() + 86400):
-        return jsonify(error="Completa la descripción y montos válidos."), 400
-    entry_id = db.add_journal(g.user["name"], t, kind, description, invested, received, estimated, note)
-    return jsonify(ok=True, id=entry_id)
-
-
-@app.post("/api/journal/delete")
-def api_journal_delete():
-    entry = db.journal_entry(body().get("id"))
-    if not entry:
-        return jsonify(error="Esa operación no existe."), 404
-    if entry["user"] != g.user["name"]:
-        return jsonify(error="Solo puedes borrar tus propias operaciones."), 403
-    db.delete_journal(entry["id"])
-    return jsonify(ok=True)
-
-
-@app.get("/api/journal.csv")
-def api_journal_csv():
-    rows = [(local_time(e["t"]), e["user"], e["kind"], e["description"], round(e["invested"]), round(e["received"]),
-             round(e["received"] - e["invested"]), "" if e["estimated"] is None else round(e["estimated"]), e["note"] or "")
-            for e in journal_rows()]
-    return csv_response(to_csv(["Fecha", "Usuario", "Tipo", "Descripción", "Invertido COP", "Recibido COP",
-                                "Ganancia COP", "Ganancia estimada COP", "Nota"], rows), "bitacora-arbicrypto.csv")
 
 
 @app.get("/api/orders")
