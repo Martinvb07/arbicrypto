@@ -699,15 +699,38 @@ def account_step():
     publish("account")
 
 
+# Errores de Binance que tienen solucion del lado del usuario (codigos de la API de Binance)
+BINANCE_CODES = {
+    -1021: "La hora de este PC no coincide con la de Binance. Sincroniza el reloj (Windows: Configuración → Hora e idioma → "
+           "Sincronizar ahora).",
+    -1022: "La Secret Key no corresponde a la API Key. Cópialas otra vez, completas.",
+    -2014: "La API Key no tiene el formato correcto. Cópiala otra vez, completa.",
+    -2015: ("Binance no acepta la llave: puede estar borrada, sin 'Habilitar lectura' o restringida a otra IP "
+            "(en Gestión de API agrega la IP de este PC o servidor)."),
+    -1002: "La llave no tiene permiso para leer esto en Binance: revisa que tenga 'Habilitar lectura'.",
+}
+
+
 def friendly_error(e):
     msg = str(e)
-    if any(k in msg for k in ("NameResolutionError", "getaddrinfo", "Max retries", "ConnectionError", "timed out")):
+    code, status, wait = (getattr(e, k, None) for k in ("code", "status", "wait"))
+    if isinstance(e, (requests.ConnectionError, requests.Timeout)) or any(
+            k in msg for k in ("NameResolutionError", "getaddrinfo", "Max retries", "ConnectionError", "timed out")):
         return "Sin conexión con Binance (revisa el internet de este PC)"
-    if "429" in msg or "rate limit" in msg:
-        return "Binance pidió esperar por demasiadas consultas"
-    if "451" in msg or "restricted location" in msg:
+    if isinstance(code, int) and code in BINANCE_CODES:
+        return BINANCE_CODES[code]
+    later = f" Se reintenta solo en {max(1, round(wait / 60))} min." if wait and wait >= 60 else ""
+    if status == 418:
+        return "Binance bloqueó por un tiempo la IP de este servidor por demasiadas consultas." + later
+    if status == 429 or code == -1003 or "429" in msg or "rate limit" in msg:
+        return "Binance pidió esperar por demasiadas consultas." + later
+    if status == 451 or "451" in msg or "restricted location" in msg:
         return ("Binance no permite cuentas desde el país donde está el servidor (por ejemplo, EE. UU.). "
                 "Los precios siguen funcionando; para conectar cuentas el panel debe correr en un servidor de otro país.")
+    if status == 403:
+        return "El firewall de Binance frenó las consultas de este servidor (HTTP 403). Se reintenta solo."
+    if status and status >= 500:
+        return f"Binance tiene problemas en este momento (HTTP {status}). Se reintenta solo."
     return msg
 
 
@@ -1181,19 +1204,22 @@ def api_connect():
     """Cada usuario conecta SU cuenta (solo lectura); reemplaza la que tuviera antes."""
     if not can_connect():
         return jsonify(error="Por seguridad, las llaves solo se ingresan desde el PC donde corre el panel (o por HTTPS en el servidor)."), 403
-    key, secret = str(body().get("key", "")).strip(), str(body().get("secret", "")).strip()
+    # al copiar se cuelan espacios, saltos de linea o caracteres invisibles; las llaves de Binance son solo letras y numeros
+    key, secret = (re.sub(r"[\s\u200b-\u200d\u2060\ufeff]+", "", str(body().get(k, ""))) for k in ("key", "secret"))
     if not key or not secret:
         return jsonify(error="Pega la API Key y la Secret Key."), 400
+    if not re.fullmatch(r"[A-Za-z0-9]{16,256}", key) or not re.fullmatch(r"[A-Za-z0-9]{16,256}", secret):
+        return jsonify(error="La API Key y la Secret Key son solo letras y números (64 cada una). Cópialas otra vez completas; "
+                             "la llave debe ser “Generada por el sistema”."), 400
     acc = engine.Account(key, secret)
     try:
         perms = acc.permissions()
-        risky = [name for flag, name in (("enableWithdrawals", "retiros"), ("enableSpotAndMarginTrading", "trading"),
-                                         ("enableMargin", "margen"), ("enableFutures", "futuros"),
-                                         ("enableInternalTransfer", "transferencias"),
-                                         ("permitsUniversalTransfer", "transferencias")) if perms.get(flag)]
+        risky = engine.risky_permissions(perms)
         if risky:
-            return jsonify(error=f"Por seguridad solo se aceptan llaves de SOLO LECTURA. Esta tiene: {', '.join(sorted(set(risky)))}. "
+            return jsonify(error=f"Por seguridad solo se aceptan llaves de SOLO LECTURA. Esta tiene: {', '.join(risky)}. "
                                  "Crea una llave nueva marcando únicamente 'Habilitar lectura'."), 400
+        if not perms.get("enableReading"):
+            return jsonify(error="Esta llave no tiene activado 'Habilitar lectura'. Actívalo en Binance (Gestión de API)."), 400
         snap = acc.snapshot()
     except (requests.RequestException, engine.BinanceError) as e:
         msg = friendly_error(e)
