@@ -197,8 +197,9 @@ export function Header({ onTab }: { onTab: (t: TabId) => void }) {
     }
   };
   const logout = async () => {
-    await api.logout().catch(() => undefined);
-    window.location.href = "/login";
+    // en el VPS el login vive en la portada (arbicrypto.org/login)
+    const r = await api.logout().catch(() => undefined);
+    window.location.href = r?.login || "/login";
   };
 
   return (
@@ -227,6 +228,8 @@ export function Header({ onTab }: { onTab: (t: TabId) => void }) {
                       <span className="sub">{state.user.role === "admin" ? "Administrador" : "Miembro del equipo"}</span>
                     </div>
                   </div>
+                  {/* su propia wallet (wallet.arbicrypto.org), con esta misma sesión */}
+                  <button onClick={() => { close(); window.location.href = "/wallet"; }}><Icon name="wallet" size={16} /> Wallet</button>
                   <button onClick={() => { close(); photoInput.current?.click(); }}><Icon name="pencil" size={16} /> {myPhoto ? "Cambiar foto" : "Poner foto de perfil"}</button>
                   {myPhoto && <button onClick={() => { close(); void removePhoto(); }}><Icon name="trash" size={16} /> Quitar foto</button>}
                   <button onClick={() => { close(); setModal("password"); }}><Icon name="key" size={16} /> Cambiar contraseña</button>

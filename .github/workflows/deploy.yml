@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   ci:
-    name: Revisar backend e interfaz
+    name: Revisar panel y wallet (backend e interfaz)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -23,7 +23,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            wallet/backend/requirements.txt
 
       - name: Backend — dependencias, errores y arranque
         working-directory: backend
@@ -33,15 +35,32 @@ jobs:
           # importar la app crea la base (SQLite temporal) y todas las rutas: si algo esta roto, falla aqui
           python -c "import app"
 
+      - name: Wallet — dependencias, errores, pruebas y arranque
+        working-directory: wallet/backend
+        run: |
+          pip install -r requirements.txt
+          python -m pyflakes .
+          python -m unittest -v
+          python -c "import app"
+
       - name: Node 20 + caché de npm
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            wallet/web/package-lock.json
 
-      - name: Interfaz — dependencias, tipos y build
+      - name: Interfaz del panel — dependencias, tipos y build
         working-directory: web
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npm run build
+
+      - name: Interfaz de la wallet — dependencias, tipos y build
+        working-directory: wallet/web
         run: |
           npm ci
           npx tsc --noEmit
@@ -96,16 +115,19 @@ jobs:
           # Versión actual, por si hay que revertir.
           ANTERIOR="$(git rev-parse HEAD)"
 
+          # Un solo entorno de Python (backend/.venv) para el panel y la wallet.
           construir() {
-            backend/.venv/bin/pip install -q -r backend/requirements.txt
+            backend/.venv/bin/pip install -q -r backend/requirements.txt -r wallet/backend/requirements.txt
             (cd web && npm ci && npm run build)
+            (cd wallet/web && npm ci && npm run build)
           }
 
-          # Un solo proceso Python (no admite recarga sin corte): se recrea desde
-          # ecosystem.config.js para que siempre use su carpeta, Python y variables.
+          # Un proceso Python por app (no admiten recarga sin corte): se recrean desde
+          # ecosystem.config.js para que siempre usen su carpeta, Python y variables.
           recargar_pm2() {
             mkdir -p logs
             pm2 delete arbicrypto >/dev/null 2>&1 || true
+            pm2 delete arbicrypto-wallet >/dev/null 2>&1 || true
             pm2 start deploy/ecosystem.config.js
             pm2 save
           }
@@ -124,20 +146,24 @@ jobs:
 
           git fetch --prune origin
           git reset --hard "$GIT_SHA"
-          # -fd no toca archivos ignorados (backend/.env, backend/data, .venv, node_modules, web/out, logs).
+          # -fd no toca archivos ignorados (los .env, backend/data, wallet/backend/data, .venv, node_modules, out, logs).
           git clean -fd
 
           construir
           recargar_pm2
 
-          # Health check: la pagina de login del panel. Si falla, se reconstruye
-          # la versión anterior y se recarga PM2.
-          if ! verificar "http://127.0.0.1:8787/login"; then
-            echo "!! Health check fallido — registros del panel:"
-            pm2 describe arbicrypto | grep -E "status|script path|exec cwd|interpreter|restarts" || true
-            pm2 logs arbicrypto --lines 60 --nostream || true
-            echo "!! Quien usa el puerto 8787:"
-            ss -ltnp 'sport = :8787' || true
+          # Health check: la pagina de login del panel y la pagina de la wallet. Si alguna
+          # falla, se reconstruye la versión anterior y se recarga PM2.
+          fallo=""
+          verificar "http://127.0.0.1:8787/login" || fallo="arbicrypto 8787"
+          [ -z "$fallo" ] && { verificar "http://127.0.0.1:8788/" || fallo="arbicrypto-wallet 8788"; }
+          if [ -n "$fallo" ]; then
+            set -- $fallo
+            echo "!! Health check fallido ($1) — registros:"
+            pm2 describe "$1" | grep -E "status|script path|exec cwd|interpreter|restarts" || true
+            pm2 logs "$1" --lines 60 --nostream || true
+            echo "!! Quien usa el puerto $2:"
+            ss -ltnp "sport = :$2" || true
             echo "!! Revirtiendo a $ANTERIOR"
             git reset --hard "$ANTERIOR"
             git clean -fd

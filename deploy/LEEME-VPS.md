@@ -3,10 +3,19 @@
 Cómo queda montado:
 
 ```
-Internet ──HTTPS──► nginx (443) ──► ArbiCrypto en 127.0.0.1:8787 (FastAPI + uvicorn, lo mantiene PM2)
-                                        ├─ MySQL   (usuarios, monedas, historial…)
-                                        └─ Redis   (opcional: eventos en vivo y límite de intentos de login)
+Internet ──HTTPS──► nginx (443) ─┬─ arbicrypto.org        ──► Portada y login (los sirve el panel, 127.0.0.1:8787)
+                                 ├─ panel.arbicrypto.org  ──► Panel en 127.0.0.1:8787  (FastAPI + uvicorn, PM2: arbicrypto)
+                                 │                                ├─ MySQL  base arbicrypto
+                                 │                                └─ Redis  (opcional: eventos en vivo y límite de intentos de login)
+                                 └─ wallet.arbicrypto.org ──► Wallet en 127.0.0.1:8788  (FastAPI + uvicorn, PM2: arbicrypto-wallet)
+                                                                  └─ MySQL  base arbicrypto_wallet
 ```
+
+Las dos apps viven en el mismo repositorio y comparten el entorno de Python (`backend/.venv`). La wallet se configura en el paso 11.
+
+Cómo se entra: **arbicrypto.org** es la portada (sale en Google). *Iniciar sesión* lleva a **arbicrypto.org/login**, donde cada
+persona elige *Panel* o *Wallet*; después de entrar sigue a **panel.arbicrypto.org** o a **su** wallet en **wallet.arbicrypto.org**.
+Es una sola sesión para los tres dominios (cookie de `.arbicrypto.org`).
 
 > **Importante:** Binance bloquea las IPs de **Estados Unidos**. Usa un VPS en otra región (por ejemplo Brasil, Europa o Colombia).
 
@@ -67,7 +76,7 @@ mkdir -p logs
 ```bash
 cd /opt/arbicrypto/backend
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements.txt -r ../wallet/backend/requirements.txt   # panel y wallet
 ```
 
 Crea `backend/.env` con:
@@ -77,7 +86,9 @@ DATABASE_URL=mysql://arbicrypto:CLAVE-SEGURA@127.0.0.1:3306/arbicrypto
 # REDIS_URL=redis://127.0.0.1:6379/0      ← solo si instalaste Redis
 COOKIE_SECURE=1      # la sesión solo viaja por HTTPS
 REMOTE_ADMIN=1       # cada usuario conecta SU cuenta de Binance desde su navegador (por HTTPS)
+SITE_DOMAIN=arbicrypto.org   # portada y login en arbicrypto.org, panel en panel., wallet en wallet. (una sola sesión)
 # APP_SECRET=...     # lo crea el panel solo la primera vez: cifra las llaves de Binance de todos
+# SSO_SECRET=...     # lo crea el panel solo la primera vez: firma la entrada a la wallet
 ```
 
 Protégelo: `chmod 600 .env`
@@ -118,15 +129,28 @@ Debe correr **una sola copia** (ya viene así en `ecosystem.config.js`): los esc
 
 ## 8. nginx + HTTPS
 
-Necesitas un dominio apuntando a la IP del VPS (registro A).
+En tu proveedor del dominio crea cuatro registros **A** con la IP del VPS: `arbicrypto.org` (@), `www`, `panel` y `wallet`.
+
+Panel (panel.arbicrypto.org):
 
 ```bash
 sudo cp /opt/arbicrypto/deploy/nginx-arbicrypto.conf /etc/nginx/sites-available/arbicrypto
-sudo sed -i 's/TU-DOMINIO.com/tudominio.com/g' /etc/nginx/sites-available/arbicrypto
+sudo sed -i 's/TU-DOMINIO.com/panel.arbicrypto.org/g' /etc/nginx/sites-available/arbicrypto
 sudo ln -s /etc/nginx/sites-available/arbicrypto /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d tudominio.com     # certificado gratis y renovación automática
+sudo certbot --nginx -d panel.arbicrypto.org     # certificado gratis y renovación automática
 ```
+
+Portada y login (arbicrypto.org y www, los sirve el mismo panel):
+
+```bash
+sudo cp /opt/arbicrypto/deploy/nginx-sitio.conf /etc/nginx/sites-available/arbicrypto-sitio
+sudo ln -s /etc/nginx/sites-available/arbicrypto-sitio /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d arbicrypto.org -d www.arbicrypto.org
+```
+
+La wallet (wallet.arbicrypto.org) va en el paso 11.
 
 ### Imágenes del chat (si ya tenías nginx instalado)
 
@@ -159,9 +183,9 @@ Igual que en ReservaTuCancha: cada `git push` a `main` dispara **GitHub Actions*
 
 1. **CI**: instala todo, revisa errores del backend, comprueba que la app carga, revisa los tipos y compila la interfaz. Si algo falla, **no se despliega**.
 2. **Deploy**: entra al VPS por SSH, deja el código en esa versión, instala dependencias, compila la interfaz y recarga PM2.
-3. **Verificación**: espera a que `http://127.0.0.1:8787/login` responda. Si no responde, **vuelve sola a la versión anterior**.
+3. **Verificación**: espera a que `http://127.0.0.1:8787/login` (panel) y `http://127.0.0.1:8788/` (wallet) respondan. Si alguna no responde, **vuelve sola a la versión anterior**.
 
-`backend/.env`, `backend/data`, `.venv`, `node_modules` y `logs` nunca se tocan.
+`backend/.env`, `wallet/backend/.env`, `backend/data`, `wallet/backend/data`, `.venv`, `node_modules` y `logs` nunca se tocan.
 
 ### Configurarlo (una sola vez)
 
@@ -184,13 +208,60 @@ En GitHub → repositorio **arbicrypto** → *Settings → Secrets and variables
 
 Listo: el próximo push a `main` se despliega solo. También puedes lanzarlo a mano en *Actions → CI y Deploy a VPS → Run workflow*. El primer arranque (pasos 1 a 9) sí se hace a mano.
 
+## 11. La wallet (wallet.arbicrypto.org)
+
+Necesitas un registro A de `wallet.arbicrypto.org` apuntando a la IP del VPS (igual que el panel).
+
+**Base de datos** (en `sudo mysql`; el mismo usuario `arbicrypto`, otra base):
+
+```sql
+CREATE DATABASE arbicrypto_wallet CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+GRANT ALL PRIVILEGES ON arbicrypto_wallet.* TO 'arbicrypto'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+Necesita MySQL 8.0.13 o más nuevo (el de Ubuntu 22.04 y 24.04 sirve).
+
+**`wallet/backend/.env`** (`chmod 600`):
+
+```ini
+DATABASE_URL=mysql://arbicrypto:CLAVE-SEGURA@127.0.0.1:3306/arbicrypto_wallet
+COOKIE_SECURE=1                      # la sesión solo viaja por HTTPS
+ALLOWED_HOSTS=wallet.arbicrypto.org  # el dominio con el que se abre (protección contra DNS rebinding)
+# APP_SECRET=...                     # lo crea la wallet sola la primera vez: cifra las llaves de Binance
+```
+
+**Interfaz y datos:**
+
+```bash
+cd /opt/arbicrypto/wallet/web && npm ci && npm run build
+```
+
+- **Usuarios:** son los del panel. Cada uno entra a SU wallet desde el menú de su usuario → **Wallet** (sin otro login).
+  `SSO_SECRET` lo crea el panel en `backend/.env` y la wallet lo lee de ahí: no hay que configurar nada.
+- **Traer lo de tu PC:** copia `wallet/backend/data/` del PC al VPS (misma ruta) y la línea `APP_SECRET` de tu `wallet/backend/.env`.
+  La primera vez que la wallet arranca con MySQL vacío copia sola todo `wallet.db` (usuarios, movimientos, cierres, extractos, llaves cifradas).
+
+**PM2 y nginx** (el `ecosystem.config.js` ya trae las dos apps):
+
+```bash
+cd /opt/arbicrypto && pm2 start deploy/ecosystem.config.js && pm2 save
+sudo cp /opt/arbicrypto/deploy/nginx-wallet.conf /etc/nginx/sites-available/arbicrypto-wallet
+sudo ln -s /etc/nginx/sites-available/arbicrypto-wallet /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d wallet.arbicrypto.org
+```
+
+El puerto **8788 nunca se abre** a internet: solo nginx habla con la wallet.
+
 ## Copias de seguridad
 
 ```bash
-mysqldump -u arbicrypto -p arbicrypto > respaldo-$(date +%F).sql
+mysqldump -u arbicrypto -p arbicrypto > respaldo-panel-$(date +%F).sql
+mysqldump -u arbicrypto -p arbicrypto_wallet > respaldo-wallet-$(date +%F).sql
 ```
 
-Guarda también `backend/.env` en un lugar seguro: tiene `APP_SECRET` (descifra las llaves de Binance de todos) y el token de Telegram. El respaldo de MySQL trae las llaves **cifradas**: sin `APP_SECRET` no sirven.
+Guarda también `backend/.env` y `wallet/backend/.env` en un lugar seguro: tienen `APP_SECRET` (descifra las llaves de Binance de todos) y el token de Telegram. El respaldo de MySQL trae las llaves **cifradas**: sin `APP_SECRET` no sirven. Los extractos bancarios originales están en `wallet/backend/data/extractos`: cópialos también.
 
 ## En tu PC con Windows
 

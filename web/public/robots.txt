@@ -1,6 +1,10 @@
-# ArbiCrypto es un panel privado: no se indexa (ver también la etiqueta noindex en cada página).
-# /login queda accesible para que los buscadores lean ese noindex y para las vistas previas al compartir el link.
+# La portada (arbicrypto.org) sí se indexa. El panel y la wallet son privados: no se indexan
+# (ver también la cabecera X-Robots-Tag noindex que el servidor pone en todo lo que no es la portada).
 User-agent: *
+Allow: /$
+Allow: /inicio
 Allow: /login
-Allow: /brand/og.png
+Allow: /brand/
+Allow: /coins/
+Allow: /_next/
 Disallow: /

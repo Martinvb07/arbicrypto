@@ -8,6 +8,7 @@ import asyncio
 import base64
 import binascii
 import functools
+import hmac
 import html
 import logging
 import mimetypes
@@ -29,6 +30,7 @@ import storage
 from httpkit import App, Response, abort, asgi, g, jsonify, redirect, request, safe_join, send_from_directory
 
 import engine
+import sso
 from auth import Auth, AuthError
 from db import DB, to_csv
 from keys import Vault
@@ -39,7 +41,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(ROOT, "data")
 WEB_DIR = os.path.normpath(os.path.join(ROOT, "..", "web", "out"))
 ENV_FILE = os.path.join(ROOT, ".env")
-ENV_KEYS = ["APP_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT", "TELEGRAM_CHAT_ID", "TELEGRAM_CHAT_NAME"]
+ENV_KEYS = ["APP_SECRET", "SSO_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT", "TELEGRAM_CHAT_ID", "TELEGRAM_CHAT_NAME"]
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 PREFS_FILE = os.path.join(DATA_DIR, "prefs.json")  # capital de cada usuario
 HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
@@ -51,6 +53,10 @@ TEAM = "--equipo" in sys.argv or _flag("EQUIPO")  # EQUIPO=1: abierto en la red 
 HOST, PORT = ("0.0.0.0" if TEAM else os.environ.get("HOST", "127.0.0.1")), int(os.environ.get("PORT", 8787))
 SECURE_COOKIE = _flag("COOKIE_SECURE")  # VPS con HTTPS: la cookie de sesion solo viaja cifrada
 REMOTE_ADMIN = _flag("REMOTE_ADMIN")    # VPS (HTTPS): cada usuario conecta su cuenta de Binance desde su navegador
+# SITE_DOMAIN=arbicrypto.org (VPS): la portada y el login viven en arbicrypto.org, el panel en panel.arbicrypto.org y la
+# wallet en wallet.arbicrypto.org. La sesión se comparte entre los tres (cookie del dominio .arbicrypto.org).
+SITE_DOMAIN = (os.environ.get("SITE_DOMAIN") or _ENV0.get("SITE_DOMAIN", "")).strip().lower().strip(".")
+COOKIE_DOMAIN = f".{SITE_DOMAIN}" if SITE_DOMAIN else None
 LOOPBACK = ("127.0.0.1", "::1")
 COOKIE = "cj_session"
 BOOT = time.time()
@@ -121,6 +127,7 @@ chat_sent = {}  # {usuario: [momentos de sus ultimos mensajes]} para frenar el s
 
 settings = dict(DEFAULTS)
 vault = None     # llaves de Binance cifradas (se abre en main con APP_SECRET)
+sso_secret = ""  # firma los pases para entrar a la wallet sin volver a iniciar sesión (SSO_SECRET)
 accounts = {}    # {usuario: engine.Account}: cada persona conecta SU cuenta y solo ella la ve
 acc_state = {}   # {usuario: saldos, comision y ordenes de su cuenta}
 acc_errors = {}  # {usuario: {"t", "msg"}} si su cuenta no se pudo leer
@@ -891,8 +898,37 @@ def run_loop(name, step, interval):
 
 # ---------------------------------------------------------------- seguridad y sesiones
 
-PUBLIC_PATHS = {"/login", "/login.html", "/favicon.ico", "/robots.txt", "/api/auth/login", "/api/auth/register"}
+PUBLIC_PATHS = {"/login", "/login.html", "/favicon.ico", "/robots.txt", "/api/auth/login", "/api/auth/register",
+                "/inicio", "/api/public/mercado", "/api/auth/logout", "/salir",
+                "/internal/binance"}  # solo responde a la wallet de este servidor, con firma (ver internal_binance)  # cerrar sesión funciona aunque ya haya vencido
 PUBLIC_PREFIXES = ("/_next/", "/coins/", "/brand/", "/icons/")
+# Lo único que responde arbicrypto.org (la portada): el resto vive en panel.arbicrypto.org
+SITE_PATHS = PUBLIC_PATHS | {"/", "/wallet", "/panel"}
+
+
+def on_site():
+    """¿La petición llegó a la portada (arbicrypto.org o www.arbicrypto.org)?"""
+    return bool(SITE_DOMAIN) and request.host.split(":")[0].lower() in (SITE_DOMAIN, f"www.{SITE_DOMAIN}")
+
+
+def site_url(sub=""):
+    """https://arbicrypto.org, https://panel.arbicrypto.org o https://wallet.arbicrypto.org (solo con SITE_DOMAIN)."""
+    return f"https://{sub + '.' if sub else ''}{SITE_DOMAIN}"
+
+
+def login_url(goto=None):
+    """El login: en arbicrypto.org/login (VPS) o en /login de este mismo panel (PC). goto: "panel" o "wallet"."""
+    q = f"?next={goto}" if goto else ""
+    return f"{site_url()}/login{q}" if SITE_DOMAIN else f"/login{q}"
+
+
+def panel_home():
+    return f"{site_url('panel')}/" if SITE_DOMAIN else "/"
+
+
+def after_login(goto):
+    """A dónde sigue la persona después de entrar: su wallet o el panel."""
+    return "/wallet" if goto in ("wallet", "/wallet") else panel_home()
 
 
 def has_account():
@@ -925,11 +961,20 @@ def guard():
     if is_local() and request.host.split(":")[0] not in ("127.0.0.1", "localhost"):
         abort(403)  # evita ataques de DNS rebinding contra este PC
     g.user = auth.user_for(request.cookies.get(COOKIE))
-    if g.user or request.path in PUBLIC_PATHS or request.path.startswith(PUBLIC_PREFIXES):
+    path = request.path
+    if on_site() and path not in SITE_PATHS and not path.startswith(PUBLIC_PREFIXES):
+        if path.startswith("/api/"):
+            return jsonify(error="No existe."), 404
+        return redirect(panel_home().rstrip("/") + path)  # arbicrypto.org/algo-del-panel -> panel.arbicrypto.org/algo
+    # la portada: siempre en arbicrypto.org; en el panel, a quien llega sin sesión (en este PC)
+    g.landing = path == "/inicio" or (path == "/" and (on_site() or (not g.user and not SITE_DOMAIN)))
+    if path == "/login" and g.user:  # ya entró: sigue directo a donde iba
+        return redirect(after_login(request.args.get("next")))
+    if g.user or g.landing or path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
         return None
-    if request.path.startswith("/api/"):
+    if path.startswith("/api/"):
         return jsonify(error="Inicia sesión para continuar."), 401
-    return redirect("/login")
+    return redirect(login_url("wallet" if path == "/wallet" else "panel" if SITE_DOMAIN else None))
 
 
 @app.after_request
@@ -939,7 +984,8 @@ def security_headers(resp):
     resp.headers.setdefault("X-Frame-Options", "DENY")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     resp.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")  # panel privado: fuera de los buscadores
+    if not g.landing:  # la portada sí sale en los buscadores; el panel privado no
+        resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
     if request.path.startswith("/api/") and not request.path.startswith("/api/avatar/"):  # las fotos si se guardan
         resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -961,7 +1007,15 @@ def body():
 
 def with_session(token):
     resp = jsonify(ok=True)
-    resp.set_cookie(COOKIE, token, max_age=30 * 86400, httponly=True, samesite="Strict", secure=SECURE_COOKIE)
+    resp.set_cookie(COOKIE, token, max_age=30 * 86400, httponly=True, samesite="Strict", secure=SECURE_COOKIE,
+                    domain=COOKIE_DOMAIN)  # VPS: la misma sesión sirve en arbicrypto.org, panel. y wallet.
+    return resp
+
+
+def clear_session(resp):
+    resp.delete_cookie(COOKIE)
+    if COOKIE_DOMAIN:  # la del dominio compartido y la vieja, solo de panel.arbicrypto.org
+        resp.delete_cookie(COOKIE, domain=COOKIE_DOMAIN)
     return resp
 
 
@@ -987,9 +1041,15 @@ def api_register():
 @app.post("/api/auth/logout")
 def api_logout():
     auth.logout(request.cookies.get(COOKIE))
-    resp = jsonify(ok=True)
-    resp.delete_cookie(COOKIE)
-    return resp
+    return clear_session(jsonify(ok=True, login=login_url()))
+
+
+@app.get("/salir")
+def logout_page():
+    """Cerrar sesión desde la wallet: cierra también la del panel. La cookie es SameSite=Strict:
+    solo llega desde el panel o la wallet (mismo sitio), nunca desde una página ajena."""
+    auth.logout(request.cookies.get(COOKIE))
+    return clear_session(redirect(login_url()))
 
 
 @app.post("/api/auth/password")
@@ -1791,6 +1851,68 @@ def api_orders_csv():
 
 # ---------------------------------------------------------------- interfaz (Next.js exportado en web/out)
 
+def wallet_url():
+    """Dirección de la wallet: WALLET_URL de backend/.env, o la que corresponde a este panel
+    (panel.arbicrypto.org -> wallet.arbicrypto.org; en este PC, el puerto 8788)."""
+    url = (os.environ.get("WALLET_URL") or _ENV0.get("WALLET_URL", "")).strip().rstrip("/")
+    if url:
+        return url
+    if SITE_DOMAIN:
+        return site_url("wallet")
+    host = request.host.split(":")[0]
+    if host.startswith("panel."):
+        return f"{request.scheme}://wallet.{host[len('panel.'):]}"
+    return f"http://{host}:8788"
+
+
+@app.get("/wallet")
+def go_wallet():
+    """Menú del usuario -> Wallet: entra a SU wallet con un pase de un solo uso, sin volver a iniciar sesión."""
+    if not g.user.get("uid"):
+        abort(403)
+    resp = redirect(f"{wallet_url()}/sso?t={sso.ticket(sso_secret, g.user)}")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.get("/internal/binance")
+def internal_binance():
+    """La wallet de ESTE servidor pide la llave de Binance (solo lectura) de una persona: una sola conexión para
+    el panel y la wallet. Solo desde 127.0.0.1 (no por nginx), firmada con SSO_SECRET y con hora (vale 30 s)."""
+    if not is_local() or request.headers.get("x-forwarded-for"):  # lo que llega por nginx nunca pasa
+        abort(404)
+    uid, ts = request.args.get("uid", ""), request.args.get("ts", 0, type=int)
+    sig = request.headers.get("x-wallet-sig", "")
+    if not uid or abs(time.time() - ts) > 30 or not hmac.compare_digest(sig, sso.sign(sso_secret, f"{uid}|{ts}")):
+        abort(404)
+    name = next((n for n, u in auth.users.items() if u.get("uid") == uid), None)
+    keys = vault.all().get(name) if name else None
+    resp = jsonify(connected=bool(keys), key=keys[0] if keys else None, secret=keys[1] if keys else None)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.get("/panel")
+def go_panel():
+    """Después del login en arbicrypto.org: al panel (panel.arbicrypto.org; en este PC, la misma página)."""
+    return redirect(panel_home())
+
+
+@app.get("/api/public/mercado")
+def api_public_market():
+    """Precios P2P en pesos del mejor anuncio de cada cripto, para la cinta de la portada (datos públicos de Binance)."""
+    with lock:
+        p2p = state["p2p"]
+        rows = []
+        for a in P2P_ASSETS if p2p else []:
+            m = p2p["market"].get(a) or {}
+            buy, sell = (m.get("BUY") or [{}])[0].get("price"), (m.get("SELL") or [{}])[0].get("price")
+            if buy or sell:
+                rows.append({"asset": a, "buy": buy, "sell": sell})
+    resp = jsonify(t=p2p["t"] if p2p else None, fiat=FIAT, rows=rows)
+    return resp
+
+
 SITE_PLACEHOLDER = "https://arbicrypto.local"  # el mismo de web/src/app/layout.tsx
 
 
@@ -1800,7 +1922,7 @@ def web(path=""):
     if not os.path.isdir(WEB_DIR):
         return ("<h1>Falta compilar la interfaz</h1><p>En la carpeta <b>web</b> ejecuta <b>npm run build</b> "
                 "y reinicia el panel (pm2 restart arbicrypto).</p>"), 503
-    target = path or "index.html"
+    target = path or ("inicio.html" if g.landing else "index.html")
     for candidate in (target, f"{target}.html", f"{target}/index.html"):
         full = safe_join(WEB_DIR, candidate)
         if full and os.path.isfile(full):
@@ -1815,7 +1937,7 @@ def web(path=""):
 # ---------------------------------------------------------------- arranque
 
 def main():
-    global settings, history, alerts_at_boot, vault
+    global settings, history, alerts_at_boot, vault, sso_secret
     os.makedirs(DATA_DIR, exist_ok=True)
     state["alerts"] = db.recent_alerts()
     alerts_at_boot = state["alerts"][0]["id"] if state["alerts"] else 0
@@ -1827,6 +1949,10 @@ def main():
         secret = Vault.new_secret()
         update_env(APP_SECRET=secret)
     vault = Vault(store, secret)
+    sso_secret = os.environ.get("SSO_SECRET") or env.get("SSO_SECRET")
+    if not sso_secret:  # primera vez: la wallet la lee de este mismo archivo (están en el mismo servidor)
+        sso_secret = sso.new_secret()
+        update_env(SSO_SECRET=sso_secret)
     for user, (key, sec) in vault.all().items():
         if user in auth.users:
             accounts[user] = engine.Account(key, sec)
