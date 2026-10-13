@@ -128,6 +128,15 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d tudominio.com     # certificado gratis y renovación automática
 ```
 
+### Imágenes del chat (si ya tenías nginx instalado)
+
+nginx deja pasar como máximo 64 KB por petición, y una imagen del chat pesa más (sale *Error 413*). El archivo `deploy/nginx-arbicrypto.conf` ya trae la excepción; si instalaste nginx antes, agrégala una vez:
+
+```bash
+sudo sed -i '/location = \/api\/events {/i\    location = /api/chat/send {\n        client_max_body_size 5m;\n        proxy_pass http://arbicrypto;\n        proxy_read_timeout 60s;\n    }\n' /etc/nginx/sites-available/arbicrypto
+sudo nginx -t && sudo systemctl reload nginx
+```
+
 ## 9. Firewall
 
 ```bash

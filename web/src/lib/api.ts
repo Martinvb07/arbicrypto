@@ -17,6 +17,8 @@ export async function post<T = { ok: boolean }>(url: string, body: unknown = {})
     body: JSON.stringify(body),
   });
   const data = (await r.json().catch(() => ({}))) as T & { error?: string };
+  if (r.status === 413 && !data.error)
+    throw new Error("El servidor no deja pasar algo tan pesado. Si es una imagen del chat, falta el ajuste de nginx del VPS (deploy/LEEME-VPS.md → Imágenes del chat).");
   if (!r.ok) throw new Error(data.error || `Error ${r.status}`);
   return data;
 }
