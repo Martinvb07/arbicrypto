@@ -32,6 +32,8 @@ import {
   Pause,
   Play,
   Percent,
+  Columns2,
+  Square,
   type LucideIcon,
 } from "lucide-react";
 import { ago, pct, perUsd, tone } from "@/lib/format";
@@ -116,6 +118,8 @@ const ICONS = {
   pause: Pause,
   play: Play,
   percent: Percent,
+  columns: Columns2,
+  square: Square,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

@@ -376,3 +376,43 @@
 @media (prefers-reduced-motion: reduce) {
   .mine-card, .mine-side, .mine-coin, .mc-block, .pa-row, .mkt-view, .mine-break > div, .mkt-tab-n, .mkt-coin-dot { animation: none !important; }
 }
+
+/* ---------- libro dividido (comprar | vender) o un lado a la vez ---------- */
+.mkt .book.split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.mkt .book.one { grid-template-columns: minmax(0, 1fr); }
+.mkt .book.one .mkt-ads { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
+.mkt .book .mkt-col { animation: mkt-win-in .28s ease both; }
+.mkt .book.split .mkt-col.SELL { animation-delay: 60ms; }
+.mkt-book-tools .seg button { padding: 7px 12px; }
+.mine-book .book.split .mkt-ads { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 1080px) {
+  .mkt .book.split { gap: 12px; }
+  .mkt .book.split .mkt-col-head .sub { display: none; }
+}
+/* pantallas angostas en dividido: tarjetas compactas para que quepan lado a lado */
+@media (max-width: 760px) {
+  .mkt .book.one .mkt-ads { grid-template-columns: minmax(0, 1fr); }
+  .mkt .book.split { gap: 8px; }
+  .mkt .book.split .mkt-col-head { gap: 8px; padding-bottom: 8px; flex-wrap: wrap; }
+  .mkt .book.split .mkt-col-ico { width: 30px; height: 30px; border-radius: 9px; }
+  .mkt .book.split .mkt-col-head h3 { font-size: 14px; }
+  .mkt .book.split .mkt-count { font-size: 11px; padding: 2px 7px; }
+  .mkt .book.split .mkt-ads { gap: 8px; }
+  .mkt .book.split .ad { padding: 10px 10px 10px 13px; gap: 8px; border-radius: 13px; }
+  .mkt .book.split .ad::before { top: 10px; bottom: 10px; width: 3px; }
+  .mkt .book.split .ad-avatar, .mkt .book.split .ad-merchant, .mkt .book.split .ad-stats, .mkt .book.split .ad-gmf,
+  .mkt .book.split .ad-methods > svg, .mkt .book.split .ad-limit > svg { display: none; }
+  .mkt .book.split .ad-head { gap: 4px; flex-wrap: wrap; }
+  .mkt .book.split .ad-who { font-size: 13px; min-width: 0; }
+  .mkt .book.split .ad-who a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .mkt .book.split .verdict { font-size: 10.5px; padding: 2px 7px; white-space: normal; flex: 1 1 100%; max-width: 100%; min-width: 0; margin-left: 0; line-height: 1.3; }
+  .mkt .book.split .ad-price { font-size: 18px; }
+  .mkt .book.split .ad-unit { font-size: 11px; }
+  .mkt .book.split .ad-foot { padding-top: 6px; gap: 6px; }
+  .mkt .book.split .ad-limit { width: 100%; padding: 4px 8px; font-size: 11.5px; }
+  .mkt .book.split .ad-methods .tag { font-size: 10.5px; padding: 1px 6px; }
+  .mkt .book.split .ad-go { height: 34px; font-size: 12px; padding: 0 8px; }
+  .mkt .book.split .ad-go .go-more { display: none; }
+  .mkt-book-tools > .seg { flex: 1 1 auto; }
+  .mkt-book-tools > .seg button { flex: 1; }
+}

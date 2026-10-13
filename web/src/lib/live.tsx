@@ -35,6 +35,8 @@ export interface Prefs {
   desktop: boolean;
   asset: string;
   range: number;
+  /** Precios P2P: comprar a la izquierda y vender a la derecha (true) o un lado a la vez. */
+  split: boolean;
 }
 
 const DEFAULT_PREFS: Prefs = {
@@ -42,6 +44,7 @@ const DEFAULT_PREFS: Prefs = {
   desktop: true,
   asset: "USDT",
   range: 3600,
+  split: true,
 };
 
 function readPrefs(): Prefs {

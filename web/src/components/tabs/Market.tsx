@@ -262,6 +262,62 @@ function MethodsSheet({ s, onClose }: { s: State; onClose: () => void }) {
   );
 }
 
+// ---------------------------------------------------------------- libro: dividido o un lado a la vez
+
+/** Cómo se ve el libro: comprar a la izquierda y vender a la derecha, o un lado a la vez. Se recuerda en este navegador. */
+function LayoutPick() {
+  const { prefs, setPrefs } = useLive();
+  return (
+    <Segmented label="Vista del libro" value={prefs.split ? "split" : "one"} onChange={(v) => setPrefs({ split: v === "split" })}
+      options={[["split", <span key="d" className="mkt-switch-opt" title="Comprar a la izquierda, vender a la derecha"><Icon name="columns" size={15} />Dividido</span>],
+        ["one", <span key="u" className="mkt-switch-opt" title="Un lado a la vez"><Icon name="square" size={15} />Uno a la vez</span>]] as const} />
+  );
+}
+
+/** Las dos columnas del libro (comprar y vender). Dividido: lado a lado en cualquier pantalla; si no, solo el lado elegido. */
+function Book({ s, asset, ads, empty, extra }: {
+  s: State; asset: string; ads: Record<Side, Ad[]>; empty: (k: Side) => ReactNode; extra?: ReactNode;
+}) {
+  const { prefs } = useLive();
+  const [view, setView] = useState<Side>("BUY");
+  const m = s.p2p?.market[asset];
+  const split = prefs.split;
+  return (
+    <>
+      <div className="mkt-book-tools">
+        <LayoutPick />
+        {!split && (
+          <Segmented label="Lado del libro" value={view} onChange={setView}
+            options={[["BUY", <span key="b" className="mkt-switch-opt"><Icon name="cart" size={15} />Comprar · {ads.BUY.length}</span>],
+              ["SELL", <span key="s" className="mkt-switch-opt"><Icon name="handCoins" size={15} />Vender · {ads.SELL.length}</span>]] as const} />
+        )}
+        {extra}
+      </div>
+      <div className={`book ${split ? "split" : "one"}`}>
+        {(["BUY", "SELL"] as const).filter((k) => split || k === view).map((k) => {
+          const best = m?.[k][0]?.price;
+          const list = ads[k];
+          return (
+            <div key={k} className={`mkt-col ${k}`}>
+              <header className="mkt-col-head">
+                <span className={`mkt-col-ico ${k}`}><Icon name={k === "BUY" ? "cart" : "handCoins"} /></span>
+                <div>
+                  <h3>{k === "BUY" ? `Comprar ${asset}` : `Vender ${asset}`}</h3>
+                  <p className="sub">{k === "BUY" ? "Te venden · más bajo es mejor" : "Te compran · más alto es mejor"}</p>
+                </div>
+                <span className="mkt-count">{list.length} {list.length === 1 ? "anuncio" : "anuncios"}</span>
+              </header>
+              <div className="mkt-ads" key={`${asset}-${k}-${list.length}`}>
+                {list.length && best ? list.map((ad, i) => <AdRow key={`${ad.nick}-${i}`} ad={ad} asset={asset} best={best} side={k} s={s} i={i} />) : empty(k)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 // ---------------------------------------------------------------- con mi capital
 
 /** Ruta directa de tu capital: comprar y vender la misma cripto en P2P (la calcula el servidor con tus costos y medios). */
@@ -327,10 +383,9 @@ function MineView({ s, asset, onCoin }: { s: State; asset: string; onCoin: (a: s
   const coins = s.settings.p2p_assets
     .map((a) => ({ a, r: directRoute(s, a) }))
     .sort((x, y) => (y.r?.profit_fiat ?? -Infinity) - (x.r?.profit_fiat ?? -Infinity));
-  const [k, setK] = useState<Side>("BUY");
   const mineAds = (side: Side) => (m?.[side] ?? []).filter((a) => forMe(a, s, side));
-  const ads = mineAds(k);
-  const best = m?.[k][0]?.price;
+  const nPay = s.settings.pay_methods?.length ?? 0;
+  const nRecv = s.settings.recv_methods?.length ?? 0;
 
   return (
     <>
@@ -383,17 +438,12 @@ function MineView({ s, asset, onCoin }: { s: State; asset: string; onCoin: (a: s
             <span className="sec-ico"><Icon name="filter" /></span>
             <div>
               <h2>Anuncios para ti</h2>
-              <p className="sub">Aceptan {cap}{methodsFor(s, k).length ? ` y ${k === "BUY" ? "pagas" : "recibes"} con ${methodsFor(s, k).join(", ")}` : ""}</p>
+              <p className="sub">Aceptan {cap}{nPay || nRecv ? " y tus medios de pago" : ""}</p>
             </div>
           </div>
-          <Segmented label="Lado" value={k} onChange={setK}
-            options={[["BUY", <span key="b" className="mkt-switch-opt"><Icon name="cart" size={15} />Comprar · {mineAds("BUY").length}</span>],
-              ["SELL", <span key="s" className="mkt-switch-opt"><Icon name="handCoins" size={15} />Vender · {mineAds("SELL").length}</span>]] as const} />
         </div>
-        <div className="mkt-ads mine-ads" key={`${asset}-${k}`}>
-          {ads.length && best ? ads.map((ad, i) => <AdRow key={`${ad.nick}-${i}`} ad={ad} asset={asset} best={best} side={k} s={s} i={i} />)
-            : <EmptyBox icon="filter" title={`Ningún anuncio para ${k === "BUY" ? "comprar" : "vender"} acepta ${cap}${methodsFor(s, k).length ? " con tus medios" : ""}.`}>Mira la pestaña <b>Todos los anuncios</b> o cambia tu capital.</EmptyBox>}
-        </div>
+        <Book s={s} asset={asset} ads={{ BUY: mineAds("BUY"), SELL: mineAds("SELL") }}
+          empty={(k) => <EmptyBox icon="filter" title={`Ningún anuncio para ${k === "BUY" ? "comprar" : "vender"} acepta ${cap}${methodsFor(s, k).length ? " con tus medios" : ""}.`}>Mira <b>Todos los anuncios</b> o cambia tu capital.</EmptyBox>} />
       </section>
     </>
   );
@@ -482,7 +532,7 @@ function AdRow({ ad, asset, best, side, s, i }: { ad: Ad; asset: string; best: n
       {url && (
         <GoButton className="ad-go" href={url} icon={side === "BUY" ? "cart" : "handCoins"} strong={j.good}
           title={`Abre el perfil de ${ad.nick} en Binance P2P para ${side === "BUY" ? "comprarle" : "venderle"} ${asset}`}>
-          {side === "BUY" ? "Comprar" : "Vender"} {asset} a <b>{ad.nick}</b>
+          {side === "BUY" ? "Comprar" : "Vender"}<span className="go-more"> {asset} a <b>{ad.nick}</b></span>
         </GoButton>
       )}
     </article>
@@ -530,54 +580,21 @@ function CoinChart({ asset, s }: { asset: string; s: State }) {
 
 function AllView({ s, asset }: { s: State; asset: string }) {
   const m = s.p2p!.market[asset];
-  const [view, setView] = useState<Side>("BUY"); // en celular y tablet se ve un lado del libro a la vez
   const [onlyMine, setOnlyMine] = useState(false);
   const has = (s.settings.pay_methods?.length ?? 0) + (s.settings.recv_methods?.length ?? 0) > 0;
-  const side = (k: Side) => (k === "BUY" ? `Comprar ${asset}` : `Vender ${asset}`);
+  const pick = (k: Side) => (onlyMine ? m[k].filter((a) => paysWith(a, methodsFor(s, k))) : m[k]);
   return (
     <>
       <OtherAmount s={s} asset={asset} />
       <CoinChart asset={asset} s={s} />
-      <section className={`card mkt-book show-${view}`}>
-        <div className="mkt-book-bar">
-          <div className="mkt-book-tools">
-            <div className="mkt-switch">
-              <Segmented label="Lado del libro" value={view} onChange={setView}
-                options={[["BUY", <span key="b" className="mkt-switch-opt"><Icon name="cart" size={15} />Comprar</span>],
-                  ["SELL", <span key="s" className="mkt-switch-opt"><Icon name="handCoins" size={15} />Vender</span>]] as const} />
-            </div>
-            {has && <Toggle on={onlyMine} onChange={setOnlyMine} label="Solo mis medios" />}
-          </div>
-          <div className="mkt-legend">
-            <span><i className="sw good" /><span><b>Verde</b>: buen precio y anunciante confiable</span></span>
-            <span><i className="sw bad" /><span><b>Rojo</b>: precio peor que el mejor, o anunciante con pocas órdenes o que cancela</span></span>
-          </div>
+      <section className="card mkt-book">
+        <div className="mkt-legend">
+          <span><i className="sw good" /><span><b>Verde</b>: buen precio y anunciante confiable</span></span>
+          <span><i className="sw bad" /><span><b>Rojo</b>: precio peor que el mejor, o anunciante con pocas órdenes o que cancela</span></span>
         </div>
-        <div className="book">
-          {(["BUY", "SELL"] as const).map((k) => {
-            const best = m[k][0]?.price;
-            const ads = onlyMine ? m[k].filter((a) => paysWith(a, methodsFor(s, k))) : m[k];
-            return (
-              <div key={k} className={`mkt-col ${k}`}>
-                <header className="mkt-col-head">
-                  <span className={`mkt-col-ico ${k}`}><Icon name={k === "BUY" ? "cart" : "handCoins"} /></span>
-                  <div>
-                    <h3>{side(k)}</h3>
-                    <p className="sub">{k === "BUY" ? "Te venden · más bajo es mejor" : "Te compran · más alto es mejor"}</p>
-                  </div>
-                  <span className="mkt-count">{ads.length} {ads.length === 1 ? "anuncio" : "anuncios"}</span>
-                </header>
-                <div className="mkt-ads" key={`${asset}-${onlyMine}`}>
-                  {ads.length && best ? (
-                    ads.map((ad, i) => <AdRow key={`${ad.nick}-${i}`} ad={ad} asset={asset} best={best} side={k} s={s} i={i} />)
-                  ) : (
-                    <EmptyBox icon="filter" title="Ningún anuncio cumple tus filtros." />
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <Book s={s} asset={asset} ads={{ BUY: pick("BUY"), SELL: pick("SELL") }}
+          empty={() => <EmptyBox icon="filter" title="Ningún anuncio cumple tus filtros." />}
+          extra={has ? <Toggle on={onlyMine} onChange={setOnlyMine} label="Solo mis medios" /> : undefined} />
       </section>
     </>
   );
