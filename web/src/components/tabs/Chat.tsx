@@ -193,6 +193,11 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
     }
   }, [msgs]);
 
+  // la barra de emojis siempre a la vista (en el primer mensaje quedaría debajo del encabezado)
+  useEffect(() => {
+    if (picker !== null) box.current?.querySelector(".chat-picker")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [picker]);
+
   const older = async () => {
     if (!msgs?.length) return;
     try {
