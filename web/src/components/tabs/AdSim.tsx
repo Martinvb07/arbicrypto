@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { adRank, fitsAd, INCOME_TAX_REF, isDollar, MAKER_FEE_REF, perDollar, simulateAds } from "@/lib/calc";
+import { adRank, fitsAd, isDollar, MAKER_FEE_REF, perDollar, simulateAds } from "@/lib/calc";
 import { money, num, pct, pctPlain, plural, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, MarketEntry, Side, State } from "@/lib/types";
@@ -101,8 +101,8 @@ function SideBox({ side, asset, mode, onMode, price, onPrice, rivals, taken, fee
 
 // ---------------------------------------------------------------- simulador de una cripto
 
-function Simulator({ s, asset, m, amount, rounds, makerFee, incomeTax }: {
-  s: State; asset: string; m: MarketEntry; amount: number | null; rounds: number; makerFee: number; incomeTax: number;
+function Simulator({ s, asset, m, amount, rounds, makerFee }: {
+  s: State; asset: string; m: MarketEntry; amount: number | null; rounds: number; makerFee: number;
 }) {
   const [buyMode, setBuyMode] = useState<Mode>("mine");
   const [sellMode, setSellMode] = useState<Mode>("mine");
@@ -125,7 +125,7 @@ function Simulator({ s, asset, m, amount, rounds, makerFee, incomeTax }: {
   const sell = sellMode === "mine" ? parse(sellStr) : sellTaken?.price ?? null;
   const sellFee = sellMode === "mine" ? makerFee : takerFee;
 
-  const sim = amount && buy && sell ? simulateAds(amount, buy, sell, buyFee, sellFee, gmf, incomeTax) : null;
+  const sim = amount && buy && sell ? simulateAds(amount, buy, sell, buyFee, sellFee, gmf) : null;
   const day = sim ? sim.net * rounds : null;
   const seller = m.BUY[0];
   const buyer = m.SELL[0];
@@ -148,8 +148,8 @@ function Simulator({ s, asset, m, amount, rounds, makerFee, incomeTax }: {
             <div>
               <h2>Resultado</h2>
               <p className="sub">
-                {amount ? <>Con {money(amount, 0)} por vuelta · ya descuenta la comisión de Binance, {gmf > 0 ? "el 4x1000 de lo que pagas" : "sin 4x1000 (apagado)"}
-                  {" "}y el impuesto de renta ({pctPlain(incomeTax, 0)} de la ganancia)</> : "Escribe cuánto usas por vuelta"}
+                {amount ? <>Con {money(amount, 0)} por vuelta · ya descuenta la comisión de Binance y {gmf > 0 ? "el 4x1000 de lo que pagas" : "sin 4x1000 (apagado)"}</>
+                  : "Escribe cuánto usas por vuelta"}
               </p>
             </div>
           </div>
@@ -180,8 +180,6 @@ function Simulator({ s, asset, m, amount, rounds, makerFee, incomeTax }: {
               <div><small>Diferencia de precios</small><b>{money(sell! - buy!)} <span className="muted">({pct(sell! / buy! - 1)})</span></b></div>
               <div><small>Comisión de Binance</small><b className="down">−{money(sim.fees, 0)}</b></div>
               <div><small>4x1000</small><b className={sim.gmf ? "down" : ""}>{sim.gmf ? "−" : ""}{money(sim.gmf, 0)}</b></div>
-              <div><small>Impuesto de renta</small><b className={sim.tax ? "down" : ""}>{sim.tax ? "−" : ""}{money(sim.tax, 0)}</b>{!sim.tax && <span className="muted"> · sin ganancia</span>}</div>
-              <div><small>Ganancia antes de renta</small><b className={`val ${tone(sim.profit)}`}>{signedMoney(sim.profit)}</b></div>
             </div>
             <p className="sim-even">
               <Icon name="target" size={15} />
@@ -199,8 +197,7 @@ function Simulator({ s, asset, m, amount, rounds, makerFee, incomeTax }: {
         )}
         <p className="note">
           <Icon name="info" size={14} /> Simulación con los anuncios de ahora. Tu anuncio solo gana cuando alguien lo toma, y mientras esperas los precios
-          se mueven. El puesto cuenta los primeros {m.BUY.length || 20} anunciantes con {s.settings.min_orders}+ órdenes. La renta se declara por año
-          (las pérdidas restan): confirma tu tarifa con tu contador.
+          se mueven. El puesto cuenta los primeros {m.BUY.length || 20} anunciantes con {s.settings.min_orders}+ órdenes.
         </p>
       </section>
     </>
@@ -215,7 +212,6 @@ export function AdSim() {
   const [amountTyped, setAmountTyped] = useState<string | null>(null);
   const [roundsTyped, setRoundsTyped] = useState("1");
   const [feeTyped, setFeeTyped] = useState<string | null>(null);
-  const [taxTyped, setTaxTyped] = useState(String(INCOME_TAX_REF * 100));
   if (!state) return <div className="card"><Skeleton rows={10} /></div>;
   const st = state.settings;
   const asset = st.p2p_assets.includes(prefs.asset) ? prefs.asset : "USDT";
@@ -226,7 +222,6 @@ export function AdSim() {
   const feeDefault = state.maker_fee ?? MAKER_FEE_REF;
   const feeStr = feeTyped ?? String(+(feeDefault * 100).toFixed(4));
   const fee = Math.min(Math.max((parse(feeStr) ?? 0) / 100, 0), 0.05);
-  const incomeTax = Math.min(Math.max((parse(taxTyped) ?? 0) / 100, 0), 0.39);
 
   return (
     <div className="mkt">
@@ -266,20 +261,11 @@ export function AdSim() {
               {" · "}al tomar un anuncio: {pctPlain(state.p2p_fee ?? 0, 2)}
             </small>
           </label>
-          <label className="login-field">
-            Impuesto de renta
-            <span className="with-unit">
-              <input type="number" min={0} max={39} step={1} value={taxTyped} onChange={(e) => setTaxTyped(e.target.value)} />
-              <span>% de la ganancia</span>
-            </span>
-            <small className="sim-hint">Trading seguido = renta ordinaria: 0 % a 39 % según lo que ganes en el año (19 % es el primer tramo que paga)</small>
-          </label>
         </div>
       </section>
 
       {m ? (
-        <Simulator key={asset} s={state} asset={asset} m={m} amount={amount && amount > 0 ? amount : null} rounds={rounds} makerFee={fee}
-          incomeTax={incomeTax} />
+        <Simulator key={asset} s={state} asset={asset} m={m} amount={amount && amount > 0 ? amount : null} rounds={rounds} makerFee={fee} />
       ) : (
         <div className="card"><Skeleton rows={8} /></div>
       )}

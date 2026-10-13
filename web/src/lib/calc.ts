@@ -139,10 +139,6 @@ export function bestDeal(s: State, asset: string): Deal | null {
  *  pagan 20 % menos). Se usa la más alta mientras no tengas órdenes como anunciante: así nunca promete de más. */
 export const MAKER_FEE_REF = 0.0035;
 
-/** Impuesto de renta sobre la ganancia: hacer trading seguido es renta ordinaria (tabla del 0 % al 39 % según lo que ganes
- *  en el año). 19 % es el primer tramo que paga. */
-export const INCOME_TAX_REF = 0.19;
-
 /** El anuncio acepta ese monto en pesos y tiene esa cripto disponible. */
 export const fitsAd = (ad: Ad, fiat: number, crypto: number) => ad.min <= fiat && fiat <= ad.max && (!ad.available || ad.available >= crypto);
 
