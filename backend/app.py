@@ -169,10 +169,22 @@ def clean_methods(raw):
     return sorted({str(m).strip()[:60] for m in raw or [] if str(m).strip()})[:30] if isinstance(raw, list) else []
 
 
+def taker_fee_of(pr):
+    """(porcentaje, minimo fijo en dolares por orden) que se descuenta al tomar un anuncio P2P.
+    Automatica: lo visto en las ordenes reales y nunca menos que el fijo por orden. Puesta a mano: exactamente esa."""
+    return (pr["taker_fee"], 0.0) if pr["taker_fee"] >= 0 else (p2p_fee(), engine.P2P_TAKER_USD)
+
+
+def effective_fee(pr):
+    """La comision P2P con su capital, como porcentaje (para mostrarla y para los calculos de la pantalla)."""
+    rate, min_usd = taker_fee_of(pr)
+    return max(rate, min_usd * (usd_ref() or 0) / pr["capital"]) if pr["capital"] else rate
+
+
 def route_key(pr):
     """Las rutas P2P cambian con el capital, el 4x1000, los costos y los medios de pago: una cuenta por combinacion."""
-    fee = pr["taker_fee"] if pr["taker_fee"] >= 0 else p2p_fee()
-    return (pr["capital"], pr["gmf"], fee, pr["bank_fee"], pr["tax"], tuple(pr["pay_methods"]), tuple(pr["recv_methods"]))
+    fee, min_usd = taker_fee_of(pr)
+    return (pr["capital"], pr["gmf"], fee, pr["bank_fee"], pr["tax"], tuple(pr["pay_methods"]), tuple(pr["recv_methods"]), min_usd)
 
 
 def tag_of(key):
@@ -180,8 +192,9 @@ def tag_of(key):
 
 
 def routes_for(market, key):
-    cap, gmf, fee, bank, tax, pay, recv = key
-    return engine.p2p_routes(market, graph, current_fee(), gmf, cap, FIAT, fee, bank_fee=bank, tax=tax, pay=pay, recv=recv)
+    cap, gmf, fee, bank, tax, pay, recv, min_usd = key
+    return engine.p2p_routes(market, graph, current_fee(), gmf, cap, FIAT, fee, bank_fee=bank, tax=tax, pay=pay, recv=recv,
+                             p2p_min_usd=min_usd)
 
 
 def main_user():
@@ -347,8 +360,9 @@ def sync_alerts(group, current, **extra):
 
 
 def p2p_fee():
-    """Comision P2P real segun las ordenes completadas de todas las cuentas conectadas
-    (Binance casi nunca cobra al que toma un anuncio). Las ordenes de anuncios propios no cuentan: pagan otra comision."""
+    """Porcentaje que Binance cobra al que TOMA un anuncio P2P, visto en las ordenes completadas de las cuentas conectadas
+    (ahora leido de takerCommission). Las ordenes de anuncios propios no cuentan: pagan otra comision. Con la comision
+    automatica, encima va siempre el minimo fijo por orden (engine.P2P_TAKER_USD)."""
     rates = sorted(o["commission"] / o["amount"] for snap in list(acc_state.values()) for o in snap.get("orders", [])
                    if o.get("status") == "COMPLETED" and o.get("amount") and o.get("commission") and o.get("role") != "MAKER")
     return min(rates[len(rates) // 2], 0.01) if rates else 0.0
@@ -547,7 +561,7 @@ def p2p_step():
     for gkey in groups:
         cap, gmf = gkey[0], gkey[1]
         routes = routes_for(market, gkey)
-        conversions = engine.usdt_conversions(market, graph, fee, gmf, cap)
+        conversions = engine.usdt_conversions(market, graph, fee, gmf, cap, gkey[2], gkey[7])
         for r in routes:
             r["per_usd"] = r["profit"] * ref
             for step in r["steps"]:
@@ -636,12 +650,12 @@ def watch_need(w, o):
 def watch_eval(w, targets):
     """Mejor salida para una vigilancia y si ya cumple (ganancia >= objetivo, con margen extra si pasa por Spot)."""
     options, failed = engine.exit_options(w["asset"], w["qty"], graph, current_fee(), FIAT, targets, usd_ref() or 0,
-                                          MIN_ORDERS, MIN_FINISH)
+                                          MIN_ORDERS, MIN_FINISH, *taker_fee_of(profile(w["user"])))
     best, best_gap = None, None
     for o in options:
         need = watch_need(w, o)
         o["profit"] = o["received"] - paid_with_gmf(w["user"], w["cost"])
-        o["need_price"] = need / o["qty"]  # precio por unidad que tiene que pagar el comprador
+        o["need_price"] = need / (o["qty"] - o.get("p2p_fee", 0))  # precio por unidad: el comprador paga lo que queda tras la comision
         o["ok"] = o["received"] >= need
         if best is None or o["received"] - need > best_gap:
             best, best_gap = o, o["received"] - need
@@ -1160,7 +1174,7 @@ def api_exit():
     try:
         p2p_hold.set()  # el escaner P2P se pausa para no gastar el cupo de consultas de Binance
         options, failed = engine.exit_options(asset, amount, graph, current_fee(), FIAT, P2P_ASSETS, usd_ref() or 0,
-                                      MIN_ORDERS, MIN_FINISH)
+                                      MIN_ORDERS, MIN_FINISH, *taker_fee_of(profile(g.user["name"])))
     except (requests.RequestException, engine.BinanceError) as e:
         return jsonify(error=friendly_error(e)), 502
     finally:
@@ -1348,13 +1362,14 @@ def api_state():
             ref = usd_ref() or 0
             for r in routes:
                 r["per_usd"] = r["profit"] * ref
-            mine = {"routes": routes, "conversions": engine.usdt_conversions(p2p["market"], graph, current_fee(), me["gmf"], cap),
+            mine = {"routes": routes, "conversions": engine.usdt_conversions(p2p["market"], graph, current_fee(), me["gmf"], cap,
+                                                                             rkey[2], rkey[7]),
                     "found": []}
         if p2p:
             p2p = {**p2p, "routes": (mine or {}).get("routes", []), "conversions": (mine or {}).get("conversions")}
         return jsonify({
-            "boot": BOOT, "now": time.time(), "settings": public_settings(g.user), "fee": current_fee(), "p2p_fee": rkey[2],
-            "p2p_fee_auto": p2p_fee(), "price_alerts": price_alert_view(name),
+            "boot": BOOT, "now": time.time(), "settings": public_settings(g.user), "fee": current_fee(), "p2p_fee": effective_fee(me),
+            "p2p_fee_auto": effective_fee({**me, "taker_fee": -1}), "price_alerts": price_alert_view(name),
             "maker_fee": maker_fee(name), "spot": state["spot"], "p2p": p2p, "account": account_view(name),
             "opps": sorted([o for o in (mine or {}).get("found", []) + opps["spot"] if o["per_usd"] >= me["min_per_usd"]],
                            key=lambda o: -o["per_usd"]),

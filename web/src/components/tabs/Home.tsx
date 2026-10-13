@@ -111,7 +111,7 @@ function CostBar({ s }: { s: State }) {
     ["Comisión Spot", pctTxt(s.fee), true, "Comisión estándar de Binance (la más alta): si pagas menos, ganas un poco más"],
     ["Redondeo Binance", "", true, "Binance redondea las cantidades hacia abajo; el sobrante queda suelto"],
     ["Colchón", pctTxt(s.settings.spot_slippage), true, "Por si el precio se mueve mientras haces el cambio en Spot"],
-    ["Comisión P2P", pctTxt(s.p2p_fee ?? 0), (s.p2p_fee ?? 0) > 0, "Tomada de tus órdenes P2P; Binance normalmente no cobra al que toma un anuncio"],
+    ["Comisión P2P", pctTxt(s.p2p_fee ?? 0), (s.p2p_fee ?? 0) > 0, "Lo que Binance se queda en cada orden P2P que tomas: mínimo 0,07 USDT por orden (automática) o la que pusiste"],
     ["4x1000", gmf ? "0,4 % de lo que pagas" : "apagado", gmf, "Lo cobra tu banco cada vez que le pagas a un vendedor P2P, ganes o pierdas"],
     ["Transferencia", s.settings.bank_fee ? money(s.settings.bank_fee, 0) : "gratis", s.settings.bank_fee > 0, "Lo que cobra tu banco por cada transferencia al vendedor (cámbialo en Precios P2P → Mis costos)"],
     ["Renta", pctTxt(s.settings.tax ?? 0), (s.settings.tax ?? 0) > 0, "Impuesto de renta sobre la ganancia (cámbialo en Precios P2P → Mis costos)"],

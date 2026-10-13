@@ -198,6 +198,19 @@ def convert(graph, a, c, fee=0.0):
     return edge[0] * (1 - fee) if edge else None
 
 
+# Lo que Binance se queda en cada orden P2P en pesos que TOMAS (comprar o vender a un anuncio). En órdenes reales de
+# octubre de 2026 fue 0,07 USDT por orden con montos distintos (157,85 y 173,22 USDT). Con la comisión automática se
+# toma lo MAYOR entre ese fijo y el porcentaje visto en las órdenes, así el cálculo nunca promete de más.
+P2P_TAKER_USD = 0.07
+
+
+def p2p_taker_fee(graph, asset, qty, rate=0.0, min_usd=0.0):
+    """Cripto que Binance descuenta en una orden P2P que tomas por `qty` de `asset`."""
+    usd = 1.0 if asset == "USDT" else usdt_value(graph, asset, 1)
+    fixed = min_usd / usd if usd and min_usd else 0.0
+    return min(max(fixed, qty * rate), qty)
+
+
 def usdt_value(graph, asset, qty):
     # Los saldos de Simple Earn llegan como LDBTC, LDUSDT...
     for a in (asset, asset[2:] if asset.startswith("LD") else None):
@@ -323,7 +336,7 @@ def _pays_with(ad, methods):
     return not methods or any(m in methods for m in ad["methods"])
 
 
-def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0, bank_fee=0.0, tax=0.0, pay=(), recv=()):
+def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0, bank_fee=0.0, tax=0.0, pay=(), recv=(), p2p_min_usd=0.0):
     """Arbitraje que se puede hacer ya, tomando anuncios existentes:
     pesos -> X (compra P2P) -> [X a Y en Spot] -> Y (venta P2P) -> pesos, para todas las criptos X, Y.
     Cada paso usa el mejor anuncio que acepta el monto real y tus medios de pago (pay al comprar, recv al vender);
@@ -351,7 +364,9 @@ def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0, bank_fee=0.0
         bx = buy_ad(x)
         if not bx:
             continue
-        qty_x = capital / bx["price"] * (1 - p2p_fee)  # si Binance cobra en P2P, te llega menos cripto
+        bought = capital / bx["price"]
+        fee_x = p2p_taker_fee(graph, x, bought, p2p_fee, p2p_min_usd)
+        qty_x = bought - fee_x  # Binance se queda su comisión P2P: te llega menos cripto
         for y in market:
             qty_y, lost = spot_detail(graph, x, y, qty_x, fee)
             if not qty_y or (y != x and graph[x][y][1] < qty_x):
@@ -364,14 +379,15 @@ def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0, bank_fee=0.0
             if y != x:
                 steps.append(spot_step(x, y, rate, qty_y))
             steps.append(p2p_step("sell", y, sy, qty_y))
-            received = qty_y * sy["price"] * (1 - p2p_fee)
+            fee_y = p2p_taker_fee(graph, y, qty_y, p2p_fee, p2p_min_usd)
+            received = (qty_y - fee_y) * sy["price"]  # al vender también: el comprador recibe menos y te paga menos
             gmf_paid = with_gmf(capital, gmf) - capital  # el banco lo cobra al pagarle al vendedor
             gross = received - capital - gmf_paid - bank_fee
             tax_paid = max(gross, 0) * tax  # la renta solo se paga si ganas
             gain = gross - tax_paid
             # en que se van los pesos: cada costo valorado al precio de venta
             costs = {k: v * sy["price"] for k, v in lost.items()}
-            costs["p2p_fee"] = capital * p2p_fee + qty_y * sy["price"] * p2p_fee
+            costs["p2p_fee"] = fee_x * bx["price"] + fee_y * sy["price"]
             costs["gmf"] = gmf_paid
             costs["bank"] = bank_fee
             costs["tax"] = tax_paid
@@ -381,7 +397,7 @@ def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0, bank_fee=0.0
     return routes
 
 
-def usdt_conversions(market, graph, fee, gmf, capital):
+def usdt_conversions(market, graph, fee, gmf, capital, p2p_fee=0.0, p2p_min_usd=0.0):
     """Si ya tienes dolares (USDT) o los quieres comprar: ¿conviene hacerlo directo en P2P
     o pasando por otra cripto en Spot? Todo en pesos por dolar, con comisiones. Comprar paga 4x1000 (le pagas al
     vendedor); vender no (recibes plata)."""
@@ -405,15 +421,17 @@ def usdt_conversions(market, graph, fee, gmf, capital):
         rate = qty / usd
         ad = first(x, "SELL", lambda a: qty * a["price"], lambda a: qty)
         if ad:
-            sell.append({"asset": x, "per_usd": rate * ad["price"], "ad": ad,
+            net = (qty - p2p_taker_fee(graph, x, qty, p2p_fee, p2p_min_usd)) / usd  # comisión P2P al vender
+            sell.append({"asset": x, "per_usd": net * ad["price"], "ad": ad,
                          "symbol": graph["USDT"][x][2] if x != "USDT" else None})
 
     buy = []  # comprar dolares: pesos -> X en P2P -> (Spot) -> USDT
     for x in market:
         ad = first(x, "BUY", lambda a: capital, lambda a: capital / a["price"])
-        got = spot_fill(graph, x, "USDT", capital / ad["price"], fee) if ad else None
+        bought = capital / ad["price"] if ad else 0
+        got = spot_fill(graph, x, "USDT", bought - p2p_taker_fee(graph, x, bought, p2p_fee, p2p_min_usd), fee) if ad else None
         if got:
-            rate = got / (capital / ad["price"])
+            rate = got / bought  # dólares que de verdad te quedan por unidad comprada (ya con la comisión P2P)
             buy.append({"asset": x, "per_usd": with_gmf(ad["price"], gmf) / rate, "ad": ad,
                         "symbol": graph[x]["USDT"][2] if x != "USDT" else None})
 
@@ -440,7 +458,7 @@ def _search_retry(asset, fiat, amount):
             time.sleep(1 + i)
 
 
-def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, min_finish):
+def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, min_finish, p2p_fee=0.0, p2p_min_usd=0.0):
     """Todas las formas de pasar `qty` de `asset` a pesos: vender directo en P2P o cambiar antes en Spot
     (directo o pasando por USDT) y vender esa. Cada opcion usa el mejor comprador real que acepta el monto
     y dice cuanto darian si ese comprador desaparece (el siguiente que acepta)."""
@@ -471,8 +489,10 @@ def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, mi
             sym = graph[a][c][2]
             base = LOT.get(sym, (a, 0))[0]
             hops.append({"from": a, "to": c, "symbol": sym, "pair": [base, c if base == a else a]})
-        options.append({"to": y, "path": path, "qty": got, "ad": best, "received": got * best["price"], "hops": hops,
-                        "backup": {"ad": backup, "received": got * backup["price"]} if backup else None})
+        cut = p2p_taker_fee(graph, y, got, p2p_fee, p2p_min_usd)  # comisión P2P: el comprador recibe menos y te paga menos
+        options.append({"to": y, "path": path, "qty": got, "ad": best, "received": (got - cut) * best["price"], "hops": hops,
+                        "p2p_fee": cut, "p2p_fee_fiat": cut * best["price"],
+                        "backup": {"ad": backup, "received": (got - cut) * backup["price"]} if backup else None})
     options.sort(key=lambda o: -o["received"])
     return options, errors
 
@@ -567,7 +587,8 @@ class Account:
                                "price": float(o.get("unitPrice") or 0), "total": float(o.get("totalPrice") or 0),
                                "status": o.get("orderStatus"), "time": int(o.get("createTime") or 0),
                                "counterpart": o.get("counterPartNickName"),
-                               "commission": float(o.get("commission") or 0),
+                               "commission": float((o.get("commission") if o.get("advertisementRole") == "MAKER"
+                                                    else o.get("takerCommission") or o.get("commission")) or 0),
                                "role": o.get("advertisementRole")})  # MAKER: era tu anuncio; TAKER: tomaste uno
         orders.sort(key=lambda o: -o["time"])
         rates = acc.get("commissionRates") or {}
