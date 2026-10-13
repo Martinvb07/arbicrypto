@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { perUsd } from "@/lib/format";
-import { chatUnread, useChat } from "@/lib/chat";
+import { avatarImage, chatUnread, useChat } from "@/lib/chat";
 import { useLive } from "@/lib/live";
 import { Menu, Modal, Sheet } from "./overlay";
-import { Ago, Brand, Icon, PasswordInput, useThumb, type IconName } from "./ui";
+import { Ago, Brand, Icon, PasswordInput, UserAvatar, useThumb, type IconName } from "./ui";
 
 export type TabId = "inicio" | "vender" | "mercado" | "anuncios" | "historial" | "chat" | "cuenta" | "equipo";
 
@@ -161,7 +161,27 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
 // ---------------------------------------------------------------- barra superior
 
 export function Header({ onTab }: { onTab: (t: TabId) => void }) {
-  const { state, offline } = useLive();
+  const { state, offline, refresh, toast } = useLive();
+  const photoInput = useRef<HTMLInputElement>(null);
+  const myPhoto = state?.user ? state.avatars?.[state.user.name] : undefined;
+  const pickPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      await api.avatarSet(await avatarImage(file));
+      refresh();
+      toast("Foto lista", "Tu equipo ya la ve en el chat.", "good", 2500);
+    } catch (e) {
+      toast("No se pudo cambiar la foto", (e as Error).message, "bad");
+    }
+  };
+  const removePhoto = async () => {
+    try {
+      await api.avatarDelete();
+      refresh();
+    } catch (e) {
+      toast("No se pudo quitar la foto", (e as Error).message, "bad");
+    }
+  };
   const [modal, setModal] = useState<"telegram" | "password" | null>(null);
   const errors = state ? Object.keys(state.errors).length : 0;
   const liveCls = offline || !state ? "" : errors ? "warn" : "ok";
@@ -197,13 +217,18 @@ export function Header({ onTab }: { onTab: (t: TabId) => void }) {
           </button>
           {state?.user && (
             <Menu label="Menú de usuario" buttonClass="btn btn-sm user-btn"
-              button={<><span className="avatar">{state.user.name.slice(0, 1).toUpperCase()}</span><span className="lbl">{state.user.name}</span></>}>
+              button={<><UserAvatar name={state.user.name} src={myPhoto} /><span className="lbl">{state.user.name}</span></>}>
               {(close) => (
                 <>
-                  <div className="menu-who">
-                    <b>{state.user.name}</b>
-                    <span className="sub">{state.user.role === "admin" ? "Administrador" : "Miembro del equipo"}</span>
+                  <div className="menu-who menu-who-photo">
+                    <UserAvatar name={state.user.name} src={myPhoto} size={42} />
+                    <div>
+                      <b>{state.user.name}</b>
+                      <span className="sub">{state.user.role === "admin" ? "Administrador" : "Miembro del equipo"}</span>
+                    </div>
                   </div>
+                  <button onClick={() => { close(); photoInput.current?.click(); }}><Icon name="pencil" size={16} /> {myPhoto ? "Cambiar foto" : "Poner foto de perfil"}</button>
+                  {myPhoto && <button onClick={() => { close(); void removePhoto(); }}><Icon name="trash" size={16} /> Quitar foto</button>}
                   <button onClick={() => { close(); setModal("password"); }}><Icon name="key" size={16} /> Cambiar contraseña</button>
                   {state.user.role === "admin" && <button onClick={() => { close(); onTab("equipo"); }}><Icon name="ticket" size={16} /> Invitar al equipo</button>}
                   <button onClick={() => void logout()}><Icon name="logout" size={16} /> Cerrar sesión</button>
@@ -211,6 +236,8 @@ export function Header({ onTab }: { onTab: (t: TabId) => void }) {
               )}
             </Menu>
           )}
+          <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" hidden
+            onChange={(e) => { void pickPhoto(e.target.files?.[0]); e.target.value = ""; }} />
         </div>
       </div>
       {modal === "telegram" && <TelegramModal onClose={() => setModal(null)} />}

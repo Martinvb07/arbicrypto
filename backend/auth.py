@@ -52,6 +52,12 @@ class Auth:
         self.sessions = store.load("sessions", {})
         self.lock = threading.RLock()
         self.fails = {}
+        # id fijo de cada usuario (no cambia al renombrarlo): con él se guardan su foto y sus datos
+        missing = [u for u in self.users.values() if not u.get("uid")]
+        for u in missing:
+            u["uid"] = secrets.token_hex(8)
+        if missing:
+            self._persist("users")
 
     def _persist(self, *names):
         for n in names:
@@ -82,7 +88,8 @@ class Auth:
                 raise AuthError("Ese usuario ya existe. Elige otro nombre.")
             salt = secrets.token_hex(16)
             self.users[username] = {"salt": salt, "hash": _hash_password(password, salt), "iter": ITERATIONS, "role": role,
-                                    "created": time.time(), "last_login": None, "invited_by": invited_by}
+                                    "created": time.time(), "last_login": None, "invited_by": invited_by,
+                                    "uid": secrets.token_hex(8)}
             self._persist("users")
         return username
 
@@ -134,6 +141,22 @@ class Auth:
                     inv["used_by"] = new
             self._persist("users", "sessions", "invites")
         return new
+
+    def set_avatar(self, username, version):
+        """Marca que el usuario tiene foto (version = cuando la subio, para que el navegador la refresque) o None."""
+        with self.lock:
+            user = self.users.get(username)
+            if not user:
+                raise AuthError("Ese usuario no existe.")
+            if version:
+                user["avatar"] = version
+            else:
+                user.pop("avatar", None)
+            self._persist("users")
+
+    def avatars(self):
+        """{usuario: url de su foto} de quienes tienen foto (la url cambia cuando la cambian)."""
+        return {n: f"/api/avatar/{u['uid']}?v={int(u['avatar'])}" for n, u in self.users.items() if u.get("avatar") and u.get("uid")}
 
     def set_role(self, username, role, by):
         if role not in ("admin", "user"):
@@ -231,7 +254,7 @@ class Auth:
         if not session or session["expires"] < time.time():
             return None
         user = self.users.get(session["user"])
-        return {"name": session["user"], "role": user["role"]} if user else None
+        return {"name": session["user"], "role": user["role"], "uid": user.get("uid")} if user else None
 
     def logout(self, token):
         with self.lock:

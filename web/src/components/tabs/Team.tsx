@@ -6,7 +6,7 @@ import { dateTime } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Invite, TeamUser } from "@/lib/types";
 import { ask, Modal, Select } from "../overlay";
-import { Badge, EmptyBox, Icon, PasswordInput, Skeleton } from "../ui";
+import { Badge, EmptyBox, Icon, PasswordInput, Skeleton, UserAvatar } from "../ui";
 
 /** El administrador cambia el nombre de usuario (con el que se entra al panel). */
 function RenameModal({ username, onClose, onDone }: { username: string; onClose: () => void; onDone: () => void }) {
@@ -186,7 +186,7 @@ export function Team() {
                 return (
                   <li key={u.username} className="user-row">
                     <div className="user-main">
-                      <span className="avatar">{u.username[0].toUpperCase()}</span>
+                      <UserAvatar name={u.username} src={state.avatars?.[u.username]} />
                       <div className="user-txt">
                         <b>{u.username}</b>
                         <span className="sub">

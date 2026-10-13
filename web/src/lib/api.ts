@@ -24,6 +24,8 @@ export async function post<T = { ok: boolean }>(url: string, body: unknown = {})
 }
 
 export const api = {
+  avatarSet: (image: string) => post<{ avatars: Record<string, string> }>("/api/me/avatar", { image }),
+  avatarDelete: () => post<{ avatars: Record<string, string> }>("/api/me/avatar/delete"),
   state: () => getJson<State>("/api/state"),
   history: (since: number) => getJson<HistPoint[]>(`/api/history?since=${since}`),
   saveSettings: (s: Partial<Settings>) => post<Settings>("/api/settings", s),

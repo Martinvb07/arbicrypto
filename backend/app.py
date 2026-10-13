@@ -160,6 +160,7 @@ def profile(name):
     haya puesto sale de los valores iniciales de backend/data/settings.json."""
     mine = prefs.get(name) or {} if name else {}
     out = {k: mine[k] if mine.get(k) is not None else settings[k] for k in PERSONAL}
+    out["bank_fee"] = 0  # las transferencias no cobran: el unico costo del banco es el 4x1000 (aunque se haya guardado otro)
     for k in METHOD_LISTS:
         out[k] = [str(m) for m in mine.get(k) or []]
     return out
@@ -746,22 +747,28 @@ price_alerts = []
 price_lock = threading.Lock()
 
 
-def price_best(alert, market):
-    """El mejor anuncio para esa alerta: BUY = el mas barato para comprar, SELL = el que mas paga al vender.
-    Con mine=True solo cuentan los que aceptan tu capital y tus medios de pago."""
+def price_ads(alert, market):
+    """Anuncios que cuentan para esa alerta, del mejor al peor: BUY = los mas baratos para comprar, SELL = los que mas
+    pagan al vender. Con mine=True solo los que aceptan tu capital y tus medios de pago."""
     pr = profile(alert["user"])
     cap = pr["capital"]
     methods = pr["pay_methods"] if alert["side"] == "BUY" else pr["recv_methods"]
-    for ad in market.get(alert["asset"], {}).get(alert["side"]) or []:
-        if alert.get("mine", True) and not (engine._fits(ad, cap, cap / ad["price"]) and engine._pays_with(ad, methods)):
-            continue
-        return ad
-    return None
+    return [ad for ad in market.get(alert["asset"], {}).get(alert["side"]) or []
+            if not alert.get("mine", True) or (engine._fits(ad, cap, cap / ad["price"]) and engine._pays_with(ad, methods))]
+
+
+def price_meets(alert, ad):
+    return ad["price"] <= alert["target"] if alert["side"] == "BUY" else ad["price"] >= alert["target"]
+
+
+def ad_who(ad):
+    return str(ad.get("user") or ad.get("nick") or "")
 
 
 def price_check(market):
-    """Revisa las alertas con los anuncios de este escaneo. Avisa cuando el precio CRUZA la meta (no repite mientras
-    siga ahi) y se rearma cuando el precio se aleja."""
+    """Revisa las alertas con los anuncios de este escaneo. Suena con CADA anunciante que llega a la meta (igual o mejor),
+    tambien si sale una promocion mientras el precio ya estaba ahi, y otra vez si ese mismo anunciante mejora su precio.
+    Mientras un anuncio siga igual no repite; si se va y vuelve, avisa de nuevo."""
     main_name = main_user()
     fired = []
     with price_lock:
@@ -769,20 +776,27 @@ def price_check(market):
         for a in price_alerts:
             if not a.get("on", True) or a["asset"] not in market:
                 continue
-            ad = price_best(a, market)
-            hit = bool(ad) and (ad["price"] <= a["target"] if a["side"] == "BUY" else ad["price"] >= a["target"])
+            ads = price_ads(a, market)
+            ad = ads[0] if ads else None
+            meeting = [x for x in ads if price_meets(a, x)]
+            hit = bool(meeting)
             a["last"] = {"t": time.time(), "price": ad["price"] if ad else None, "nick": ad["nick"] if ad else None, "hit": hit}
-            if hit and not a.get("armed_off"):
-                a["armed_off"] = True
+            seen = a.get("seen") or {}  # {anunciante: precio con el que ya se aviso}
+            better = (lambda new, old: new < old) if a["side"] == "BUY" else (lambda new, old: new > old)
+            fresh = [x for x in meeting if ad_who(x) not in seen or better(x["price"], seen[ad_who(x)])]
+            now_seen = {ad_who(x): min(x["price"], seen.get(ad_who(x), x["price"])) if a["side"] == "BUY"
+                        else max(x["price"], seen.get(ad_who(x), x["price"])) for x in meeting}
+            if now_seen != seen:
+                a["seen"] = now_seen  # los que ya no cumplen salen: si vuelven, avisa otra vez
+                changed = True
+            a["armed_off"] = hit
+            if fresh:
                 a["hits"] = a.get("hits", 0) + 1
                 a["last_hit"] = time.time()
-                fired.append((a, ad))
+                fired.append((a, fresh[0]))  # el mejor de los nuevos
                 changed = True
                 if a.get("once"):
                     a["on"] = False
-            elif not hit and a.get("armed_off"):
-                a["armed_off"] = False
-                changed = True
         if changed:
             save_json(PRICE_FILE, price_alerts)
     for a, ad in fired:
@@ -926,7 +940,7 @@ def security_headers(resp):
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     resp.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
     resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")  # panel privado: fuera de los buscadores
-    if request.path.startswith("/api/"):
+    if request.path.startswith("/api/") and not request.path.startswith("/api/avatar/"):  # las fotos si se guardan
         resp.headers["Cache-Control"] = "no-store"
     return resp
 
@@ -988,6 +1002,52 @@ def api_password():
     except AuthError as e:
         return jsonify(error=str(e)), 400
     return with_session(auth.login(g.user["name"], str(b.get("new")), request.remote_addr))
+
+
+# ---------------------------------------------------------------- foto de perfil
+
+AVATAR_MAX = 48 * 1024  # la foto llega recortada a 256 px y comprimida en el navegador
+AVATAR_RE = re.compile(r"^data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$")
+AVATAR_MAGIC = {"jpeg": (bytes([0xFF, 0xD8, 0xFF]),), "png": (bytes([0x89]) + b"PNG",), "webp": (b"RIFF",)}
+
+
+@app.post("/api/me/avatar")
+def api_avatar_set():
+    m = AVATAR_RE.match(str(body().get("image") or ""))
+    if not m:
+        return jsonify(error="Elige una imagen JPG, PNG o WebP."), 400
+    kind, data = m.group(1), m.group(2)
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except ValueError:
+        return jsonify(error="La imagen no llegó bien. Intenta otra vez."), 400
+    if len(raw) > AVATAR_MAX or not raw.startswith(AVATAR_MAGIC[kind]):
+        return jsonify(error="Esa imagen no sirve o pesa demasiado. Prueba con otra."), 400
+    store.save(f"avatar_{g.user['uid']}", {"type": kind, "data": data})
+    auth.set_avatar(g.user["name"], time.time())
+    publish("presence")  # el chat y el equipo la ven de una vez
+    return jsonify(ok=True, avatars=auth.avatars())
+
+
+@app.post("/api/me/avatar/delete")
+def api_avatar_delete():
+    store.save(f"avatar_{g.user['uid']}", None)
+    auth.set_avatar(g.user["name"], None)
+    publish("presence")
+    return jsonify(ok=True, avatars=auth.avatars())
+
+
+@app.get("/api/avatar/{uid}")
+def api_avatar(uid):
+    """La foto de un miembro del equipo (solo con sesión: el panel es privado)."""
+    if not re.fullmatch(r"[0-9a-f]{16}", uid or ""):
+        abort(404)
+    doc = store.load(f"avatar_{uid}", None)
+    if not doc or not doc.get("data"):
+        abort(404)
+    resp = Response(base64.b64decode(doc["data"]), mimetype=f"image/{doc['type']}")
+    resp.headers["Cache-Control"] = "private, max-age=31536000, immutable"  # la url cambia con cada foto nueva
+    return resp
 
 
 @app.get("/api/team")
@@ -1328,7 +1388,7 @@ def api_price_update():
         except ValueError as e:
             return jsonify(error=str(e)), 400
         if any(new.get(k) != a.get(k) for k in ("asset", "side", "target", "mine")) or (new.get("on") and not a.get("on")):
-            new["armed_off"] = False  # meta nueva: puede avisar otra vez
+            new["armed_off"], new["seen"] = False, {}  # meta nueva: puede avisar otra vez con todos
         a.update(new)
         save_json(PRICE_FILE, price_alerts)
     publish("watch")
@@ -1374,7 +1434,7 @@ def api_state():
             "opps": sorted([o for o in (mine or {}).get("found", []) + opps["spot"] if o["per_usd"] >= me["min_per_usd"]],
                            key=lambda o: -o["per_usd"]),
             "connected": name in accounts, "key_hint": accounts[name].hint() if name in accounts else None,
-            "can_connect": can_connect(), "local": is_local(), "team": TEAM, "user": g.user, "telegram": telegram.info(), "usd_ref": usd_ref(),
+            "can_connect": can_connect(), "local": is_local(), "team": TEAM, "user": g.user, "avatars": auth.avatars(), "telegram": telegram.info(), "usd_ref": usd_ref(),
             "alerts_at_boot": alerts_at_boot,
             "alerts": [a for a in state["alerts"] if alert_visible(a, g.user)][:100], "watches": watch_view(g.user),
             "errors": {**state["errors"], **({"account": acc_errors[name]} if name in acc_errors else {})},
@@ -1708,7 +1768,12 @@ def local_time(t):
 def api_history_stats():
     days = min(max(request.args.get("days", 7, type=int), 1), 120)
     opps_rows, hours = db.stats(days)
-    return jsonify(opps=opps_rows, hours=hours, days=days)
+    cap = profile(g.user["name"])["capital"]
+    for o in opps_rows:  # la ganancia se guardo con el capital del equipo: se muestra con el tuyo, en proporcion
+        if o.get("capital"):
+            o["best_gain"] = o["best_gain"] / o["capital"] * cap
+            o["capital"] = cap
+    return jsonify(opps=opps_rows, hours=hours, days=days, capital=cap)
 
 
 @app.get("/api/orders")

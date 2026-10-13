@@ -255,6 +255,8 @@ export interface Alert {
 }
 
 export interface State {
+  /** fotos de perfil del equipo: {usuario: url} (quien no tiene foto no aparece) */
+  avatars?: Record<string, string>;
   watches: Watch[];
   boot: number;
   now: number;

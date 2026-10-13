@@ -105,7 +105,7 @@ function AlertForm({ s, edit, asset0, onClose }: { s: State; edit: PriceAlert | 
         <div className={`pf-alert ${once ? "on" : ""}`}>
           <div>
             <b><Icon name="bell" size={16} /> Avisar una sola vez</b>
-            <span className="dim small">Si está apagado, vuelve a avisar cada vez que el precio cruce tu meta.</span>
+            <span className="dim small">Si está apagado, avisa con cada anuncio que llegue a tu meta (también promociones).</span>
           </div>
           <Toggle on={once} onChange={setOnce} label="Avisar una sola vez" />
         </div>
@@ -160,7 +160,7 @@ function AlertRow({ a, s, i, onEdit }: { a: PriceAlert; s: State; i: number; onE
       <div className="pa-cell pa-goal">
         <small>{p.hit ? "¡Ya llegó!" : p.gap != null ? `Falta ${num(p.gap * 100, p.gap < 0.01 ? 2 : 1)} %` : "Sin anuncios"}</small>
         <div className="wprogress-bar"><span style={{ width: `${p.pct}%` }} /></div>
-        <span className="dim">{a.hits ? <>avisó {a.hits} {a.hits === 1 ? "vez" : "veces"}{a.last_hit ? <> · <Ago t={a.last_hit} /></> : null}</> : a.once ? "avisa una vez" : "avisa cada vez que cruce"}</span>
+        <span className="dim">{a.hits ? <>avisó {a.hits} {a.hits === 1 ? "vez" : "veces"}{a.last_hit ? <> · <Ago t={a.last_hit} /></> : null}</> : a.once ? "avisa una vez" : "avisa con cada anuncio que llegue"}</span>
       </div>
       <div className="pa-tags">
         {a.mine && <span className="badge brand"><Icon name="wallet" size={12} /> Mi capital</span>}
@@ -220,7 +220,7 @@ export function PriceAlerts({ s, asset }: { s: State; asset: string }) {
           <button className="btn btn-brand" onClick={() => setForm({ edit: null })}><Icon name="bellPlus" size={17} /> Crear alerta</button>
         </div>
       )}
-      <p className="note"><Icon name="info" size={14} /><span>Se revisa en cada escaneo de P2P. Avisa cuando el precio cruza tu meta y vuelve a avisar si se aleja y regresa. Confirma el precio en Binance antes de pagar.</span></p>
+      <p className="note"><Icon name="info" size={14} /><span>Se revisa en cada escaneo de P2P. Suena con cada anunciante que llegue a tu meta o la mejore, también si sale una promoción mientras el precio ya estaba ahí. Confirma el precio en Binance antes de pagar.</span></p>
       {form && <AlertForm s={s} edit={form.edit} asset0={asset} onClose={() => setForm(null)} />}
     </section>
   );

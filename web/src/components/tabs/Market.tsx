@@ -105,36 +105,32 @@ function Kpi({ icon, kind, label, value, hint, i }: { icon: IconName; kind: stri
 // ---------------------------------------------------------------- mis costos y mis medios
 
 const TAX_STEPS = [0, 0.19, 0.28, 0.33, 0.35, 0.37, 0.39];
-const parseNum = (v: string) => Number(v.trim().replace(/[\s$%]/g, "").replace(/\./g, "").replace(",", "."));
 const parsePct = (v: string) => Number(v.trim().replace(/[\s%]/g, "").replace(",", ".")) / 100;
 
-/** Comisión P2P, transferencia del banco y renta: lo que no sale en el anuncio pero sí de tu bolsillo. */
+/** Comisión P2P, 4x1000 y renta: lo que no sale en el anuncio pero sí de tu bolsillo (las transferencias no cobran). */
 function CostsSheet({ s, onClose }: { s: State; onClose: () => void }) {
   const { saveSettings, toast } = useLive();
   const st = s.settings;
   const [auto, setAuto] = useState(st.taker_fee < 0);
   const [fee, setFee] = useState(st.taker_fee >= 0 ? num(st.taker_fee * 100, 2) : "");
-  const [bank, setBank] = useState(st.bank_fee ? String(Math.round(st.bank_fee)) : "");
   const [tax, setTax] = useState(st.tax);
   const [gmf, setGmf] = useState(st.gmf > 0);
   const [busy, setBusy] = useState(false);
   const feeNow = auto ? s.p2p_fee_auto ?? 0 : parsePct(fee || "0");
-  const bankNow = parseNum(bank || "0");
   // ejemplo en vivo con tu capital: comprar y vender ya la misma cripto con 0,8 % de diferencia
   const cap = st.capital;
   const sample = (() => {
     const gross = cap * 1.008 * (1 - feeNow) ** 2;
     const g = gmf ? cap * 0.004 : 0;
-    const before = gross - cap - g - (bankNow || 0);
+    const before = gross - cap - g;
     const t = Math.max(before, 0) * tax;
-    return { feeCost: cap * 1.008 - gross, g, bank: bankNow || 0, t, net: before - t };
+    return { feeCost: cap * 1.008 - gross, g, t, net: before - t };
   })();
 
   const save = async () => {
     if (!auto && !(feeNow >= 0 && feeNow <= 0.02)) return toast("Revisa la comisión", "Entre 0 % y 2 %.", "bad");
-    if (!(bankNow >= 0 && bankNow <= 100000)) return toast("Revisa la transferencia", "Entre $0 y $100.000.", "bad");
     setBusy(true);
-    const ok = await saveSettings({ taker_fee: auto ? -1 : feeNow, bank_fee: bankNow || 0, tax, gmf: gmf ? 0.004 : 0 });
+    const ok = await saveSettings({ taker_fee: auto ? -1 : feeNow, bank_fee: 0, tax, gmf: gmf ? 0.004 : 0 });
     setBusy(false);
     if (ok) {
       toast("Costos guardados", "Rutas, avisos y precios ya se calculan con tus costos reales.", "good", 3000);
@@ -154,20 +150,10 @@ function CostsSheet({ s, onClose }: { s: State; onClose: () => void }) {
           <Segmented label="Comisión P2P" value={auto ? "auto" : "manual"} onChange={(v) => setAuto(v === "auto")}
             options={[["auto", `Automática · ${pctPlain(s.p2p_fee_auto ?? 0, 2)}`], ["manual", "La pongo yo"]] as const} />
           {auto ? (
-            <p className="dim small">Sale de las órdenes de las cuentas conectadas en Mi Binance. Si nadie ha conectado, es 0 %.</p>
+            <p className="dim small">Lo que Binance se queda en cada orden que tomas: mínimo 0,07 USDT por orden, o el porcentaje de las órdenes reales si es mayor.</p>
           ) : (
             <label className="mc-input"><input type="text" inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="0,1" autoFocus /><span>%</span></label>
           )}
-        </section>
-
-        <section className="mc-block">
-          <header><span className="mc-ico"><Icon name="bank" size={16} /></span><div><b>Transferencia de tu banco</b><small>Lo que te cobran por cada pago al vendedor (vacío = gratis)</small></div></header>
-          <label className="mc-input"><span>$</span><input type="text" inputMode="numeric" value={bank} onChange={(e) => setBank(e.target.value)} placeholder="0" /></label>
-          <div className="mc-chips">
-            {[0, 2000, 4500, 7500].map((v) => (
-              <button key={v} type="button" className={`chip-toggle ${bankNow === v ? "on" : ""}`} onClick={() => setBank(v ? String(v) : "")}>{v ? money(v, 0) : "Gratis"}</button>
-            ))}
-          </div>
         </section>
 
         <section className="mc-block">
@@ -190,7 +176,6 @@ function CostsSheet({ s, onClose }: { s: State; onClose: () => void }) {
             <div><small>Antes de costos</small><b>{signedMoney(cap * 0.008)}</b></div>
             {sample.feeCost >= 0.5 && <div className="cost"><small>Comisión P2P</small><b>−{money(sample.feeCost, 0)}</b></div>}
             {sample.g >= 0.5 && <div className="cost"><small>4x1000</small><b>−{money(sample.g, 0)}</b></div>}
-            {sample.bank >= 0.5 && <div className="cost"><small>Transferencia</small><b>−{money(sample.bank, 0)}</b></div>}
             {sample.t >= 0.5 && <div className="cost"><small>Renta</small><b>−{money(sample.t, 0)}</b></div>}
             <div className="net"><small>Te queda</small><b className={`val ${tone(sample.net)}`}>{signedMoney(sample.net)}</b></div>
           </div>
@@ -326,7 +311,7 @@ const directRoute = (s: State, asset: string) => s.p2p?.routes?.find((r) => r.id
 /** Desglose de lo que pagas, en qué se va y cuánto te queda con tu capital. */
 function Breakdown({ r }: { r: Route }) {
   const c = r.costs;
-  const parts: [string, number | undefined][] = [["Comisión P2P", c.p2p_fee], ["4x1000", c.gmf], ["Transferencia", c.bank], ["Renta", c.tax]];
+  const parts: [string, number | undefined][] = [["Comisión P2P", c.p2p_fee], ["4x1000", c.gmf], ["Renta", c.tax]];
   return (
     <div className="breakdown mine-break">
       <div><small>Pagas</small><b>{money(r.paid, 0)}</b></div>
@@ -645,7 +630,6 @@ export function Market() {
   const costTxt = [
     `comisión P2P ${pctPlain(state.p2p_fee ?? 0, 2)}${st.taker_fee < 0 ? " (auto)" : ""}`,
     st.gmf > 0 ? "4x1000" : "sin 4x1000",
-    st.bank_fee ? `transferencia ${money(st.bank_fee, 0)}` : "transferencia gratis",
     `renta ${pctPlain(st.tax ?? 0, 0)}`,
   ].join(" · ");
   const winsWith = (a: string) => {

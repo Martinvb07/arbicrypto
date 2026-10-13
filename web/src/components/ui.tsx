@@ -140,6 +140,17 @@ export function Logo({ size = 38 }: { size?: number }) {
   );
 }
 
+/** Foto de perfil del usuario, o su inicial si no ha subido foto. */
+export function UserAvatar({ name, src, size }: { name: string; src?: string; size?: number }) {
+  const box = size ? { width: size, height: size, fontSize: Math.round(size * 0.45) } : undefined;
+  return (
+    <span className={`avatar ${src ? "has-img" : ""}`} style={box}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {src ? <img src={src} alt="" loading="lazy" /> : (name[0] ?? "?").toUpperCase()}
+    </span>
+  );
+}
+
 export function Brand() {
   return (
     <span className="brand">

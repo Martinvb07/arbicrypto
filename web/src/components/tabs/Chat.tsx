@@ -8,7 +8,7 @@ import { hhmm } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { ChatMessage, ChatSummary } from "@/lib/types";
 import { ask } from "../overlay";
-import { EmptyBox, Icon, Skeleton } from "../ui";
+import { EmptyBox, Icon, Skeleton, UserAvatar } from "../ui";
 
 const PAGE = 60; // el servidor entrega de a 60 mensajes
 const MAX = 2000;
@@ -26,9 +26,10 @@ const preview = (m: ChatMessage, me: string, general: boolean) =>
   `${m.from === me ? "Tú: " : general ? `${m.from}: ` : ""}${msgText(m).replace(/\s+/g, " ")}`;
 
 function Avatar({ name, online, general }: { name: string; online?: boolean; general?: boolean }) {
+  const { state } = useLive();
   return (
     <span className="chat-av">
-      <span className={`avatar ${general ? "general" : ""}`}>{general ? <Icon name="users" size={15} /> : name[0].toUpperCase()}</span>
+      {general ? <span className="avatar general"><Icon name="users" size={15} /></span> : <UserAvatar name={name} src={state?.avatars?.[name]} />}
       {online !== undefined && <span className={`chat-dot ${online ? "on" : ""}`} aria-label={online ? "conectado" : "desconectado"} />}
     </span>
   );

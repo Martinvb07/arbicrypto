@@ -100,4 +100,34 @@ export async function shrinkImage(file: Blob): Promise<string> {
   return out;
 }
 
+/** Foto de perfil: recorte cuadrado al centro, 256 px en JPEG y liviana (menos de 45 KB) para que viaje rápido. */
+export async function avatarImage(file: Blob): Promise<string> {
+  if (!file.type.startsWith("image/")) throw new Error("Eso no es una imagen.");
+  const src = await new Promise<string>((ok, fail) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result));
+    r.onerror = () => fail(new Error("No se pudo leer la imagen."));
+    r.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((ok, fail) => {
+    const i = new Image();
+    i.onload = () => ok(i);
+    i.onerror = () => fail(new Error("No se pudo abrir la imagen."));
+    i.src = src;
+  });
+  const side = Math.min(img.naturalWidth, img.naturalHeight);
+  const c = document.createElement("canvas");
+  c.width = c.height = 256;
+  const ctx = c.getContext("2d");
+  if (!ctx) throw new Error("Tu navegador no pudo preparar la foto.");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, 256, 256);
+  for (const q of [0.86, 0.75, 0.62, 0.5]) {
+    const out = c.toDataURL("image/jpeg", q);
+    if (out.length < 60000) return out;
+  }
+  throw new Error("No se pudo achicar la foto. Prueba con otra.");
+}
+
 export const imageUrl = (name: string) => `/api/chat/image?name=${encodeURIComponent(name)}`;
