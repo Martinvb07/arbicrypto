@@ -1,18 +1,24 @@
 # secretos y datos: nunca al repositorio
 backend/.env
 backend/data/
+wallet/backend/data/
 logs/
 
 # Python
 __pycache__/
 *.pyc
 backend/.venv/
+wallet/backend/.venv/
 
 # Next.js
 web/node_modules/
 web/.next/
 web/out/
 web/tsconfig.tsbuildinfo
+wallet/web/node_modules/
+wallet/web/.next/
+wallet/web/out/
+wallet/web/tsconfig.tsbuildinfo
 
 # cualquier .env
 .env

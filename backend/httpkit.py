@@ -66,6 +66,10 @@ class _RequestProxy:
         return self._r.headers.get("host", "")
 
     @property
+    def headers(self):
+        return self._r.headers
+
+    @property
     def path(self):
         return self._r.url.path
 
@@ -107,7 +111,7 @@ class Json(JSONResponse):
 
     def set_cookie(self, key, value="", max_age=None, httponly=False, samesite="lax", secure=False, **kw):
         super().set_cookie(key, value, max_age=max_age, httponly=httponly, samesite=(samesite or "lax").lower(),
-                           secure=secure, path=kw.get("path", "/"))
+                           secure=secure, path=kw.get("path", "/"), domain=kw.get("domain"))
 
 
 def jsonify(*args, **kwargs):

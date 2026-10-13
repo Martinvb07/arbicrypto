@@ -2,6 +2,14 @@
 
 Panel en vivo de **arbitraje en Binance** para ti y tu equipo: comprar barato y vender más caro al mismo tiempo, en P2P (pesos) y dentro de Binance Spot, solo con criptos principales. Todo se mide en **pesos por dólar (USDT)** y ya descuenta comisiones de Binance, el redondeo de cantidades, un colchón por movimiento de precio y el 4x1000 **solo sobre la ganancia** (lo que llega de más a Nequi; el capital va y vuelve sin cobro por los topes exentos).
 
+En el mismo repositorio está **ArbiCrypto Wallet** (carpeta `wallet/`): la contabilidad de tus cripto, ganancias e impuestos en Colombia (DIAN, formulario 210). Usa las mismas tecnologías y se prende con el mismo PM2; ver **wallet/LEEME.md**.
+
+| App | Carpeta | En tu PC | En el VPS |
+|---|---|---|---|
+| Portada y login | `web/src/app/inicio` + `login` (los sirve el panel) | http://127.0.0.1:8787 sin sesión | arbicrypto.org · arbicrypto.org/login |
+| Panel (bot y oportunidades) | `backend/` + `web/` | http://127.0.0.1:8787 | panel.arbicrypto.org |
+| Wallet (ganancias e impuestos) | `wallet/backend/` + `wallet/web/` | http://127.0.0.1:8788 | wallet.arbicrypto.org |
+
 ## Cómo abrirlo (PM2)
 
 El panel se maneja con **PM2**, igual en tu PC y en el VPS. La primera vez, en la carpeta del proyecto:
@@ -35,6 +43,7 @@ Cada `git push` a `main` se **despliega solo en el VPS** (GitHub Actions: revisa
 - Invitar a alguien: pestaña **Equipo → Generar código** (sirve una sola vez y vence en 7 días). La persona toca *“Tengo un código de invitación”* y crea su usuario.
 - **Cada usuario pone su propio capital** (Arbitraje → Capital) y ve las rutas y avisos para su monto.
 - **Cada usuario conecta SU cuenta de Binance** en *Mi Binance* (llave de solo lectura). Solo esa persona ve sus saldos, órdenes y bitácora automática; ni los administradores las ven, y nadie puede desconectar la cuenta de otro. Si un administrador borra un usuario, su llave se borra con él.
+- **Wallet**: menú de tu usuario (arriba a la derecha) → *Wallet*. Abre TU contabilidad e impuestos (wallet.arbicrypto.org) con la misma sesión, sin otro login. Cada usuario tiene la suya; nadie más la ve, ni los administradores.
 - Los administradores cambian 4x1000 y avisos, invitan gente y **cambian la contraseña de cualquier usuario** (Equipo → Contraseña).
 - ¿Olvidaste la contraseña? Apaga el panel (`pm2 stop arbicrypto`) y en la carpeta `backend` ejecuta `python auth.py` → opción 2.
 
@@ -87,7 +96,10 @@ crypto-jesus/
   backend/   Python (FastAPI): lee Binance (también en tiempo real), calcula oportunidades, avisos, usuarios e historial
     data/    SQLite y archivos (si no usas MySQL)
   web/       Next.js + TypeScript: la interfaz (se compila a web/out)
-  deploy/    PM2, nginx y la guía del VPS
+  wallet/    ArbiCrypto Wallet: contabilidad e impuestos (mismas tecnologías, ver wallet/LEEME.md)
+    backend/ Python (FastAPI) + SQLite o MySQL
+    web/     Next.js + TypeScript (se compila a wallet/web/out)
+  deploy/    PM2 (las dos apps), nginx (panel y wallet) y la guía del VPS
 ```
 
 Si cambias algo en `web/src`: `cd web && npm run build` y luego `pm2 restart arbicrypto`.

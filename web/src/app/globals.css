@@ -532,6 +532,19 @@ label.chip:has(input:checked)::before { content: "✓"; font-weight: 800; color:
 .login-field { display: grid; gap: 6px; text-align: left; font-size: 13.5px; font-weight: 600; margin-bottom: 14px; }
 .login-field input { height: 46px; font-size: 15px; }
 .code-input { text-align: center; letter-spacing: .14em; font-family: var(--mono); font-size: 17px !important; text-transform: uppercase; }
+/* ¿a dónde entras? panel o wallet */
+.login-dest { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; margin-bottom: 18px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.login-dest button { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border: 0; border-radius: 9px;
+  background: none; color: var(--text-2); text-align: left; cursor: pointer; transition: background .15s, color .15s; }
+.login-dest button span { display: grid; line-height: 1.2; }
+.login-dest button b { font-size: 13.5px; }
+.login-dest button small { font-size: 11.5px; color: var(--muted); }
+.login-dest button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.login-dest button.on svg { color: var(--brand-text); }
+.login-dest button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.login-home { display: inline-flex; align-items: center; gap: 6px; margin-top: 16px; font-size: 13px; color: var(--muted); text-decoration: none; }
+.login-home:hover { color: var(--text); }
 
 /* ---------- menú de usuario ---------- */
 .menu { position: relative; }

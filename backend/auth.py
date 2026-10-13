@@ -52,6 +52,12 @@ class Auth:
         self.sessions = store.load("sessions", {})
         self.lock = threading.RLock()
         self.fails = {}
+        # id fijo de cada usuario (no cambia al renombrarlo): con él la wallet sabe de quién son los datos
+        missing = [u for u in self.users.values() if not u.get("uid")]
+        for u in missing:
+            u["uid"] = secrets.token_hex(8)
+        if missing:
+            self._persist("users")
 
     def _persist(self, *names):
         for n in names:
@@ -82,7 +88,8 @@ class Auth:
                 raise AuthError("Ese usuario ya existe. Elige otro nombre.")
             salt = secrets.token_hex(16)
             self.users[username] = {"salt": salt, "hash": _hash_password(password, salt), "iter": ITERATIONS, "role": role,
-                                    "created": time.time(), "last_login": None, "invited_by": invited_by}
+                                    "created": time.time(), "last_login": None, "invited_by": invited_by,
+                                    "uid": secrets.token_hex(8)}
             self._persist("users")
         return username
 
@@ -231,7 +238,7 @@ class Auth:
         if not session or session["expires"] < time.time():
             return None
         user = self.users.get(session["user"])
-        return {"name": session["user"], "role": user["role"]} if user else None
+        return {"name": session["user"], "role": user["role"], "uid": user.get("uid")} if user else None
 
     def logout(self, token):
         with self.lock:
