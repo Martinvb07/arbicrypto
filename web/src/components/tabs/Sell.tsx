@@ -7,7 +7,7 @@ import { money, num, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { ExitOption, Watch } from "@/lib/types";
 import { ask, Select, Sheet } from "../overlay";
-import { Asset, Coin, CopyButton, GoButton, Icon } from "../ui";
+import { Asset, Coin, CopyButton, GoButton, Icon, Toggle } from "../ui";
 
 /** Cantidad de cripto: acepta 0,0021 o 0.0021. */
 const parseQty = (v: string) => Number(v.trim().replace(/\s/g, "").replace(",", "."));
@@ -108,17 +108,6 @@ function coinOptions(choices: string[], holdings: { asset: string; qty: number }
 
 const ENDED: Record<string, string> = { vendida: "Ya la vendiste", vencida: "Venció", reemplazada: "Reemplazada" };
 const LIVE = new Set<Watch["status"]>(["vigilando", "lista"]);
-
-/** Switch de prender/apagar con el estilo del panel. */
-function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label?: string; disabled?: boolean }) {
-  return (
-    <label className={`toggle ${on ? "on" : ""}`}>
-      <input type="checkbox" checked={on} disabled={disabled} onChange={(e) => onChange(e.target.checked)} aria-label={label} />
-      <span className="toggle-track" aria-hidden="true" />
-      {label && <span className="toggle-txt">{label}</span>}
-    </label>
-  );
-}
 
 /** Agregar o editar una moneda de la lista. */
 function CoinForm({ edit, choices, holdings, onClose }: {

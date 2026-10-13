@@ -49,7 +49,7 @@ export interface Route {
   received: number;
   paid: number;
   /** En qué se van los pesos (COP): comisión Spot, redondeo de Binance, colchón, comisión P2P y 4x1000. */
-  costs: { spot_fee: number; rounding: number; buffer: number; p2p_fee: number; gmf: number };
+  costs: { spot_fee: number; rounding: number; buffer: number; p2p_fee: number; gmf: number; bank?: number; tax?: number };
   profit: number;
   profit_fiat: number;
   per_usd: number;
@@ -186,9 +186,36 @@ export interface Settings {
   safe_p2p: number;
   safe_spot: number;
   spot_slippage: number;
+  /** Comisión P2P al tomar un anuncio (-1 = automática, sacada de tus órdenes). */
+  taker_fee: number;
+  /** Lo que cobra tu banco por cada transferencia al vendedor, en pesos. */
+  bank_fee: number;
+  /** Impuesto de renta sobre la ganancia (0 a 0,39). */
+  tax: number;
+  /** Medios con los que pagas al comprar y por los que recibes al vender (vacío = todos). */
+  pay_methods: string[];
+  recv_methods: string[];
 }
 
-export type AlertKind = "p2p" | "spot" | "system" | "test" | "sell";
+/** "Avísame cuando USDT esté barato": el servidor la revisa en cada escaneo P2P. */
+export interface PriceAlert {
+  id: string;
+  asset: string;
+  /** BUY: avisa cuando comprar cueste igual o menos que target. SELL: cuando vender pague igual o más. */
+  side: Side;
+  target: number;
+  /** Solo anuncios que aceptan tu capital y tus medios de pago. */
+  mine: boolean;
+  on: boolean;
+  /** Se apaga sola después de avisar una vez. */
+  once: boolean;
+  created: number;
+  hits: number;
+  last_hit?: number | null;
+  last: { t: number; price: number | null; nick: string | null; hit: boolean } | null;
+}
+
+export type AlertKind = "p2p" | "spot" | "system" | "test" | "sell" | "price";
 
 /** "Avísame cuando pueda vender sin perder": el servidor vigila cada 5 s. */
 export interface Watch {
@@ -234,6 +261,9 @@ export interface State {
   settings: Settings;
   fee: number;
   p2p_fee: number;
+  /** La comisión P2P que sale de las órdenes de las cuentas conectadas (la que se usa en modo automático). */
+  p2p_fee_auto?: number;
+  price_alerts?: PriceAlert[];
   /** Lo que Binance te cobra por tus propios anuncios, sacado de tus órdenes como anunciante (null si no tienes). */
   maker_fee: number | null;
   spot: SpotState | null;
@@ -312,6 +342,13 @@ export interface ChatMessage {
   from: string;
   to: string | null;
   body: string;
+  /** Nombre de la imagen adjunta (se pide a /api/chat/image). */
+  image?: string | null;
+  reply_to?: number | null;
+  /** El mensaje al que responde, resumido. */
+  reply?: { id: number; from: string; body: string; image: boolean } | null;
+  /** {emoji: [usuarios]} */
+  reactions?: Record<string, string[]>;
 }
 
 export interface ChatUser {

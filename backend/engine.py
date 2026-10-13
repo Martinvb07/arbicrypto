@@ -318,16 +318,24 @@ def _fits(ad, fiat_amount, crypto_qty):
     return ad["min"] <= fiat_amount <= ad["max"] and (not ad["available"] or ad["available"] >= crypto_qty)
 
 
-def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0):
+def _pays_with(ad, methods):
+    """El anuncio acepta alguno de tus medios de pago (sin medios elegidos, todos sirven)."""
+    return not methods or any(m in methods for m in ad["methods"])
+
+
+def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0, bank_fee=0.0, tax=0.0, pay=(), recv=()):
     """Arbitraje que se puede hacer ya, tomando anuncios existentes:
     pesos -> X (compra P2P) -> [X a Y en Spot] -> Y (venta P2P) -> pesos, para todas las criptos X, Y.
-    Cada paso usa el mejor anuncio que acepta el monto real; descuenta comision Spot y el 4x1000 de lo que pagas
-    al vendedor (capital x 0,4 %)."""
+    Cada paso usa el mejor anuncio que acepta el monto real y tus medios de pago (pay al comprar, recv al vender);
+    descuenta comision Spot, comision P2P, el 4x1000 de lo que pagas al vendedor (capital x 0,4 %), lo que cobra
+    tu banco por la transferencia y el impuesto de renta sobre lo que ganas."""
     def buy_ad(asset):
-        return next((a for a in market.get(asset, {}).get("BUY") or [] if _fits(a, capital, capital / a["price"])), None)
+        return next((a for a in market.get(asset, {}).get("BUY") or []
+                     if _fits(a, capital, capital / a["price"]) and _pays_with(a, pay)), None)
 
     def sell_ad(asset, qty):
-        return next((a for a in market.get(asset, {}).get("SELL") or [] if _fits(a, qty * a["price"], qty)), None)
+        return next((a for a in market.get(asset, {}).get("SELL") or []
+                     if _fits(a, qty * a["price"], qty) and _pays_with(a, recv)), None)
 
     def p2p_step(kind, asset, ad, qty):
         return {"venue": "P2P", "kind": kind, "asset": asset, "label": f"{'Comprar' if kind == 'buy' else 'Vender'} {asset}",
@@ -358,11 +366,15 @@ def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0):
             steps.append(p2p_step("sell", y, sy, qty_y))
             received = qty_y * sy["price"] * (1 - p2p_fee)
             gmf_paid = with_gmf(capital, gmf) - capital  # el banco lo cobra al pagarle al vendedor
-            gain = received - capital - gmf_paid
+            gross = received - capital - gmf_paid - bank_fee
+            tax_paid = max(gross, 0) * tax  # la renta solo se paga si ganas
+            gain = gross - tax_paid
             # en que se van los pesos: cada costo valorado al precio de venta
             costs = {k: v * sy["price"] for k, v in lost.items()}
             costs["p2p_fee"] = capital * p2p_fee + qty_y * sy["price"] * p2p_fee
             costs["gmf"] = gmf_paid
+            costs["bank"] = bank_fee
+            costs["tax"] = tax_paid
             routes.append({"id": f"{x}>{y}", "steps": steps, "received": received, "paid": capital, "costs": costs,
                            "profit_fiat": gain, "profit": gain / capital})
     routes.sort(key=lambda t: -t["profit"])

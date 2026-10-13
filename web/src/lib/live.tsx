@@ -61,7 +61,12 @@ interface Toast {
   title: string;
   body?: string;
   tone: Tone;
+  /** Tipo de aviso (p2p, price…) para el ícono; vacío = mensaje del panel. */
+  kind?: string;
+  ms: number;
 }
+
+const TOAST_ICON: Record<string, string> = { p2p: "💰", spot: "⚡", sell: "🎯", price: "🔔", system: "⚠️", test: "🔊" };
 
 // ---------------------------------------------------------------- contexto
 
@@ -73,7 +78,7 @@ interface Live {
   prefsReady: boolean;
   setPrefs: (p: Partial<Prefs>) => void;
   refresh: () => void;
-  toast: (title: string, body?: string, tone?: Tone, ms?: number) => void;
+  toast: (title: string, body?: string, tone?: Tone, ms?: number, kind?: string) => void;
   beep: (kind?: string) => void;
   unread: number;
   clearUnread: () => void;
@@ -98,7 +103,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   const [offline, setOffline] = useState(false);
   const [prefs, setPrefsState] = useState<Prefs>(DEFAULT_PREFS);
   const [prefsReady, setPrefsReady] = useState(false);
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [toasts, setToasts] = useState<(Toast & { leaving?: boolean })[]>([]);
   const [unread, setUnread] = useState(0);
   const [permission, setPermission] = useState<Live["permission"]>("default");
   const [soundReady, setSoundReady] = useState(false);
@@ -144,38 +149,65 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const toast = useCallback((title: string, body?: string, tone: Tone = "info", ms = 8000) => {
-    const id = ++toastId.current;
-    setToasts((list) => [...list.slice(-3), { id, title, body, tone }]);
-    setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), ms);
+  const dropToast = useCallback((id: number) => {
+    setToasts((list) => list.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
+    setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), 220);
   }, []);
+  const toast = useCallback((title: string, body?: string, tone: Tone = "info", ms = 8000, kind?: string) => {
+    const id = ++toastId.current;
+    setToasts((list) => [...list.slice(-3), { id, title, body, tone, kind, ms }]);
+    setTimeout(() => dropToast(id), ms);
+  }, [dropToast]);
 
-  // Oportunidad: tres tonos que suben (dos veces), fuerte. Mensaje de chat: "tun-tun" suave que baja,
-  // como las apps de mensajería, para distinguirlo sin mirar. Pruebas: dos tonos cortos.
+  // Cada aviso suena distinto para reconocerlo sin mirar:
+  // - Chat: "pop-pop" corto y suave con el tono deslizándose hacia arriba (como una burbuja), volumen bajo.
+  // - Oportunidad (P2P, Spot, venta lista): fanfarria brillante tipo caja registradora, fuerte y larga.
+  // - Alerta de precio: campana grave que resuena (dos golpes).
+  // - Sistema: dos tonos graves que bajan. Pruebas: dos tonos cortos.
+  type Note = { f: number; to?: number; at: number; len: number; peak: number; wave: OscillatorType };
+  const SOUNDS: Record<string, Note[]> = {
+    chat: [
+      { f: 520, to: 980, at: 0, len: 0.09, peak: 0.16, wave: "sine" },
+      { f: 640, to: 1180, at: 0.13, len: 0.1, peak: 0.13, wave: "sine" },
+    ],
+    opp: [523, 659, 784, 1047, 0, 784, 1047, 1319, 1568].flatMap((f, i) => (f ? [
+      { f, at: i * 0.085, len: 0.22, peak: 0.26, wave: "square" as OscillatorType },
+      { f: f * 2, at: i * 0.085, len: 0.18, peak: 0.07, wave: "triangle" as OscillatorType },
+    ] : [])),
+    price: [0, 0.55].flatMap((at) => [
+      { f: 392, at, len: 1.1, peak: 0.3, wave: "sine" as OscillatorType },
+      { f: 784, at, len: 0.8, peak: 0.14, wave: "sine" as OscillatorType },
+      { f: 1176, at, len: 0.5, peak: 0.08, wave: "sine" as OscillatorType },
+    ]),
+    system: [
+      { f: 440, at: 0, len: 0.28, peak: 0.25, wave: "sawtooth" },
+      { f: 330, at: 0.3, len: 0.4, peak: 0.25, wave: "sawtooth" },
+    ],
+    test: [
+      { f: 880, at: 0, len: 0.2, peak: 0.3, wave: "triangle" },
+      { f: 1320, at: 0.12, len: 0.2, peak: 0.3, wave: "triangle" },
+    ],
+  };
   const beep = useCallback((kind: string = "test") => {
     const ctx = audio.current;
     if (!ctx || !prefsRef.current.sound) return;
     const t = ctx.currentTime;
-    const chat = kind === "chat";
-    const notes = kind === "p2p" || kind === "spot" || kind === "sell" ? [784, 1047, 1319, 0, 784, 1047, 1319] : chat ? [1175, 880] : [880, 1320];
-    const step = chat ? 0.11 : 0.12;
-    const peak = chat ? 0.18 : 0.3;
-    const len = chat ? 0.16 : 0.2;
-    notes.forEach((f, i) => {
-      if (!f) return;
+    const notes = SOUNDS[kind === "p2p" || kind === "spot" || kind === "sell" ? "opp" : kind] ?? SOUNDS.test;
+    notes.forEach((n) => {
       const o = ctx.createOscillator();
       const g = ctx.createGain();
-      const at = t + i * step;
-      o.type = chat ? "sine" : "triangle";
-      o.frequency.value = f;
+      const at = t + n.at;
+      o.type = n.wave;
+      o.frequency.setValueAtTime(n.f, at);
+      if (n.to) o.frequency.exponentialRampToValueAtTime(n.to, at + n.len * 0.8);
       g.gain.setValueAtTime(0.0001, at);
-      g.gain.exponentialRampToValueAtTime(peak, at + 0.015);
-      g.gain.exponentialRampToValueAtTime(0.0001, at + len);
+      g.gain.exponentialRampToValueAtTime(n.peak, at + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + n.len);
       o.connect(g).connect(ctx.destination);
       o.start(at);
-      o.stop(at + len + 0.02);
+      o.stop(at + n.len + 0.02);
     });
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const enableSound = useCallback(() => {
     try {
@@ -191,7 +223,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
 
   const notify = useCallback(
     (a: Alert) => {
-      toast(a.title, a.body, a.kind === "test" ? "info" : "good");
+      toast(a.title, a.body, a.kind === "test" ? "info" : a.kind === "system" ? "bad" : "good", a.kind === "test" ? 5000 : 12000, a.kind);
       beep(a.kind);
       if (prefsRef.current.desktop && "Notification" in window && Notification.permission === "granted") {
         try {
@@ -201,6 +233,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
             // directo a donde está el paso a paso con los botones a Binance
             if (a.kind === "p2p" || a.kind === "spot") window.location.hash = "inicio";
             else if (a.kind === "sell") window.location.hash = "vender";
+            else if (a.kind === "price") window.location.hash = "mercado";
             n.close();
           };
         } catch {
@@ -353,12 +386,13 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       {children}
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.tone}`}>
-            <b>{t.title}</b>
-            <button aria-label="Cerrar" onClick={() => setToasts((l) => l.filter((x) => x.id !== t.id))}>
-              ×
-            </button>
-            {t.body && <p>{t.body}</p>}
+          <div key={t.id} className={`toast ${t.tone} ${t.kind ? `k-${t.kind}` : ""} ${t.leaving ? "leaving" : ""}`} style={{ ["--ms" as string]: `${t.ms}ms` } as React.CSSProperties}>
+            <span className="toast-ico" aria-hidden="true">{TOAST_ICON[t.kind ?? ""] ?? (t.tone === "bad" ? "!" : t.tone === "good" ? "✓" : "i")}</span>
+            <div className="toast-txt">
+              <b>{t.title}</b>
+              {t.body && <p>{t.body}</p>}
+            </div>
+            <button aria-label="Cerrar" onClick={() => dropToast(t.id)}>×</button>
           </div>
         ))}
       </div>

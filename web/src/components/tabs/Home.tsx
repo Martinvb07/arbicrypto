@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { advertiserUrl, bestDeal, COIN_NAMES, copyQty, effBuy, gmfOf, isDollar, isMine, roundTrip, spotUrl, usdtPrices, type Deal } from "@/lib/calc";
+import { advertiserUrl, bestDeal, COIN_NAMES, copyQty, effBuy, gmfOf, isDollar, isMine, netOf, roundTrip, spotUrl, usdtPrices, type Deal } from "@/lib/calc";
 import { money, num, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, Conversion, Route, State, Triangle } from "@/lib/types";
@@ -113,6 +113,8 @@ function CostBar({ s }: { s: State }) {
     ["Colchón", pctTxt(s.settings.spot_slippage), true, "Por si el precio se mueve mientras haces el cambio en Spot"],
     ["Comisión P2P", pctTxt(s.p2p_fee ?? 0), (s.p2p_fee ?? 0) > 0, "Tomada de tus órdenes P2P; Binance normalmente no cobra al que toma un anuncio"],
     ["4x1000", gmf ? "0,4 % de lo que pagas" : "apagado", gmf, "Lo cobra tu banco cada vez que le pagas a un vendedor P2P, ganes o pierdas"],
+    ["Transferencia", s.settings.bank_fee ? money(s.settings.bank_fee, 0) : "gratis", s.settings.bank_fee > 0, "Lo que cobra tu banco por cada transferencia al vendedor (cámbialo en Precios P2P → Mis costos)"],
+    ["Renta", pctTxt(s.settings.tax ?? 0), (s.settings.tax ?? 0) > 0, "Impuesto de renta sobre la ganancia (cámbialo en Precios P2P → Mis costos)"],
   ];
   return (
     <div className="cost-bar" aria-label="Costos incluidos">
@@ -132,6 +134,7 @@ function Breakdown({ route }: { route: Route }) {
   if (!c) return null;
   const parts: [string, number][] = [
     ["Comisión Spot", c.spot_fee], ["Redondeo", c.rounding], ["Colchón", c.buffer], ["Comisión P2P", c.p2p_fee], ["4x1000", c.gmf],
+    ["Transferencia", c.bank ?? 0], ["Renta", c.tax ?? 0],
   ];
   const shown = parts.filter(([, v]) => v >= 0.5);
   return (
@@ -250,7 +253,8 @@ export function DealSteps({ d, s }: { d: Deal; s: State }) {
   const k = 1 - (s.p2p_fee ?? 0);
   const got = (d.amount / d.buy.price) * k;
   const received = got * d.sell.price * k;
-  const gmf = gmfOf(d.amount, s);
+  const n = netOf(d.amount, received, s);
+  const gmf = n.gmf;
   const unit = isDollar(d.asset) ? "cada dólar" : `por cada ${d.asset}`;
   const who = (ad: Ad) => (
     <div className="step-sub">
@@ -286,7 +290,9 @@ export function DealSteps({ d, s }: { d: Deal; s: State }) {
         <div><small>Pagas</small><b>{money(d.amount, 0)}</b></div>
         <div><small>Recibes</small><b>{money(received, 0)}</b></div>
         {gmf >= 0.5 && <div className="cost"><small>4x1000</small><b>−{money(gmf, 0)}</b></div>}
-        <div className="net"><small>Te queda</small><b className={`val ${tone(d.amount * d.ratio)}`}>{signedMoney(d.amount * d.ratio)}</b></div>
+        {n.bank >= 0.5 && <div className="cost"><small>Transferencia</small><b>−{money(n.bank, 0)}</b></div>}
+        {n.tax >= 0.5 && <div className="cost"><small>Renta</small><b>−{money(n.tax, 0)}</b></div>}
+        <div className="net"><small>Te queda</small><b className={`val ${tone(n.net)}`}>{signedMoney(n.net)}</b></div>
       </div>
     </>
   );

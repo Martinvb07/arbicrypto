@@ -26,6 +26,22 @@ export const effBuy = (price: number | undefined, s: State) => (price == null ? 
 /** El 4x1000 que cobra el banco sobre un pago. */
 export const gmfOf = (paid: number, s: State) => paid * s.settings.gmf;
 
+/** Lo que de verdad te queda al pagar `paid` y recibir `received` (ya sin comisión P2P): descuenta el 4x1000 de lo que
+ *  pagas, lo que cobra tu banco por la transferencia al vendedor y el impuesto de renta sobre la ganancia (si ganas). */
+export function netOf(paid: number, received: number, s: State) {
+  const gmf = gmfOf(paid, s);
+  const bank = s.settings.bank_fee ?? 0;
+  const gross = received - paid - gmf - bank;
+  const tax = Math.max(gross, 0) * (s.settings.tax ?? 0);
+  return { gmf, bank, tax, gross, net: gross - tax, ratio: paid ? (gross - tax) / paid : 0 };
+}
+
+/** ¿El anuncio acepta alguno de mis medios? (sin medios elegidos, todos sirven) */
+export const paysWith = (ad: Ad, methods: string[] | undefined) => !methods?.length || ad.methods.some((m) => methods.includes(m));
+
+/** ¿El anuncio acepta mi capital (monto y cripto disponible)? */
+export const takesCapital = (ad: Ad, capital: number) => ad.min <= capital && capital <= ad.max && (!ad.available || ad.available >= capital / ad.price);
+
 export function usdtPrices(s: State) {
   return { buy: effBuy(bestAd(s, "USDT", "BUY")?.price, s), sell: bestAd(s, "USDT", "SELL")?.price };
 }
@@ -39,7 +55,8 @@ export function roundTrip(s: State, asset: string): number | null {
   const sell = bestAd(s, asset, "SELL")?.price;
   if (!buy || !sell) return null;
   const keep = 1 - (s.p2p_fee ?? 0); // comisión P2P al comprar y al vender
-  return perDollar((sell * keep * keep) / (effBuy(buy, s) ?? buy) - 1, s); // al comprar pagas el 4x1000
+  const cap = s.settings.capital;
+  return perDollar(netOf(cap, ((cap / buy) * keep) * sell * keep, s).ratio, s); // 4x1000, transferencia y renta
 }
 
 /** Serie de precios de una cripto: precios de los anuncios, antes de comisiones y 4x1000. */
@@ -85,7 +102,7 @@ export interface Deal {
   /** Montos en pesos que aceptan los dos anuncios a la vez. */
   lo: number;
   hi: number;
-  /** Ganancia por cada peso que le pagas al vendedor, ya con comisión P2P y 4x1000. */
+  /** Ganancia por cada peso que le pagas al vendedor, ya con comisión P2P, 4x1000, transferencia y renta. */
   ratio: number;
   per_usd: number;
   /** El monto sugerido: tu capital si cabe; si no, el más cercano que aceptan. */
@@ -100,15 +117,16 @@ export function bestDeal(s: State, asset: string): Deal | null {
   const k = 1 - (s.p2p_fee ?? 0);
   const cap = s.settings.capital;
   let best: Deal | null = null;
-  for (const b of m.BUY.filter(trusted)) {
-    for (const v of m.SELL.filter(trusted)) {
-      const ratio = (v.price * k * k) / b.price - 1 - s.settings.gmf;
-      if (ratio <= 0 || (best && ratio <= best.ratio)) continue;
+  for (const b of m.BUY.filter((a) => trusted(a) && paysWith(a, s.settings.pay_methods))) {
+    for (const v of m.SELL.filter((a) => trusted(a) && paysWith(a, s.settings.recv_methods))) {
+      if ((v.price * k * k) / b.price - 1 - s.settings.gmf <= 0) continue; // ni antes de transferencia y renta gana
       const c = (v.price * k) / b.price; // pesos que vale en el anuncio de venta cada peso que pagas
       const lo = Math.ceil(Math.max(b.min, v.min / c));
       const hi = Math.floor(Math.min(b.max, v.max / c, b.available ? b.available * b.price : Infinity, v.available ? (v.available * b.price) / k : Infinity));
       if (!(lo <= hi)) continue;
       const amount = Math.min(Math.max(cap, lo), hi);
+      const { ratio } = netOf(amount, (amount / b.price) * k * v.price * k, s);
+      if (ratio <= 0 || (best && ratio <= best.ratio)) continue;
       best = { asset, buy: b, sell: v, lo, hi, ratio, per_usd: perDollar(ratio, s), amount, fitsCapital: amount === cap };
     }
   }

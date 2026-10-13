@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatSummary, ExitResult, HistPoint, HourBest, Invite, Order, PastOpp, Settings, State, TeamUser } from "./types";
+import type { ChatMessage, ChatSummary, ExitResult, HistPoint, HourBest, Invite, Order, PastOpp, PriceAlert, Settings, State, TeamUser } from "./types";
 
 async function getJson<T>(url: string): Promise<T> {
   const r = await fetch(url, { cache: "no-store" });
@@ -54,7 +54,13 @@ export const api = {
   chat: () => getJson<ChatSummary>("/api/chat"),
   chatMessages: (peer: string, before = 0) =>
     getJson<{ messages: ChatMessage[] }>(`/api/chat/messages?peer=${encodeURIComponent(peer)}${before ? `&before=${before}` : ""}`),
-  chatSend: (peer: string, body: string) => post<{ ok: boolean; message: ChatMessage }>("/api/chat/send", { peer, body }),
+  chatSend: (peer: string, body: string, extra: { reply_to?: number | null; image?: string | null } = {}) =>
+    post<{ ok: boolean; message: ChatMessage }>("/api/chat/send", { peer, body, ...extra }),
+  chatReact: (id: number, emoji: string) => post("/api/chat/react", { id, emoji }),
+  addPriceAlert: (a: Pick<PriceAlert, "asset" | "side" | "target" | "mine" | "once">) => post<{ ok: boolean; id: string }>("/api/price-alerts", a),
+  updatePriceAlert: (id: string, patch: Partial<Pick<PriceAlert, "asset" | "side" | "target" | "mine" | "on" | "once">>) =>
+    post("/api/price-alerts/update", { id, ...patch }),
+  deletePriceAlert: (id: string) => post("/api/price-alerts/delete", { id }),
   chatRead: (peer: string, id: number) => post("/api/chat/read", { peer, id }),
   chatDelete: (id: number) => post("/api/chat/delete", { id }),
 };

@@ -5,6 +5,8 @@ Se enciende con PM2 (ver LEEME.md):
     pm2 start deploy/ecosystem.config.js --env equipo    red local (Wi-Fi) -> http://IP-de-este-PC:8787
 """
 import asyncio
+import base64
+import binascii
 import functools
 import html
 import logging
@@ -42,6 +44,7 @@ SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 PREFS_FILE = os.path.join(DATA_DIR, "prefs.json")  # capital de cada usuario
 HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 WATCH_FILE = os.path.join(DATA_DIR, "watches.json")
+PRICE_FILE = os.path.join(DATA_DIR, "price_alerts.json")  # alertas de precio de cada usuario
 _ENV0 = storage.read_env_file(ENV_FILE)
 _flag = lambda k: (os.environ.get(k) or _ENV0.get(k, "")).strip().lower() in ("1", "true", "si", "yes")
 TEAM = "--equipo" in sys.argv or _flag("EQUIPO")  # EQUIPO=1: abierto en la red Wi-Fi
@@ -85,10 +88,16 @@ FIXED = {"fiat": FIAT, "p2p_assets": P2P_ASSETS, "max_profit": MAX_PROFIT, "p2p_
          "min_orders": MIN_ORDERS, "min_finish": MIN_FINISH,
          "safe_p2p": SAFE_P2P, "safe_spot": SAFE_SPOT, "spot_slippage": engine.SPOT_SLIPPAGE}
 
-# Lo unico que se configura (cada usuario el suyo): capital, desde cuanto avisar y si su cuenta paga 4x1000
-DEFAULTS = {"capital": 500000, "min_per_usd": 3, "gmf": 0.004}
+# Lo que se configura (cada usuario el suyo): capital, desde cuanto avisar, 4x1000 y sus costos reales.
+# taker_fee: comision P2P que le cobra Binance al tomar un anuncio (-1 = automatica, sacada de sus ordenes).
+# bank_fee: lo que le cobra su banco por cada transferencia al vendedor. tax: impuesto de renta sobre la ganancia.
+DEFAULTS = {"capital": 500000, "min_per_usd": 3, "gmf": 0.004, "taker_fee": -1, "bank_fee": 0, "tax": 0.19}
 PERSONAL = tuple(DEFAULTS)
-LIMITS = {"capital": (10000, 1e10), "min_per_usd": (0, 1e5), "gmf": (0, 0.01)}
+LIMITS = {"capital": (10000, 1e10), "min_per_usd": (0, 1e5), "gmf": (0, 0.01), "taker_fee": (-1, 0.02),
+          "bank_fee": (0, 100000), "tax": (0, 0.39)}
+# Medios de pago de cada usuario: con cuales paga al comprar y por cuales recibe al vender (vacio = todos)
+METHOD_LISTS = ("pay_methods", "recv_methods")
+PRICE_ALERT_MAX = 20              # alertas de precio por usuario
 
 CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
        "img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; "
@@ -147,10 +156,32 @@ def clean_settings(raw):
 
 
 def profile(name):
-    """Capital, 4x1000 y "avisar desde" de un usuario (administradores incluidos). Lo que no haya puesto
-    sale de los valores iniciales de backend/data/settings.json."""
+    """Capital, 4x1000, "avisar desde", costos y medios de pago de un usuario (administradores incluidos). Lo que no
+    haya puesto sale de los valores iniciales de backend/data/settings.json."""
     mine = prefs.get(name) or {} if name else {}
-    return {k: mine[k] if mine.get(k) is not None else settings[k] for k in PERSONAL}
+    out = {k: mine[k] if mine.get(k) is not None else settings[k] for k in PERSONAL}
+    for k in METHOD_LISTS:
+        out[k] = [str(m) for m in mine.get(k) or []]
+    return out
+
+
+def clean_methods(raw):
+    return sorted({str(m).strip()[:60] for m in raw or [] if str(m).strip()})[:30] if isinstance(raw, list) else []
+
+
+def route_key(pr):
+    """Las rutas P2P cambian con el capital, el 4x1000, los costos y los medios de pago: una cuenta por combinacion."""
+    fee = pr["taker_fee"] if pr["taker_fee"] >= 0 else p2p_fee()
+    return (pr["capital"], pr["gmf"], fee, pr["bank_fee"], pr["tax"], tuple(pr["pay_methods"]), tuple(pr["recv_methods"]))
+
+
+def tag_of(key):
+    return "@".join(str(x) for x in key[:5]) + "@" + ",".join(key[5]) + "@" + ",".join(key[6])
+
+
+def routes_for(market, key):
+    cap, gmf, fee, bank, tax, pay, recv = key
+    return engine.p2p_routes(market, graph, current_fee(), gmf, cap, FIAT, fee, bank_fee=bank, tax=tax, pay=pay, recv=recv)
 
 
 def main_user():
@@ -160,13 +191,12 @@ def main_user():
 
 
 def all_profiles():
-    """{(capital, 4x1000): [usuarios]}: las rutas P2P se calculan una vez por combinacion distinta."""
+    """{route_key: [usuarios]}: las rutas P2P se calculan una vez por combinacion distinta."""
     groups = {}
     for name in list(auth.users):
-        pr = profile(name)
-        groups.setdefault((pr["capital"], pr["gmf"]), []).append(name)
+        groups.setdefault(route_key(profile(name)), []).append(name)
     if not groups:
-        groups[(settings["capital"], settings["gmf"])] = []
+        groups[route_key(profile(None))] = []
     return dict(sorted(groups.items(), key=lambda kv: -len(kv[1]))[:8])
 
 
@@ -298,7 +328,7 @@ def raise_alert(key, kind, title, body, capital=None, user=None, telegram_too=Tr
         state["alerts"].insert(0, {"id": alert_id, "t": now, "kind": kind, "title": title, "body": body,
                                    "capital": capital, "user": user, "users": users, "audience": audience, "links": links})
         del state["alerts"][200:]
-    icon = {"p2p": "💰", "spot": "⚡", "system": "⚠️", "sell": "🎯"}.get(kind, "✅")
+    icon = {"p2p": "💰", "spot": "⚡", "system": "⚠️", "sell": "🎯", "price": "🔔"}.get(kind, "✅")
     if telegram_too:
         buttons = "\n" + "".join(f'\n👉 <a href="{html.escape(l["url"])}">{html.escape(l["label"])}</a>' for l in links) if links else ""
         telegram.send_async(f"<b>{icon} {html.escape(title)}</b>\n{html.escape(body)}{buttons}"
@@ -509,13 +539,14 @@ def p2p_step():
         if asset not in cache["market"] or not any(e.startswith(f"{asset} ") for e in errors):
             cache["market"][asset] = m  # si fallo, se conserva lo ultimo bueno
     market = {a: cache["market"][a] for a in P2P_ASSETS if a in cache["market"]}
-    fee, pfee, now = current_fee(), p2p_fee(), time.time()
+    fee, now = current_fee(), time.time()
     usdt_ads = market.get("USDT", {}).get("BUY") or market.get("USDT", {}).get("SELL") or []
     ref = usdt_ads[0]["price"] if usdt_ads else (usd_ref() or 0)
     computed, keep = {}, set()
     groups = all_profiles()
-    for (cap, gmf) in groups:
-        routes = engine.p2p_routes(market, graph, fee, gmf, cap, FIAT, pfee)
+    for gkey in groups:
+        cap, gmf = gkey[0], gkey[1]
+        routes = routes_for(market, gkey)
         conversions = engine.usdt_conversions(market, graph, fee, gmf, cap)
         for r in routes:
             r["per_usd"] = r["profit"] * ref
@@ -528,18 +559,22 @@ def p2p_step():
                 break
             if r["profit"] > MAX_PROFIT:
                 continue  # el minimo de cada usuario se aplica al mostrar y al avisar
-            key, seen_key = "p2p:" + r["id"], f"p2p:{r['id']}@{cap}@{gmf}"
+            key, seen_key = "p2p:" + r["id"], f"p2p:{r['id']}@{tag_of(gkey)}"
             first_seen.setdefault(seen_key, now)
             keep.add(seen_key)
             found.append({"id": key, "kind": "p2p", "profit": r["profit"], "per_usd": r["per_usd"], "gain": r["profit_fiat"],
                           "since": first_seen[seen_key], "route": r, "tight": r["profit"] < SAFE_P2P})
-        computed[(cap, gmf)] = {"routes": routes, "conversions": conversions, "found": found}
+        computed[gkey] = {"routes": routes, "conversions": conversions, "found": found}
     for key in [k for k in first_seen if k.startswith("p2p:") and k not in keep]:
         first_seen.pop(key, None)
     main_name = main_user()
     main = profile(main_name)  # historial y Telegram: el perfil del administrador principal
-    own = computed.get((main["capital"], main["gmf"])) or {"routes": [], "found": []}
+    own = computed.get(route_key(main)) or {"routes": [], "found": []}
     record_hour_best("p2p", own["routes"][0]["per_usd"] if own["routes"] else None, now)
+    try:
+        price_check(market)
+    except Exception as e:  # una alerta rota no frena el escaneo
+        logging.getLogger("arbicrypto").warning("alertas de precio: %s", e)
     db.track("p2p", {o["id"]: (route_label(o["route"]), o["per_usd"], o["gain"], route_text(o["route"]))
                      for o in own["found"] if o["per_usd"] >= main["min_per_usd"]}, main["capital"], now)
 
@@ -558,15 +593,17 @@ def p2p_step():
     if snapshot is not None:
         save_json(HISTORY_FILE, snapshot)
 
-    for (cap, gmf), names in groups.items():
-        costs_txt = (f"Ya descuenta comisiones, redondeo, colchón y el 4x1000 de lo que pagas ({money(cap * gmf)})" if gmf
-                     else "Ya descuenta comisiones, redondeo y colchón (sin 4x1000)")
-        found = computed[(cap, gmf)]["found"]
+    for gkey, names in groups.items():
+        cap, gmf, _, bank, tax = gkey[:5]
+        extra = "".join([f", transferencia {money(bank)}" if bank else "", f", renta {num(tax * 100, 0)} %" if tax else ""])
+        costs_txt = (f"Ya descuenta comisiones, el 4x1000 de lo que pagas ({money(cap * gmf)}){extra}" if gmf
+                     else f"Ya descuenta comisiones (sin 4x1000){extra}")
+        found = computed[gkey]["found"]
         by_min = {}
         for name in names:
             by_min.setdefault(profile(name)["min_per_usd"], []).append(name)
         for minimum, who in by_min.items():
-            tag = f"{cap}@{gmf}@{minimum}"
+            tag = f"{tag_of(gkey)}@{minimum}"
             sync_alerts(f"p2p@{tag}", {f"{o['id']}@{tag}": (
                 "p2p", f"{per_usd(o['per_usd'])} en P2P" + (" · JUSTA, actúa rápido" if o["tight"] else ""),
                 f"{route_text(o['route'])}\nCon {money(cap)}: {money(o['gain'])} de ganancia\n{costs_txt}",
@@ -687,6 +724,67 @@ def watch_view(user):
     with watch_lock:
         rows = [w for w in watches if w["user"] == user["name"]]  # personales, tambien para administradores
         return sorted(rows, key=lambda w: (w["status"] not in ("lista", "vigilando"), -w["created"]))[:30]
+
+
+# ---------------------------------------------------------------- alertas de precio ("avisame cuando este barato")
+
+price_alerts = []
+price_lock = threading.Lock()
+
+
+def price_best(alert, market):
+    """El mejor anuncio para esa alerta: BUY = el mas barato para comprar, SELL = el que mas paga al vender.
+    Con mine=True solo cuentan los que aceptan tu capital y tus medios de pago."""
+    pr = profile(alert["user"])
+    cap = pr["capital"]
+    methods = pr["pay_methods"] if alert["side"] == "BUY" else pr["recv_methods"]
+    for ad in market.get(alert["asset"], {}).get(alert["side"]) or []:
+        if alert.get("mine", True) and not (engine._fits(ad, cap, cap / ad["price"]) and engine._pays_with(ad, methods)):
+            continue
+        return ad
+    return None
+
+
+def price_check(market):
+    """Revisa las alertas con los anuncios de este escaneo. Avisa cuando el precio CRUZA la meta (no repite mientras
+    siga ahi) y se rearma cuando el precio se aleja."""
+    main_name = main_user()
+    fired = []
+    with price_lock:
+        changed = False
+        for a in price_alerts:
+            if not a.get("on", True) or a["asset"] not in market:
+                continue
+            ad = price_best(a, market)
+            hit = bool(ad) and (ad["price"] <= a["target"] if a["side"] == "BUY" else ad["price"] >= a["target"])
+            a["last"] = {"t": time.time(), "price": ad["price"] if ad else None, "nick": ad["nick"] if ad else None, "hit": hit}
+            if hit and not a.get("armed_off"):
+                a["armed_off"] = True
+                a["hits"] = a.get("hits", 0) + 1
+                a["last_hit"] = time.time()
+                fired.append((a, ad))
+                changed = True
+                if a.get("once"):
+                    a["on"] = False
+            elif not hit and a.get("armed_off"):
+                a["armed_off"] = False
+                changed = True
+        if changed:
+            save_json(PRICE_FILE, price_alerts)
+    for a, ad in fired:
+        unit = "cada dólar" if a["asset"] in ("USDT", "USDC", "FDUSD") else f"por {a['asset']}"
+        verb = "Compra" if a["side"] == "BUY" else "Vende"
+        title = f"{a['asset']} {'barato' if a['side'] == 'BUY' else 'caro'}: {money(ad['price'])} {unit}"
+        body = (f"{verb} a {ad['nick']} a {money(ad['price'])} {unit} (tu meta: {money(a['target'])})\n"
+                f"Acepta entre {money(ad['min'])} y {money(ad['max'])} · {', '.join(ad['methods'][:3])}")
+        raise_alert(f"price:{a['id']}:{a['hits']}", "price", title, body, users=[a["user"]],
+                    telegram_too=a["user"] == main_name,
+                    links=[(f"{verb} {a['asset']} a {ad['nick']}", advertiser_url(ad))])
+
+
+def price_alert_view(name):
+    with price_lock:
+        return sorted([a for a in price_alerts if a["user"] == name], key=lambda a: -a["created"])
 
 
 def account_step():
@@ -909,6 +1007,9 @@ def api_team_delete():
     except AuthError as e:
         return jsonify(error=str(e)), 400
     forget_account(name)  # su llave de Binance se borra con el usuario
+    with price_lock:
+        price_alerts[:] = [x for x in price_alerts if x["user"] != name]
+        save_json(PRICE_FILE, price_alerts)
     return jsonify(ok=True)
 
 
@@ -935,6 +1036,11 @@ def api_team_rename():
             if w["user"] == old:
                 w["user"] = new
         save_json(WATCH_FILE, watches)
+    with price_lock:
+        for x in price_alerts:
+            if x["user"] == old:
+                x["user"] = new
+        save_json(PRICE_FILE, price_alerts)
     vault.rename(old, new)
     with lock:
         for d in (accounts, acc_state, acc_errors):
@@ -1155,16 +1261,90 @@ def api_watch_delete():
     return jsonify(ok=True)
 
 
+def price_input(b, base=None):
+    """Valida una alerta de precio (nueva o cambios sobre `base`)."""
+    a = dict(base or {})
+    if "asset" in b or not base:
+        a["asset"] = str(b.get("asset") or "").upper()
+    if "side" in b or not base:
+        a["side"] = str(b.get("side") or "BUY").upper()
+    for k in ("mine", "on", "once"):
+        if k in b:
+            a[k] = bool(b[k])
+    if "target" in b or not base:
+        try:
+            a["target"] = float(b.get("target"))
+        except (TypeError, ValueError):
+            a["target"] = 0
+    if a["asset"] not in P2P_ASSETS:
+        raise ValueError("Esa cripto no está en P2P.")
+    if a["side"] not in ("BUY", "SELL"):
+        raise ValueError("Elige comprar o vender.")
+    if not 0 < a["target"] < 1e12:
+        raise ValueError("Escribe el precio al que quieres que te avise.")
+    return a
+
+
+@app.post("/api/price-alerts")
+def api_price_add():
+    try:
+        a = price_input(body())
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    with price_lock:
+        if sum(x["user"] == g.user["name"] for x in price_alerts) >= PRICE_ALERT_MAX:
+            return jsonify(error=f"Máximo {PRICE_ALERT_MAX} alertas. Borra una primero."), 400
+        a.update(id=secrets.token_hex(6), user=g.user["name"], created=time.time(), hits=0, last=None, armed_off=False,
+                 on=a.get("on", True), mine=a.get("mine", True), once=a.get("once", False))
+        price_alerts.append(a)
+        save_json(PRICE_FILE, price_alerts)
+    publish("watch")
+    return jsonify(ok=True, id=a["id"])
+
+
+@app.post("/api/price-alerts/update")
+def api_price_update():
+    b = body()
+    with price_lock:
+        a = next((x for x in price_alerts if x["id"] == str(b.get("id") or "") and x["user"] == g.user["name"]), None)
+        if not a:
+            return jsonify(error="Esa alerta ya no existe."), 404
+        try:
+            new = price_input(b, a)
+        except ValueError as e:
+            return jsonify(error=str(e)), 400
+        if any(new.get(k) != a.get(k) for k in ("asset", "side", "target", "mine")) or (new.get("on") and not a.get("on")):
+            new["armed_off"] = False  # meta nueva: puede avisar otra vez
+        a.update(new)
+        save_json(PRICE_FILE, price_alerts)
+    publish("watch")
+    return jsonify(ok=True)
+
+
+@app.post("/api/price-alerts/delete")
+def api_price_delete():
+    pid = str(body().get("id") or "")
+    with price_lock:
+        a = next((x for x in price_alerts if x["id"] == pid and x["user"] == g.user["name"]), None)
+        if not a:
+            return jsonify(error="Esa alerta ya no existe."), 404
+        price_alerts.remove(a)
+        save_json(PRICE_FILE, price_alerts)
+    publish("watch")
+    return jsonify(ok=True)
+
+
 @app.get("/api/state")
 def api_state():
     with lock:
         name = g.user["name"]  # saldos, ordenes y llave de Binance: solo los de su propia cuenta
         me = profile(name)
         cap = me["capital"]
-        mine = by_capital.get((cap, me["gmf"]))
+        rkey = route_key(me)
+        mine = by_capital.get(rkey)
         p2p = state["p2p"]
-        if p2p and mine is None and graph:  # capital o 4x1000 recien cambiado: se calcula ya con los anuncios guardados
-            routes = engine.p2p_routes(p2p["market"], graph, current_fee(), me["gmf"], cap, FIAT, p2p_fee())
+        if p2p and mine is None and graph:  # capital, costos o medios recien cambiados: se calcula ya con los anuncios guardados
+            routes = routes_for(p2p["market"], rkey)
             ref = usd_ref() or 0
             for r in routes:
                 r["per_usd"] = r["profit"] * ref
@@ -1173,7 +1353,8 @@ def api_state():
         if p2p:
             p2p = {**p2p, "routes": (mine or {}).get("routes", []), "conversions": (mine or {}).get("conversions")}
         return jsonify({
-            "boot": BOOT, "now": time.time(), "settings": public_settings(g.user), "fee": current_fee(), "p2p_fee": p2p_fee(),
+            "boot": BOOT, "now": time.time(), "settings": public_settings(g.user), "fee": current_fee(), "p2p_fee": rkey[2],
+            "p2p_fee_auto": p2p_fee(), "price_alerts": price_alert_view(name),
             "maker_fee": maker_fee(name), "spot": state["spot"], "p2p": p2p, "account": account_view(name),
             "opps": sorted([o for o in (mine or {}).get("found", []) + opps["spot"] if o["per_usd"] >= me["min_per_usd"]],
                            key=lambda o: -o["per_usd"]),
@@ -1194,13 +1375,15 @@ def api_history():
 
 @app.post("/api/settings")
 def api_settings():
-    b = {k: v for k, v in body().items() if k in PERSONAL}
-    if not b:
+    raw = body()
+    b = {k: v for k, v in raw.items() if k in PERSONAL}
+    lists = {k: clean_methods(raw[k]) for k in METHOD_LISTS if k in raw}
+    if not b and not lists:
         return jsonify(error="Nada que guardar."), 400
-    # capital, 4x1000 y "avisar desde" son de cada usuario, tambien de los administradores
+    # capital, 4x1000, "avisar desde", costos y medios son de cada usuario, tambien de los administradores
     clean = clean_settings({**profile(g.user["name"]), **b})
     with lock:
-        prefs[g.user["name"]] = {**prefs.get(g.user["name"], {}), **{k: clean[k] for k in b}}
+        prefs[g.user["name"]] = {**prefs.get(g.user["name"], {}), **{k: clean[k] for k in b}, **lists}
         save_json(PREFS_FILE, prefs)
     for e in wake.values():
         e.set()
@@ -1316,6 +1499,10 @@ def api_events():
 # algo nuevo: cada quien pide despues lo suyo, asi un privado nunca viaja a otra persona.
 
 CHAT_MAX = 2000           # caracteres por mensaje
+CHAT_IMG_DIR = os.path.join(DATA_DIR, "chat_img")
+CHAT_IMG_MAX = 3 * 1024 * 1024  # 3 MB por imagen (el navegador la reduce antes de enviarla)
+CHAT_IMG_TYPES = {"jpeg": (b"\xff\xd8\xff",), "png": (b"\x89PNG",), "gif": (b"GIF8",), "webp": (b"RIFF",)}
+CHAT_EMOJIS = ("👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "💰")
 CHAT_BURST = (12, 20)     # maximo 12 mensajes cada 20 s por usuario
 
 
@@ -1343,13 +1530,80 @@ def api_chat_messages():
     return jsonify(messages=db.messages(g.user["name"], peer, before or None))
 
 
+def can_see(msg, user):
+    """El canal general lo ven todos; un privado, solo sus dos personas."""
+    return bool(msg) and (msg["to"] is None or user in (msg["from"], msg["to"]))
+
+
+def save_chat_image(data_url):
+    """data:image/...;base64,... -> nombre del archivo guardado en backend/data/chat_img."""
+    m = re.fullmatch(r"data:image/(jpeg|png|gif|webp);base64,([A-Za-z0-9+/=\s]+)", str(data_url or ""))
+    if not m:
+        raise ValueError("Esa imagen no se puede enviar (usa JPG, PNG, GIF o WEBP).")
+    try:
+        raw = base64.b64decode(m.group(2), validate=False)
+    except (ValueError, binascii.Error):
+        raise ValueError("La imagen está dañada.")
+    kind = m.group(1)
+    if len(raw) > CHAT_IMG_MAX:
+        raise ValueError("La imagen pesa demasiado (máximo 3 MB).")
+    if not raw.startswith(CHAT_IMG_TYPES[kind]) or (kind == "webp" and raw[8:12] != b"WEBP"):
+        raise ValueError("Eso no parece una imagen.")
+    os.makedirs(CHAT_IMG_DIR, exist_ok=True)
+    name = f"{secrets.token_hex(12)}.{'jpg' if kind == 'jpeg' else kind}"
+    with open(os.path.join(CHAT_IMG_DIR, name), "wb") as f:
+        f.write(raw)
+    return name
+
+
+@app.get("/api/chat/image")
+def api_chat_image():
+    name = str(request.args.get("name") or "")
+    if not re.fullmatch(r"[0-9a-f]{24}\.(jpg|png|gif|webp)", name):
+        abort(404)
+    msg = db.message_by_image(name)
+    if not can_see(msg, g.user["name"]):
+        abort(404)
+    resp = send_from_directory(CHAT_IMG_DIR, name)
+    resp.headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    return resp
+
+
+@app.post("/api/chat/react")
+def api_chat_react():
+    b = body()
+    try:
+        msg = db.message(int(b.get("id") or 0))
+    except (TypeError, ValueError):
+        abort(400)
+    emoji = str(b.get("emoji") or "")
+    if emoji and emoji not in CHAT_EMOJIS:
+        return jsonify(error="Esa reacción no está disponible."), 400
+    if not can_see(msg, g.user["name"]):
+        return jsonify(error="Ese mensaje ya no existe."), 404
+    db.react(msg["id"], g.user["name"], emoji)
+    publish("chat")
+    return jsonify(ok=True)
+
+
 @app.post("/api/chat/send")
 def api_chat_send():
     b = body()
     me = g.user["name"]
     peer = chat_peer(b.get("peer"))
     text = str(b.get("body") or "").strip()
-    if not text:
+    reply_to = None
+    if b.get("reply_to"):
+        try:
+            quoted = db.message(int(b.get("reply_to")))
+        except (TypeError, ValueError):
+            abort(400)
+        # solo se responde a un mensaje de la misma conversacion
+        same = quoted and (quoted["to"] is None if not peer else {quoted["from"], quoted["to"]} == {me, peer})
+        if not same:
+            return jsonify(error="Ese mensaje ya no existe."), 400
+        reply_to = quoted["id"]
+    if not text and not b.get("image"):
         return jsonify(error="Escribe un mensaje."), 400
     if len(text) > CHAT_MAX:
         return jsonify(error=f"Máximo {CHAT_MAX} caracteres por mensaje."), 400
@@ -1359,7 +1613,13 @@ def api_chat_send():
         if len(recent) >= CHAT_BURST[0]:
             return jsonify(error="Vas muy rápido. Espera unos segundos."), 429
         chat_sent[me] = recent + [now]
-    msg = db.add_message(me, peer or None, text)
+    image = None
+    if b.get("image"):
+        try:
+            image = save_chat_image(b["image"])
+        except ValueError as e:
+            return jsonify(error=str(e)), 400
+    msg = db.add_message(me, peer or None, text, reply_to, image)
     db.mark_read(me, peer, msg["id"])
     publish("chat")
     return jsonify(ok=True, message=msg)
@@ -1389,6 +1649,11 @@ def api_chat_delete():
     if not msg or not (msg["from"] == me["name"] or (msg["to"] is None and me["role"] == "admin")):
         return jsonify(error="Solo puedes borrar tus propios mensajes."), 403
     db.delete_message(msg["id"])
+    if msg.get("image"):
+        try:
+            os.remove(os.path.join(CHAT_IMG_DIR, msg["image"]))
+        except OSError:
+            pass
     publish("chat")
     return jsonify(ok=True)
 
@@ -1492,6 +1757,7 @@ def main():
     if sql.mysql or redis.on:
         print(f"  Datos en {'MySQL' if sql.mysql else 'SQLite'}{' + Redis' if redis.on else ''}")
     watches.extend(load_json(WATCH_FILE, []))
+    price_alerts.extend(load_json(PRICE_FILE, []))
     prefs.update(load_json(PREFS_FILE, {}))
     for name, step, interval in (("spot", spot_step, SPOT_INTERVAL), ("p2p", p2p_step, P2P_INTERVAL),
                                  ("account", account_step, 60), ("watch", watch_step, WATCH_INTERVAL)):

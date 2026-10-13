@@ -23,6 +23,15 @@ import {
   SendHorizontal,
   ArrowLeft,
   Maximize2,
+  Reply,
+  SmilePlus,
+  ImagePlus,
+  Receipt,
+  Landmark,
+  BellPlus,
+  Pause,
+  Play,
+  Percent,
   type LucideIcon,
 } from "lucide-react";
 import { ago, pct, perUsd, tone } from "@/lib/format";
@@ -98,6 +107,15 @@ const ICONS = {
   send: SendHorizontal,
   back: ArrowLeft,
   expand: Maximize2,
+  reply: Reply,
+  smile: SmilePlus,
+  image: ImagePlus,
+  receipt: Receipt,
+  bank: Landmark,
+  bellPlus: BellPlus,
+  pause: Pause,
+  play: Play,
+  percent: Percent,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;
@@ -257,6 +275,17 @@ export function Switch({ checked, onChange, label }: { checked: boolean; onChang
     <label className="switch">
       <span>{label}</span>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    </label>
+  );
+}
+
+/** Switch de prender/apagar con el estilo del panel. */
+export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label?: string; disabled?: boolean }) {
+  return (
+    <label className={`toggle ${on ? "on" : ""}`}>
+      <input type="checkbox" checked={on} disabled={disabled} onChange={(e) => onChange(e.target.checked)} aria-label={label} />
+      <span className="toggle-track" aria-hidden="true" />
+      {label && <span className="toggle-txt">{label}</span>}
     </label>
   );
 }

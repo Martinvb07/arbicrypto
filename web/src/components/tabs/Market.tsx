@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { advertiserUrl, bestDeal, COIN_NAMES, dayStats, effBuy, GOOD_FINISH, GOOD_ORDERS, isDollar, perDollar, roundTrip, series } from "@/lib/calc";
+import { advertiserUrl, bestDeal, COIN_NAMES, dayStats, effBuy, GOOD_FINISH, GOOD_ORDERS, isDollar, paysWith, perDollar, roundTrip, series, takesCapital } from "@/lib/calc";
 import { money, num, pct, pctPlain, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, P2PStep, Route, Side, State } from "@/lib/types";
 import { DealSteps, p2pRow, RouteStatus, Steps } from "./Home";
+import { PriceAlerts } from "./PriceAlerts";
 import { PriceChart } from "../PriceChart";
-import { Ago, Coin, EmptyBox, ExtLink, GoButton, Icon, Segmented, Skeleton, Usd, type IconName } from "../ui";
-import { CapitalField, CostsNote, GmfToggle } from "../controls";
+import { Sheet } from "../overlay";
+import { Ago, Coin, EmptyBox, ExtLink, GoButton, Icon, Segmented, Skeleton, Toggle, Usd, type IconName } from "../ui";
+import { CapitalField } from "../controls";
 
 // Verde: precio casi igual al mejor y anunciante confiable. Rojo: lo contrario.
 const NEAR_BEST = 0.001; // hasta 0,1 % peor que el mejor precio (unos $3 por dólar)
@@ -30,10 +32,18 @@ function judge(ad: Ad, best: number, side: Side, s: State) {
 /** Cada cuánto se revisa el P2P, en palabras. */
 const every = (sec: number) => (sec >= 60 ? `${num(sec / 60, sec % 60 ? 1 : 0)} min` : `${sec} s`);
 
+/** Medios de un lado: los de pago al comprar, los de recibir al vender. */
+const methodsFor = (s: State, side: Side) => (side === "BUY" ? s.settings.pay_methods : s.settings.recv_methods) ?? [];
+
+/** ¿Este anuncio sirve con MI capital y MIS medios? */
+const forMe = (ad: Ad, s: State, side: Side) => takesCapital(ad, s.settings.capital) && paysWith(ad, methodsFor(s, side));
+
+type View = "mine" | "all" | "alerts";
+
 // ---------------------------------------------------------------- selector de moneda
 
 /** Fichas de monedas que se deslizan de lado en celular; los bordes se difuminan cuando hay más. */
-export function CoinPicker({ assets, value, onChange }: { assets: string[]; value: string; onChange: (a: string) => void }) {
+export function CoinPicker({ assets, value, onChange, badge }: { assets: string[]; value: string; onChange: (a: string) => void; badge?: (a: string) => ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const [fade, setFade] = useState({ l: false, r: false });
 
@@ -69,6 +79,7 @@ export function CoinPicker({ assets, value, onChange }: { assets: string[]; valu
               <b>{a}</b>
               <small>{COIN_NAMES[a] ?? "Cripto"}</small>
             </span>
+            {badge?.(a)}
           </button>
         ))}
       </div>
@@ -91,71 +102,326 @@ function Kpi({ icon, kind, label, value, hint, i }: { icon: IconName; kind: stri
   );
 }
 
-// ---------------------------------------------------------------- comprar y vender ya
+// ---------------------------------------------------------------- mis costos y mis medios
 
-/** Ruta directa de tu capital: comprar y vender la misma cripto en P2P (la calcula el servidor con comisiones y el 4x1000 de lo que pagas). */
+const TAX_STEPS = [0, 0.19, 0.28, 0.33, 0.35, 0.37, 0.39];
+const parseNum = (v: string) => Number(v.trim().replace(/[\s$%]/g, "").replace(/\./g, "").replace(",", "."));
+const parsePct = (v: string) => Number(v.trim().replace(/[\s%]/g, "").replace(",", ".")) / 100;
+
+/** Comisión P2P, transferencia del banco y renta: lo que no sale en el anuncio pero sí de tu bolsillo. */
+function CostsSheet({ s, onClose }: { s: State; onClose: () => void }) {
+  const { saveSettings, toast } = useLive();
+  const st = s.settings;
+  const [auto, setAuto] = useState(st.taker_fee < 0);
+  const [fee, setFee] = useState(st.taker_fee >= 0 ? num(st.taker_fee * 100, 2) : "");
+  const [bank, setBank] = useState(st.bank_fee ? String(Math.round(st.bank_fee)) : "");
+  const [tax, setTax] = useState(st.tax);
+  const [gmf, setGmf] = useState(st.gmf > 0);
+  const [busy, setBusy] = useState(false);
+  const feeNow = auto ? s.p2p_fee_auto ?? 0 : parsePct(fee || "0");
+  const bankNow = parseNum(bank || "0");
+  // ejemplo en vivo con tu capital: comprar y vender ya la misma cripto con 0,8 % de diferencia
+  const cap = st.capital;
+  const sample = (() => {
+    const gross = cap * 1.008 * (1 - feeNow) ** 2;
+    const g = gmf ? cap * 0.004 : 0;
+    const before = gross - cap - g - (bankNow || 0);
+    const t = Math.max(before, 0) * tax;
+    return { feeCost: cap * 1.008 - gross, g, bank: bankNow || 0, t, net: before - t };
+  })();
+
+  const save = async () => {
+    if (!auto && !(feeNow >= 0 && feeNow <= 0.02)) return toast("Revisa la comisión", "Entre 0 % y 2 %.", "bad");
+    if (!(bankNow >= 0 && bankNow <= 100000)) return toast("Revisa la transferencia", "Entre $0 y $100.000.", "bad");
+    setBusy(true);
+    const ok = await saveSettings({ taker_fee: auto ? -1 : feeNow, bank_fee: bankNow || 0, tax, gmf: gmf ? 0.004 : 0 });
+    setBusy(false);
+    if (ok) {
+      toast("Costos guardados", "Rutas, avisos y precios ya se calculan con tus costos reales.", "good", 3000);
+      onClose();
+    }
+  };
+
+  return (
+    <Sheet title={<span className="sheet-title"><Icon name="receipt" size={18} /> Mis costos</span>} onClose={onClose}
+      footer={<>
+        <button className="btn" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-brand" onClick={() => void save()} disabled={busy}><Icon name="check" size={16} /> {busy ? "Guardando…" : "Guardar"}</button>
+      </>}>
+      <div className="mc-form">
+        <section className="mc-block">
+          <header><span className="mc-ico"><Icon name="percent" size={16} /></span><div><b>Comisión P2P de Binance</b><small>Al tomar el anuncio de otro, al comprar y al vender</small></div></header>
+          <Segmented label="Comisión P2P" value={auto ? "auto" : "manual"} onChange={(v) => setAuto(v === "auto")}
+            options={[["auto", `Automática · ${pctPlain(s.p2p_fee_auto ?? 0, 2)}`], ["manual", "La pongo yo"]] as const} />
+          {auto ? (
+            <p className="dim small">Sale de las órdenes de las cuentas conectadas en Mi Binance. Si nadie ha conectado, es 0 %.</p>
+          ) : (
+            <label className="mc-input"><input type="text" inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="0,1" autoFocus /><span>%</span></label>
+          )}
+        </section>
+
+        <section className="mc-block">
+          <header><span className="mc-ico"><Icon name="bank" size={16} /></span><div><b>Transferencia de tu banco</b><small>Lo que te cobran por cada pago al vendedor (vacío = gratis)</small></div></header>
+          <label className="mc-input"><span>$</span><input type="text" inputMode="numeric" value={bank} onChange={(e) => setBank(e.target.value)} placeholder="0" /></label>
+          <div className="mc-chips">
+            {[0, 2000, 4500, 7500].map((v) => (
+              <button key={v} type="button" className={`chip-toggle ${bankNow === v ? "on" : ""}`} onClick={() => setBank(v ? String(v) : "")}>{v ? money(v, 0) : "Gratis"}</button>
+            ))}
+          </div>
+        </section>
+
+        <section className="mc-block">
+          <header><span className="mc-ico"><Icon name="receipt" size={16} /></span><div><b>Impuesto de renta</b><small>Sobre lo que ganas (si pierdes, no se cobra)</small></div></header>
+          <div className="mc-chips">
+            {TAX_STEPS.map((t) => (
+              <button key={t} type="button" className={`chip-toggle ${Math.abs(tax - t) < 1e-6 ? "on" : ""}`} onClick={() => setTax(t)}>{pctPlain(t, 0)}</button>
+            ))}
+          </div>
+        </section>
+
+        <section className="mc-block row">
+          <header><span className="mc-ico"><Icon name="card" size={16} /></span><div><b>4x1000</b><small>0,4 % de cada pago al vendedor</small></div></header>
+          <Toggle on={gmf} onChange={setGmf} label={gmf ? "Lo pago" : "Exento"} />
+        </section>
+
+        <div className="mc-sample">
+          <small>Ejemplo con {money(cap, 0)} y una diferencia de 0,8 % entre compra y venta</small>
+          <div className="breakdown">
+            <div><small>Antes de costos</small><b>{signedMoney(cap * 0.008)}</b></div>
+            {sample.feeCost >= 0.5 && <div className="cost"><small>Comisión P2P</small><b>−{money(sample.feeCost, 0)}</b></div>}
+            {sample.g >= 0.5 && <div className="cost"><small>4x1000</small><b>−{money(sample.g, 0)}</b></div>}
+            {sample.bank >= 0.5 && <div className="cost"><small>Transferencia</small><b>−{money(sample.bank, 0)}</b></div>}
+            {sample.t >= 0.5 && <div className="cost"><small>Renta</small><b>−{money(sample.t, 0)}</b></div>}
+            <div className="net"><small>Te queda</small><b className={`val ${tone(sample.net)}`}>{signedMoney(sample.net)}</b></div>
+          </div>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+/** Todos los medios de pago que aparecen hoy en los anuncios, más los que ya elegiste. */
+function allMethods(s: State) {
+  const seen = new Map<string, number>();
+  for (const m of Object.values(s.p2p?.market ?? {})) {
+    for (const ad of [...m.BUY, ...m.SELL]) for (const x of ad.methods) seen.set(x, (seen.get(x) ?? 0) + 1);
+  }
+  for (const x of [...(s.settings.pay_methods ?? []), ...(s.settings.recv_methods ?? [])]) if (!seen.has(x)) seen.set(x, 0);
+  return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([x]) => x);
+}
+
+function MethodPick({ title, sub, icon, all, value, onChange }: { title: string; sub: string; icon: IconName; all: string[]; value: string[]; onChange: (v: string[]) => void }) {
+  const flip = (m: string) => onChange(value.includes(m) ? value.filter((x) => x !== m) : [...value, m]);
+  return (
+    <section className="mc-block">
+      <header>
+        <span className="mc-ico"><Icon name={icon} size={16} /></span>
+        <div><b>{title}</b><small>{sub}</small></div>
+        <button type="button" className={`chip-toggle mc-all ${value.length ? "" : "on"}`} onClick={() => onChange([])}>Todos</button>
+      </header>
+      <div className="mc-chips">
+        {all.map((m) => (
+          <button key={m} type="button" className={`chip-toggle ${value.includes(m) ? "on" : ""}`} onClick={() => flip(m)} aria-pressed={value.includes(m)}>
+            {value.includes(m) && <Icon name="check" size={13} />}{m}
+          </button>
+        ))}
+        {!all.length && <span className="dim small">Aún no hay anuncios cargados.</span>}
+      </div>
+    </section>
+  );
+}
+
+/** Con qué pagas al comprar y por dónde recibes al vender: solo se usan anuncios con esos medios. */
+function MethodsSheet({ s, onClose }: { s: State; onClose: () => void }) {
+  const { saveSettings, toast } = useLive();
+  const all = useMemo(() => allMethods(s), [s]);
+  const [pay, setPay] = useState<string[]>(s.settings.pay_methods ?? []);
+  const [recv, setRecv] = useState<string[]>(s.settings.recv_methods ?? []);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    const ok = await saveSettings({ pay_methods: pay, recv_methods: recv });
+    setBusy(false);
+    if (ok) {
+      toast("Medios guardados", pay.length || recv.length ? "Solo verás rutas y avisos con anuncios que aceptan tus medios." : "Se usan anuncios con cualquier medio.", "good", 3000);
+      onClose();
+    }
+  };
+  return (
+    <Sheet title={<span className="sheet-title"><Icon name="card" size={18} /> Mis medios de pago</span>} onClose={onClose}
+      footer={<>
+        <button className="btn" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-brand" onClick={() => void save()} disabled={busy}><Icon name="check" size={16} /> {busy ? "Guardando…" : "Guardar"}</button>
+      </>}>
+      <div className="mc-form">
+        <MethodPick title="Pago con" sub="Al comprar: cómo le pagas al vendedor" icon="cart" all={all} value={pay} onChange={setPay} />
+        <MethodPick title="Recibo en" sub="Al vender: dónde te pueden pagar" icon="handCoins" all={all} value={recv} onChange={setRecv} />
+        <p className="dim small"><Icon name="info" size={13} /> Sin elegir ninguno se usan todos. Las rutas de Inicio y los avisos también usan estos medios.</p>
+      </div>
+    </Sheet>
+  );
+}
+
+// ---------------------------------------------------------------- con mi capital
+
+/** Ruta directa de tu capital: comprar y vender la misma cripto en P2P (la calcula el servidor con tus costos y medios). */
 const directRoute = (s: State, asset: string) => s.p2p?.routes?.find((r) => r.id === `${asset}>${asset}`);
 
-/** Cuando comprar y vender gana: el paso a paso, igual que en Inicio. Abajo, las otras criptos que también ganan. */
-function WinCard({ s, asset, onCoin }: { s: State; asset: string; onCoin: (a: string) => void }) {
-  const r = directRoute(s, asset);
-  const others = (s.p2p?.routes ?? [])
-    .filter((x) => x.steps.length === 2 && x.profit_fiat > 0 && x.id !== `${asset}>${asset}`)
-    .sort((a, b) => b.per_usd - a.per_usd);
-  const wins = r && r.profit_fiat > 0;
-  const found = wins ? null : bestDeal(s, asset);
-  const deal = found && !found.fitsCapital ? found : null; // con otro monto: anunciantes recomendables que no aceptan tu capital
-  if (!wins && !deal && !others.length) return null;
-  const row = r && p2pRow(s, r);
+/** Desglose de lo que pagas, en qué se va y cuánto te queda con tu capital. */
+function Breakdown({ r }: { r: Route }) {
+  const c = r.costs;
+  const parts: [string, number | undefined][] = [["Comisión P2P", c.p2p_fee], ["4x1000", c.gmf], ["Transferencia", c.bank], ["Renta", c.tax]];
   return (
-    <section className={`card mkt-win ${wins || deal ? "on" : ""}`}>
-      {wins && row ? (
+    <div className="breakdown mine-break">
+      <div><small>Pagas</small><b>{money(r.paid, 0)}</b></div>
+      <div><small>Recibes</small><b>{money(r.received, 0)}</b></div>
+      {parts.filter(([, v]) => (v ?? 0) >= 0.5).map(([k, v]) => <div key={k} className="cost"><small>{k}</small><b>−{money(v, 0)}</b></div>)}
+      <div className="net"><small>Te queda</small><b className={`val ${tone(r.profit_fiat)}`}>{signedMoney(r.profit_fiat)}</b></div>
+    </div>
+  );
+}
+
+/** El mejor anuncio de un lado para mí, en una tarjeta compacta. */
+function MineSide({ side, ad, asset, s, qtyHint }: { side: Side; ad: Ad | undefined; asset: string; s: State; qtyHint?: number }) {
+  const buy = side === "BUY";
+  const unit = isDollar(asset) ? "por dólar" : `por ${asset}`;
+  return (
+    <div className={`mine-side ${side}`}>
+      <div className="mine-side-top">
+        <span className={`mkt-col-ico ${side}`}><Icon name={buy ? "cart" : "handCoins"} size={17} /></span>
+        <div>
+          <small>{buy ? "Le compras a" : "Le vendes a"}</small>
+          <b>{ad ? <ExtLink href={advertiserUrl(ad)}>{ad.nick}</ExtLink> : "Nadie acepta tu capital"}</b>
+        </div>
+      </div>
+      {ad ? (
         <>
-          <div className="mkt-sec-head">
-            <div className="mkt-sec-title">
-              <span className="sec-ico green"><Icon name="trend" /></span>
-              <div>
-                <h2>Gana ahora con {asset}: <span className="up">{signedMoney(r.profit_fiat)}</span></h2>
-                <p className="sub">Con {money(s.settings.capital, 0)} · ya descuenta comisión P2P y el 4x1000 de lo que pagas</p>
-              </div>
-            </div>
-            <RouteStatus r={row} />
+          <div className="mine-side-price">{money(ad.price)} <small>{unit}</small></div>
+          <div className="mine-side-meta">
+            <span>{num(ad.orders, 0)} órdenes · {num(ad.finish * 100, 0)} %</span>
+            <span>{money(ad.min, 0)} – {money(ad.max, 0)}</span>
           </div>
-          <Steps row={row} s={s} />
-        </>
-      ) : deal ? (
-        <>
-          <div className="mkt-sec-head">
-            <div className="mkt-sec-title">
-              <span className="sec-ico green"><Icon name="trend" /></span>
-              <div>
-                <h2>Gana con otro monto en {asset}: <span className="up">{perUsd(deal.per_usd)}</span> por dólar</h2>
-                <p className="sub">
-                  Tu capital ({money(s.settings.capital, 0)}) no cabe en sus límites · aceptan entre {money(deal.lo, 0)} y {money(deal.hi, 0)} ·
-                  ya descuenta comisión P2P y el 4x1000
-                </p>
-              </div>
-            </div>
-            {deal.ratio < s.settings.safe_p2p && <span className="badge warn" title="Gana poco: si un precio cambia mientras operas, puede volverse pérdida">Justa · actúa rápido</span>}
-          </div>
-          <DealSteps d={deal} s={s} />
+          <div className="ad-methods">{ad.methods.slice(0, 4).map((m) => <span key={m} className={`tag ${methodsFor(s, side).includes(m) ? "mine" : ""}`}>{m}</span>)}</div>
+          <GoButton href={advertiserUrl(ad)} icon={buy ? "cart" : "handCoins"} strong
+            title={`Abre el perfil de ${ad.nick} en Binance P2P`}>
+            {buy ? `Comprar${qtyHint ? ` ${isDollar(asset) ? num(qtyHint, 2) : qty(qtyHint)}` : ""}` : "Vender"} {asset}
+          </GoButton>
         </>
       ) : (
-        <div className="mkt-win-none"><Icon name="info" size={16} /> Comprar y vender {asset} ya no gana con {money(s.settings.capital, 0)}.</div>
+        <p className="dim small">Prueba con otro capital o agrega más medios de pago.</p>
       )}
-      {others.length > 0 && (
-        <div className="mkt-win-others">
-          <small>{wins ? "También gana:" : "Sí gana con:"}</small>
-          {others.slice(0, 6).map((o) => {
-            const a = o.id.split(">")[0];
-            return (
-              <button key={a} type="button" className="mkt-win-chip" onClick={() => onCoin(a)}>
-                <Coin s={a} size={18} /> {a} <b className="up">{signedMoney(o.profit_fiat)}</b>
-              </button>
-            );
-          })}
+    </div>
+  );
+}
+
+/** Lo que de verdad pasa con TU capital y TUS medios: el mejor par, el desglose y las demás criptos. */
+function MineView({ s, asset, onCoin }: { s: State; asset: string; onCoin: (a: string) => void }) {
+  const m = s.p2p?.market[asset];
+  const r = directRoute(s, asset);
+  const [bStep, sStep] = (r?.steps ?? []) as P2PStep[];
+  const buyAd = bStep?.ad ?? m?.BUY.find((a) => forMe(a, s, "BUY"));
+  const sellAd = sStep?.ad ?? m?.SELL.find((a) => forMe(a, s, "SELL"));
+  const row = r && p2pRow(s, r);
+  const wins = !!r && r.profit_fiat > 0;
+  const cap = money(s.settings.capital, 0);
+  const coins = s.settings.p2p_assets
+    .map((a) => ({ a, r: directRoute(s, a) }))
+    .sort((x, y) => (y.r?.profit_fiat ?? -Infinity) - (x.r?.profit_fiat ?? -Infinity));
+  const [k, setK] = useState<Side>("BUY");
+  const mineAds = (side: Side) => (m?.[side] ?? []).filter((a) => forMe(a, s, side));
+  const ads = mineAds(k);
+  const best = m?.[k][0]?.price;
+
+  return (
+    <>
+      <section className={`card mine-card ${wins ? "on" : ""}`} key={asset}>
+        <div className="mkt-sec-head">
+          <div className="mkt-sec-title">
+            <span className={`sec-ico ${wins ? "green" : ""}`}><Icon name={wins ? "trend" : "wallet"} /></span>
+            <div>
+              <h2>{wins ? <>Gana ya con {asset}: <span className="up">{signedMoney(r.profit_fiat)}</span></> : <>Con tu capital en {asset}</>}</h2>
+              <p className="sub">Solo anuncios que aceptan {cap}{(s.settings.pay_methods?.length || s.settings.recv_methods?.length) ? " y tus medios" : ""} · con todos tus costos</p>
+            </div>
+          </div>
+          {row && wins ? <RouteStatus r={row} /> : r && <span className="badge bad">Hoy pierdes {money(-r.profit_fiat, 0)}</span>}
         </div>
-      )}
+
+        <div className="mine-pair">
+          <MineSide side="BUY" ad={buyAd} asset={asset} s={s} qtyHint={bStep?.qty} />
+          <span className="mine-arrow" aria-hidden="true"><Icon name="arrowRight" size={18} /></span>
+          <MineSide side="SELL" ad={sellAd} asset={asset} s={s} />
+        </div>
+        {r ? <Breakdown r={r} /> : <p className="dim small mine-none"><Icon name="info" size={14} /> No hay un par de anuncios que acepte {cap} con tus medios.</p>}
+        {wins && row && <details className="mine-steps"><summary><Icon name="listChecks" size={15} /> Paso a paso con botones a Binance</summary><Steps row={row} s={s} /></details>}
+      </section>
+
+      <section className="card mine-coins">
+        <div className="mkt-sec-head">
+          <div className="mkt-sec-title">
+            <span className="sec-ico blue"><Icon name="coins" /></span>
+            <div>
+              <h2>Todas las criptos con {cap}</h2>
+              <p className="sub">Comprar y vender ya la misma cripto · lo que te queda después de costos</p>
+            </div>
+          </div>
+        </div>
+        <div className="mine-grid">
+          {coins.map(({ a, r: x }, i) => (
+            <button key={a} type="button" className={`mine-coin ${a === asset ? "on" : ""} ${x ? tone(x.profit_fiat) : "flat"}`} onClick={() => onCoin(a)}
+              style={{ ["--i" as string]: i } as CSSProperties}>
+              <Coin s={a} size={24} />
+              <span className="mine-coin-txt"><b>{a}</b><small>{x ? `${perUsd(x.per_usd)} por dólar` : "sin anuncios para ti"}</small></span>
+              <b className={`val ${x ? tone(x.profit_fiat) : "flat"}`}>{x ? signedMoney(x.profit_fiat) : "—"}</b>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="card mkt-book mine-book">
+        <div className="mkt-sec-head">
+          <div className="mkt-sec-title">
+            <span className="sec-ico"><Icon name="filter" /></span>
+            <div>
+              <h2>Anuncios para ti</h2>
+              <p className="sub">Aceptan {cap}{methodsFor(s, k).length ? ` y ${k === "BUY" ? "pagas" : "recibes"} con ${methodsFor(s, k).join(", ")}` : ""}</p>
+            </div>
+          </div>
+          <Segmented label="Lado" value={k} onChange={setK}
+            options={[["BUY", <span key="b" className="mkt-switch-opt"><Icon name="cart" size={15} />Comprar · {mineAds("BUY").length}</span>],
+              ["SELL", <span key="s" className="mkt-switch-opt"><Icon name="handCoins" size={15} />Vender · {mineAds("SELL").length}</span>]] as const} />
+        </div>
+        <div className="mkt-ads mine-ads" key={`${asset}-${k}`}>
+          {ads.length && best ? ads.map((ad, i) => <AdRow key={`${ad.nick}-${i}`} ad={ad} asset={asset} best={best} side={k} s={s} i={i} />)
+            : <EmptyBox icon="filter" title={`Ningún anuncio para ${k === "BUY" ? "comprar" : "vender"} acepta ${cap}${methodsFor(s, k).length ? " con tus medios" : ""}.`}>Mira la pestaña <b>Todos los anuncios</b> o cambia tu capital.</EmptyBox>}
+        </div>
+      </section>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- otro monto (todos los anuncios)
+
+/** Ganancias que NO son con tu capital: anunciantes recomendables que piden otro monto. Separado para no confundir. */
+function OtherAmount({ s, asset }: { s: State; asset: string }) {
+  const r = directRoute(s, asset);
+  const found = r && r.profit_fiat > 0 ? null : bestDeal(s, asset);
+  const deal = found && !found.fitsCapital ? found : null;
+  if (!deal) return null;
+  return (
+    <section className="card mkt-win other">
+      <div className="mkt-sec-head">
+        <div className="mkt-sec-title">
+          <span className="sec-ico blue"><Icon name="layers" /></span>
+          <div>
+            <h2>Con otro monto en {asset}: <span className="up">{perUsd(deal.per_usd)}</span> por dólar</h2>
+            <p className="sub">
+              <b>No es con tu capital</b> ({money(s.settings.capital, 0)}): aceptan entre {money(deal.lo, 0)} y {money(deal.hi, 0)} · ya con todos tus costos
+            </p>
+          </div>
+        </div>
+        {deal.ratio < s.settings.safe_p2p && <span className="badge warn" title="Gana poco: si un precio cambia mientras operas, puede volverse pérdida">Justa · actúa rápido</span>}
+      </div>
+      <DealSteps d={deal} s={s} />
     </section>
   );
 }
@@ -166,7 +432,8 @@ function AdRow({ ad, asset, best, side, s, i }: { ad: Ad; asset: string; best: n
   const j = judge(ad, best, side, s);
   const top = ad.price === best;
   const capital = s.settings.capital;
-  const fits = ad.min <= capital && capital <= ad.max;
+  const fits = takesCapital(ad, capital);
+  const mineM = methodsFor(s, side);
   const unit = isDollar(asset) ? "por dólar" : `por ${asset}`;
   const url = advertiserUrl(ad);
   return (
@@ -208,7 +475,7 @@ function AdRow({ ad, asset, best, side, s, i }: { ad: Ad; asset: string; best: n
         </span>
         <div className="ad-methods" aria-label="Medios de pago">
           <Icon name="card" size={14} />
-          {ad.methods.map((m) => <span key={m} className="tag">{m}</span>)}
+          {ad.methods.map((m) => <span key={m} className={`tag ${mineM.includes(m) ? "mine" : ""}`}>{m}</span>)}
         </div>
       </footer>
 
@@ -259,12 +526,87 @@ function CoinChart({ asset, s }: { asset: string; s: State }) {
   );
 }
 
+// ---------------------------------------------------------------- todos los anuncios
+
+function AllView({ s, asset }: { s: State; asset: string }) {
+  const m = s.p2p!.market[asset];
+  const [view, setView] = useState<Side>("BUY"); // en celular y tablet se ve un lado del libro a la vez
+  const [onlyMine, setOnlyMine] = useState(false);
+  const has = (s.settings.pay_methods?.length ?? 0) + (s.settings.recv_methods?.length ?? 0) > 0;
+  const side = (k: Side) => (k === "BUY" ? `Comprar ${asset}` : `Vender ${asset}`);
+  return (
+    <>
+      <OtherAmount s={s} asset={asset} />
+      <CoinChart asset={asset} s={s} />
+      <section className={`card mkt-book show-${view}`}>
+        <div className="mkt-book-bar">
+          <div className="mkt-book-tools">
+            <div className="mkt-switch">
+              <Segmented label="Lado del libro" value={view} onChange={setView}
+                options={[["BUY", <span key="b" className="mkt-switch-opt"><Icon name="cart" size={15} />Comprar</span>],
+                  ["SELL", <span key="s" className="mkt-switch-opt"><Icon name="handCoins" size={15} />Vender</span>]] as const} />
+            </div>
+            {has && <Toggle on={onlyMine} onChange={setOnlyMine} label="Solo mis medios" />}
+          </div>
+          <div className="mkt-legend">
+            <span><i className="sw good" /><span><b>Verde</b>: buen precio y anunciante confiable</span></span>
+            <span><i className="sw bad" /><span><b>Rojo</b>: precio peor que el mejor, o anunciante con pocas órdenes o que cancela</span></span>
+          </div>
+        </div>
+        <div className="book">
+          {(["BUY", "SELL"] as const).map((k) => {
+            const best = m[k][0]?.price;
+            const ads = onlyMine ? m[k].filter((a) => paysWith(a, methodsFor(s, k))) : m[k];
+            return (
+              <div key={k} className={`mkt-col ${k}`}>
+                <header className="mkt-col-head">
+                  <span className={`mkt-col-ico ${k}`}><Icon name={k === "BUY" ? "cart" : "handCoins"} /></span>
+                  <div>
+                    <h3>{side(k)}</h3>
+                    <p className="sub">{k === "BUY" ? "Te venden · más bajo es mejor" : "Te compran · más alto es mejor"}</p>
+                  </div>
+                  <span className="mkt-count">{ads.length} {ads.length === 1 ? "anuncio" : "anuncios"}</span>
+                </header>
+                <div className="mkt-ads" key={`${asset}-${onlyMine}`}>
+                  {ads.length && best ? (
+                    ads.map((ad, i) => <AdRow key={`${ad.nick}-${i}`} ad={ad} asset={asset} best={best} side={k} s={s} i={i} />)
+                  ) : (
+                    <EmptyBox icon="filter" title="Ningún anuncio cumple tus filtros." />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </>
+  );
+}
+
 // ---------------------------------------------------------------- pestaña
+
+function readView(): View {
+  try {
+    const v = localStorage.getItem("cj-mkt-view");
+    return v === "all" || v === "alerts" ? v : "mine";
+  } catch {
+    return "mine";
+  }
+}
 
 export function Market() {
   const { state, prefs, setPrefs } = useLive();
-  // en celular y tablet se ve un lado del libro a la vez
-  const [view, setView] = useState<Side>("BUY");
+  const [tab, setTab] = useState<View>("mine");
+  const [sheet, setSheet] = useState<"costs" | "methods" | null>(null);
+  useEffect(() => setTab(readView()), []);
+  const pick = (v: View) => {
+    setTab(v);
+    try {
+      localStorage.setItem("cj-mkt-view", v);
+    } catch {
+      /* sin almacenamiento */
+    }
+  };
   if (!state) return <div className="card"><Skeleton rows={10} /></div>;
   const st = state.settings;
   const asset = st.p2p_assets.includes(prefs.asset) ? prefs.asset : "USDT";
@@ -276,11 +618,23 @@ export function Market() {
   // precios netos con tu capital: lo que de verdad pagas y recibes por cada unidad (comisión P2P incluida)
   const route: Route | undefined = directRoute(state, asset);
   const [bStep, sStep] = (route?.steps ?? []) as P2PStep[];
-  const netBuy = route && bStep ? (route.paid + route.costs.gmf) / bStep.qty : effBuy(buy, state); // con su 4x1000
+  const netBuy = route && bStep ? (route.paid + route.costs.gmf + (route.costs.bank ?? 0)) / bStep.qty : effBuy(buy, state); // con 4x1000 y transferencia
   const netSell = route && sStep ? route.received / sStep.qty : sell;
   const rt = route ? route.per_usd : roundTrip(state, asset);
   const cap = money(st.capital, 0);
-  const side = (k: Side) => (k === "BUY" ? `Comprar ${asset}` : `Vender ${asset}`);
+  const alerts = state.price_alerts ?? [];
+  const hits = alerts.filter((a) => a.on && a.last?.hit).length;
+  const nMethods = (st.pay_methods?.length ?? 0) + (st.recv_methods?.length ?? 0);
+  const costTxt = [
+    `comisión P2P ${pctPlain(state.p2p_fee ?? 0, 2)}${st.taker_fee < 0 ? " (auto)" : ""}`,
+    st.gmf > 0 ? "4x1000" : "sin 4x1000",
+    st.bank_fee ? `transferencia ${money(st.bank_fee, 0)}` : "transferencia gratis",
+    `renta ${pctPlain(st.tax ?? 0, 0)}`,
+  ].join(" · ");
+  const winsWith = (a: string) => {
+    const r = directRoute(state, a);
+    return r && r.profit_fiat > 0 ? <span className="mkt-coin-dot" title="Gana con tu capital" /> : null;
+  };
 
   return (
     <div className="mkt">
@@ -293,76 +647,62 @@ export function Market() {
               <p className="sub">Los anuncios de Binance P2P en pesos, en vivo</p>
             </div>
           </div>
-          <div className="toolbar mkt-tools"><CapitalField /><GmfToggle /></div>
+          <div className="toolbar mkt-tools">
+            <CapitalField />
+            <button className="btn mkt-tool-btn" onClick={() => setSheet("costs")} title="Comisión P2P, transferencia, renta y 4x1000">
+              <Icon name="receipt" size={16} /> Mis costos
+            </button>
+            <button className={`btn mkt-tool-btn ${nMethods ? "set" : ""}`} onClick={() => setSheet("methods")} title="Con qué pagas y dónde recibes">
+              <Icon name="card" size={16} /> Mis medios{nMethods > 0 && <span className="mkt-tool-n">{nMethods}</span>}
+            </button>
+          </div>
         </div>
-        <CoinPicker assets={st.p2p_assets} value={asset} onChange={(a) => setPrefs({ asset: a })} />
+        <CoinPicker assets={st.p2p_assets} value={asset} onChange={(a) => setPrefs({ asset: a })} badge={winsWith} />
+        <div className="mkt-tabs">
+          <Segmented label="Vista" value={tab} onChange={pick}
+            options={[
+              ["mine", <span key="m" className="mkt-switch-opt"><Icon name="wallet" size={15} />Con mi capital</span>],
+              ["all", <span key="a" className="mkt-switch-opt"><Icon name="layers" size={15} />Todos los anuncios</span>],
+              ["alerts", <span key="l" className="mkt-switch-opt"><Icon name="bellRing" size={15} />Alertas{alerts.length > 0 && <span className={`mkt-tab-n ${hits ? "hit" : ""}`}>{hits || alerts.length}</span>}</span>],
+            ] as const} />
+          <button type="button" className="mkt-costs-line" onClick={() => setSheet("costs")} title="Cambiar mis costos">
+            <Icon name="check" size={13} /> {costTxt}
+          </button>
+        </div>
       </section>
 
       {!m ? (
         <div className="card"><Skeleton rows={8} /></div>
       ) : (
         <>
-          <div className="mkt-kpis" key={asset}>
-            <Kpi i={0} icon="cart" kind="buy" label="Te cuesta comprar" value={money(netBuy)}
-              hint={bStep ? <>Te vende <b>{bStep.ad.nick}</b>{netBuy !== bStep.price && <> · anuncio {money(bStep.price)}</>}</>
-                : buyAd ? <>Ninguno acepta {cap} · mejor: <b>{buyAd.nick}</b></> : "Sin anuncios"} />
-            <Kpi i={1} icon="handCoins" kind="sell" label="Recibes al vender" value={money(netSell)}
-              hint={sStep ? <>Te compra <b>{sStep.ad.nick}</b>{netSell !== sStep.price && <> · anuncio {money(sStep.price)}</>}</>
-                : sellAd ? <>Ninguno acepta {cap} · mejor: <b>{sellAd.nick}</b></> : "Sin anuncios"} />
-            <Kpi i={2} icon="swap" kind={`rt ${tone(rt)}`} label="Comprar y vender ya" value={<Usd v={rt} suffix="por dólar" />}
-              hint={route ? <>Con {cap}: <b className={tone(route.profit_fiat) === "up" ? "up" : "down"}>{signedMoney(route.profit_fiat)}</b> neto</>
-                : buy && sell ? <>Comprar y vender: <b className={sell > buy ? "up" : sell < buy ? "down" : ""}>{pct(sell / buy - 1)}</b> (antes de costos)</> : undefined} />
-            <Kpi i={3} icon="clock" kind="ago" label="Actualizado" value={<span className="mkt-ago"><span className="pulse" /><Ago t={state.p2p?.t} /></span>}
-              hint={`Se revisa cada ${every(st.p2p_interval)}`} />
+          {tab !== "alerts" && (
+            <div className="mkt-kpis" key={asset}>
+              <Kpi i={0} icon="cart" kind="buy" label="Te cuesta comprar" value={money(netBuy)}
+                hint={bStep ? <>Te vende <b>{bStep.ad.nick}</b>{netBuy !== bStep.price && <> · anuncio {money(bStep.price)}</>}</>
+                  : buyAd ? <>Ninguno acepta {cap} · mejor: <b>{buyAd.nick}</b></> : "Sin anuncios"} />
+              <Kpi i={1} icon="handCoins" kind="sell" label="Recibes al vender" value={money(netSell)}
+                hint={sStep ? <>Te compra <b>{sStep.ad.nick}</b>{netSell !== sStep.price && <> · anuncio {money(sStep.price)}</>}</>
+                  : sellAd ? <>Ninguno acepta {cap} · mejor: <b>{sellAd.nick}</b></> : "Sin anuncios"} />
+              <Kpi i={2} icon="swap" kind={`rt ${tone(rt)}`} label="Comprar y vender ya" value={<Usd v={rt} suffix="por dólar" />}
+                hint={route ? <>Con {cap}: <b className={tone(route.profit_fiat) === "up" ? "up" : "down"}>{signedMoney(route.profit_fiat)}</b> neto</>
+                  : buy && sell ? <>Comprar y vender: <b className={sell > buy ? "up" : sell < buy ? "down" : ""}>{pct(sell / buy - 1)}</b> (antes de costos)</> : undefined} />
+              <Kpi i={3} icon="clock" kind="ago" label="Actualizado" value={<span className="mkt-ago"><span className="pulse" /><Ago t={state.p2p?.t} /></span>}
+                hint={`Se revisa cada ${every(st.p2p_interval)}`} />
+            </div>
+          )}
+
+          <div className="mkt-view" key={tab}>
+            {tab === "mine" && <MineView s={state} asset={asset} onCoin={(a) => setPrefs({ asset: a })} />}
+            {tab === "all" && <AllView s={state} asset={asset} />}
+            {tab === "alerts" && <PriceAlerts s={state} asset={asset} />}
           </div>
-
-          <p className="mkt-net-note"><Icon name="info" size={14} /> Precios netos con tu capital: incluyen comisión P2P{(state.p2p_fee ?? 0) > 0 ? ` (${pctPlain(state.p2p_fee, 2)})` : " (hoy 0 %)"} y {state.settings.gmf > 0 ? `el 4x1000 de lo que pagas (${money(state.settings.capital * state.settings.gmf, 0)} con tu capital)` : "sin 4x1000 (apagado)"}.</p>
-
-          <WinCard s={state} asset={asset} onCoin={(a) => setPrefs({ asset: a })} />
-
-          <CoinChart asset={asset} s={state} />
-
-          <section className={`card mkt-book show-${view}`}>
-            <div className="mkt-book-bar">
-              <div className="mkt-switch">
-                <Segmented label="Lado del libro" value={view} onChange={setView}
-                  options={[["BUY", <span key="b" className="mkt-switch-opt"><Icon name="cart" size={15} />Comprar</span>],
-                    ["SELL", <span key="s" className="mkt-switch-opt"><Icon name="handCoins" size={15} />Vender</span>]] as const} />
-              </div>
-              <div className="mkt-legend">
-                <span><i className="sw good" /><span><b>Verde</b>: buen precio y anunciante confiable</span></span>
-                <span><i className="sw bad" /><span><b>Rojo</b>: precio peor que el mejor, o anunciante con pocas órdenes o que cancela</span></span>
-              </div>
-            </div>
-            <div className="book">
-              {(["BUY", "SELL"] as const).map((k) => {
-                const best = k === "BUY" ? buy : sell;
-                const ads = m[k];
-                return (
-                  <div key={k} className={`mkt-col ${k}`}>
-                    <header className="mkt-col-head">
-                      <span className={`mkt-col-ico ${k}`}><Icon name={k === "BUY" ? "cart" : "handCoins"} /></span>
-                      <div>
-                        <h3>{side(k)}</h3>
-                        <p className="sub">{k === "BUY" ? "Te venden · más bajo es mejor" : "Te compran · más alto es mejor"}</p>
-                      </div>
-                      <span className="mkt-count">{ads.length} {ads.length === 1 ? "anuncio" : "anuncios"}</span>
-                    </header>
-                    <div className="mkt-ads" key={asset}>
-                      {ads.length && best ? (
-                        ads.map((ad, i) => <AdRow key={`${ad.nick}-${i}`} ad={ad} asset={asset} best={best} side={k} s={state} i={i} />)
-                      ) : (
-                        <EmptyBox icon="filter" title="Ningún anuncio cumple tus filtros." />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <CostsNote s={state} />
-          </section>
+          {tab !== "alerts" && (
+            <p className="note"><Icon name="check" size={14} /> Precios netos con tu capital: ya descuentan {costTxt}. Confirma el precio en Binance antes de pagar.</p>
+          )}
         </>
       )}
+      {sheet === "costs" && <CostsSheet s={state} onClose={() => setSheet(null)} />}
+      {sheet === "methods" && <MethodsSheet s={state} onClose={() => setSheet(null)} />}
     </div>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
-import { chatUnread, refreshChat, useChat } from "@/lib/chat";
+import { chatUnread, imageUrl, msgText, REACTIONS, refreshChat, shrinkImage, useChat } from "@/lib/chat";
 import { hhmm } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { ChatMessage, ChatSummary } from "@/lib/types";
@@ -22,7 +23,7 @@ function dayLabel(t: number) {
 }
 
 const preview = (m: ChatMessage, me: string, general: boolean) =>
-  `${m.from === me ? "Tú: " : general ? `${m.from}: ` : ""}${m.body.replace(/\s+/g, " ")}`;
+  `${m.from === me ? "Tú: " : general ? `${m.from}: ` : ""}${msgText(m).replace(/\s+/g, " ")}`;
 
 function Avatar({ name, online, general }: { name: string; online?: boolean; general?: boolean }) {
   return (
@@ -66,6 +67,55 @@ function Channels({ s, peer, onPick }: { s: ChatSummary; peer: string; onPick: (
   );
 }
 
+// ---------------------------------------------------------------- piezas de un mensaje
+
+/** Foto en pantalla completa: se cierra tocando afuera o con Escape. */
+function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", esc);
+    return () => document.removeEventListener("keydown", esc);
+  }, [onClose]);
+  return createPortal(
+    <div className="chat-lightbox" onClick={onClose} role="dialog" aria-label="Imagen">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt="" onClick={(e) => e.stopPropagation()} />
+      <div className="chat-lightbox-bar">
+        <a className="icon-btn" href={src} download target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} aria-label="Abrir original"><Icon name="download" size={18} /></a>
+        <button className="icon-btn" onClick={onClose} aria-label="Cerrar"><Icon name="x" size={18} /></button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/** Cita del mensaje al que se responde (dentro de la burbuja o encima del cuadro de texto). */
+function Quote({ q, me, onClick, onClose }: { q: { from: string; body: string; image?: boolean | string | null }; me: string; onClick?: () => void; onClose?: () => void }) {
+  return (
+    <div className={`chat-quote ${onClick ? "link" : ""}`} onClick={onClick} role={onClick ? "button" : undefined}>
+      <b>{q.from === me ? "Tú" : q.from}</b>
+      <span>{msgText({ body: q.body, image: q.image }) || "Mensaje"}</span>
+      {onClose && <button type="button" className="icon-btn" onClick={onClose} aria-label="Cancelar respuesta"><Icon name="x" size={14} /></button>}
+    </div>
+  );
+}
+
+/** Reacciones de un mensaje: emoji + cuántos; la tuya resaltada (tocarla la quita). */
+function Reactions({ m, me, onReact }: { m: ChatMessage; me: string; onReact: (e: string) => void }) {
+  const list = Object.entries(m.reactions ?? {}).filter(([, u]) => u.length);
+  if (!list.length) return null;
+  return (
+    <div className="chat-reacts">
+      {list.map(([e, users]) => (
+        <button key={e} type="button" className={`chat-react ${users.includes(me) ? "mine" : ""}`} onClick={() => onReact(e)}
+          title={users.map((u) => (u === me ? "Tú" : u)).join(", ")}>
+          <span>{e}</span>{users.length > 1 && <b>{users.length}</b>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- conversación abierta
 
 function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; rev: number; onBack: () => void }) {
@@ -74,6 +124,14 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
   const [more, setMore] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [image, setImage] = useState<string | null>(null);
+  const [active, setActive] = useState<number | null>(null); // mensaje con el menú abierto (celular: al tocarlo)
+  const [picker, setPicker] = useState<number | null>(null); // mensaje con las reacciones abiertas
+  const [zoom, setZoom] = useState<string | null>(null);
+  const [flash, setFlash] = useState<number | null>(null);
+  const [drag, setDrag] = useState(false);
+  const file = useRef<HTMLInputElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const stick = useRef(true); // seguir abajo mientras llegan mensajes, salvo que estés leyendo arriba
@@ -88,6 +146,8 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
   useEffect(() => {
     setMsgs(null);
     setText("");
+    setReplyTo(null);
+    setImage(null);
     stick.current = true;
     firstLoad.current = true;
     input.current?.focus();
@@ -145,15 +205,57 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
     }
   };
 
+  const attach = async (f: Blob | null | undefined) => {
+    if (!f) return;
+    try {
+      setImage(await shrinkImage(f));
+      input.current?.focus();
+    } catch (e) {
+      toast("No se pudo adjuntar", (e as Error).message, "bad");
+    }
+  };
+
+  const react = async (m: ChatMessage, emoji: string) => {
+    setPicker(null);
+    setActive(null);
+    // se ve al instante; el servidor confirma con el siguiente refresco
+    setMsgs((old) => old?.map((x) => {
+      if (x.id !== m.id) return x;
+      const r: Record<string, string[]> = {};
+      const had = Object.entries(x.reactions ?? {}).find(([, u]) => u.includes(me))?.[0];
+      for (const [e, u] of Object.entries(x.reactions ?? {})) {
+        const left = u.filter((n) => n !== me);
+        if (left.length) r[e] = left;
+      }
+      if (had !== emoji) r[emoji] = [...(r[emoji] ?? []), me];
+      return { ...x, reactions: r };
+    }) ?? old);
+    try {
+      await api.chatReact(m.id, emoji);
+    } catch (e) {
+      toast("No se pudo reaccionar", (e as Error).message, "bad");
+    }
+  };
+
+  const jump = (id: number) => {
+    const el = box.current?.querySelector<HTMLElement>(`[data-msg="${id}"]`);
+    if (!el) return toast("Ese mensaje es más antiguo", "Toca «Ver mensajes anteriores» para cargarlo.", "info", 3000);
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlash(id);
+    window.setTimeout(() => setFlash(null), 1600);
+  };
+
   const send = async () => {
     const body = text.trim();
-    if (!body || busy) return;
+    if ((!body && !image) || busy) return;
     setBusy(true);
     try {
-      const { message } = await api.chatSend(peer, body);
+      const { message } = await api.chatSend(peer, body, { reply_to: replyTo?.id ?? null, image });
       stick.current = true;
       setMsgs((old) => (old?.some((m) => m.id === message.id) ? old : [...(old ?? []), message]));
       setText("");
+      setReplyTo(null);
+      setImage(null);
       refreshChat();
     } catch (e) {
       toast("No se envió", (e as Error).message, "bad");
@@ -186,10 +288,14 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
         <div className="chat-ch-txt"><b>{title}</b><span className="sub">{status}</span></div>
       </header>
 
-      <div className="chat-msgs" ref={box} onScroll={(e) => {
+      <div className={`chat-msgs ${drag ? "drag" : ""}`} ref={box} onScroll={(e) => {
         const el = e.currentTarget;
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-      }}>
+        if (picker !== null) setPicker(null);
+      }}
+        onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDrag(true); } }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={(e) => { e.preventDefault(); setDrag(false); void attach(e.dataTransfer.files[0]); }}>
         {!msgs ? <Skeleton rows={5} /> : !msgs.length ? (
           <div className="empty">{peer ? `Escríbele a ${peer}. Solo ustedes dos verán esta conversación.` : "Aún no hay mensajes. Escribe el primero para todo el equipo."}</div>
         ) : (
@@ -203,15 +309,37 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
               return (
                 <div key={m.id}>
                   {newDay && <div className="chat-day"><span>{dayLabel(m.t)}</span></div>}
-                  <div className={`chat-msg ${mine ? "mine" : ""} ${grouped ? "grouped" : ""}`}>
-                    <div className="chat-bubble">
+                  <div data-msg={m.id} className={`chat-msg ${mine ? "mine" : ""} ${grouped ? "grouped" : ""} ${active === m.id ? "active" : ""} ${flash === m.id ? "flash" : ""} ${Object.keys(m.reactions ?? {}).length ? "has-reacts" : ""}`}>
+                    <div className={`chat-bubble ${m.image ? "has-img" : ""}`} onClick={(e) => {
+                      if ((e.target as HTMLElement).closest("button, a, img, .chat-quote")) return;
+                      setActive(active === m.id ? null : m.id);
+                    }} onDoubleClick={() => void react(m, "❤️")}>
                       {!mine && !peer && !grouped && <b className="chat-from">{m.from}</b>}
-                      <p>{m.body}</p>
+                      {m.reply && <Quote q={m.reply} me={me} onClick={() => jump(m.reply!.id)} />}
+                      {m.image && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img className="chat-img" src={imageUrl(m.image)} alt="Imagen" loading="lazy" onClick={() => setZoom(imageUrl(m.image!))}
+                          onLoad={() => { const el = box.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }} />
+                      )}
+                      {m.body && <p>{m.body}</p>}
                       <time dateTime={new Date(m.t * 1000).toISOString()}>{hhmm(m.t)}</time>
+                      <Reactions m={m} me={me} onReact={(e) => void react(m, e)} />
                     </div>
-                    {(mine || (!peer && admin)) && (
-                      <button className="icon-btn danger chat-del" onClick={() => void remove(m)} title="Borrar mensaje" aria-label="Borrar mensaje"><Icon name="trash" size={14} /></button>
-                    )}
+                    <div className="chat-tools">
+                      <button className="icon-btn" onClick={() => { setPicker(picker === m.id ? null : m.id); }} title="Reaccionar" aria-label="Reaccionar"><Icon name="smile" size={15} /></button>
+                      <button className="icon-btn" onClick={() => { setReplyTo(m); setActive(null); input.current?.focus(); }} title="Responder" aria-label="Responder"><Icon name="reply" size={15} /></button>
+                      {(mine || (!peer && admin)) && (
+                        <button className="icon-btn danger" onClick={() => void remove(m)} title="Borrar mensaje" aria-label="Borrar mensaje"><Icon name="trash" size={14} /></button>
+                      )}
+                      {picker === m.id && (
+                        <div className="chat-picker" role="menu" aria-label="Reacciones">
+                          {REACTIONS.map((e, k) => {
+                            const on = m.reactions?.[e]?.includes(me);
+                            return <button key={e} type="button" className={on ? "on" : ""} style={{ ["--k" as string]: k } as React.CSSProperties} onClick={() => void react(m, e)}>{e}</button>;
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -224,17 +352,43 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
         <p className="sub chat-closed">{peer} ya no está en el equipo: no puedes responderle.</p>
       ) : (
         <form className="chat-compose" onSubmit={(e) => { e.preventDefault(); void send(); }}>
-          <textarea ref={input} rows={1} value={text} maxLength={MAX} placeholder={peer ? `Mensaje privado para ${peer}` : "Mensaje para todo el equipo"}
+          {(replyTo || image) && (
+            <div className="chat-compose-extra">
+              {replyTo && <Quote q={replyTo} me={me} onClose={() => setReplyTo(null)} />}
+              {image && (
+                <div className="chat-attach">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={image} alt="Imagen para enviar" />
+                  <span>Imagen lista · escribe un texto si quieres</span>
+                  <button type="button" className="icon-btn" onClick={() => setImage(null)} aria-label="Quitar imagen"><Icon name="x" size={14} /></button>
+                </div>
+              )}
+            </div>
+          )}
+          <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { void attach(e.target.files?.[0]); e.target.value = ""; }} />
+          <button type="button" className="icon-btn chat-clip" onClick={() => file.current?.click()} title="Enviar imagen (también puedes pegarla con Ctrl+V)" aria-label="Enviar imagen">
+            <Icon name="image" size={19} />
+          </button>
+          <textarea ref={input} rows={1} value={text} maxLength={MAX} placeholder={image ? "Agrega un texto (opcional)" : peer ? `Mensaje privado para ${peer}` : "Mensaje para todo el equipo"}
             aria-label="Escribe un mensaje" onChange={(e) => setText(e.target.value)}
+            onPaste={(e) => {
+              const item = [...e.clipboardData.items].find((i) => i.type.startsWith("image/"));
+              if (item) {
+                e.preventDefault();
+                void attach(item.getAsFile());
+              }
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 void send();
               }
+              if (e.key === "Escape" && replyTo) setReplyTo(null);
             }} />
-          <button className="btn btn-brand chat-send" type="submit" disabled={busy || !text.trim()} aria-label="Enviar"><Icon name="send" size={18} /></button>
+          <button className="btn btn-brand chat-send" type="submit" disabled={busy || (!text.trim() && !image)} aria-label="Enviar"><Icon name="send" size={18} /></button>
         </form>
       )}
+      {zoom && <Lightbox src={zoom} onClose={() => setZoom(null)} />}
     </section>
   );
 }
@@ -386,11 +540,11 @@ export function ChatDock({ hidden, onFull }: { hidden: boolean; onFull: (peer: s
     const looking = !document.hidden && (hidden || (open && conv && peer === p));
     if (looking) return;
     beep("chat");
-    if (!hidden && !(open && conv && peer === p)) setPop({ peer: p, from: c.last.from, body: c.last.body, id: c.last.id });
+    if (!hidden && !(open && conv && peer === p)) setPop({ peer: p, from: c.last.from, body: msgText(c.last), id: c.last.id });
     if (document.hidden && prefs.desktop && "Notification" in window && Notification.permission === "granted") {
       try {
         const title = p ? `Mensaje privado de ${c.last.from}` : `${c.last.from} en General`;
-        const n = new Notification(title, { body: c.last.body.slice(0, 140), tag: `cj-chat-${p}`, icon: "/icons/web-app-manifest-192x192.png" });
+        const n = new Notification(title, { body: msgText(c.last).slice(0, 140), tag: `cj-chat-${p}`, icon: "/icons/web-app-manifest-192x192.png" });
         n.onclick = () => {
           window.focus();
           if (hidden) onFull(p);

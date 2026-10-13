@@ -16,6 +16,7 @@ from starlette.responses import (FileResponse, HTMLResponse, JSONResponse, Redir
                                  Response as _Response, StreamingResponse)
 
 MAX_BODY = 64 * 1024  # ningun formulario legitimo pesa mas
+BIG_BODY = {"/api/chat/send": 4 * 1024 * 1024}  # el chat puede llevar una imagen (ya comprimida en el navegador)
 
 _ctx = contextvars.ContextVar("arbicrypto_request")
 
@@ -207,7 +208,7 @@ class Middleware:
         body = b""
         if scope["method"] in ("POST", "PUT", "PATCH"):
             body = await req.body()
-            if len(body) > MAX_BODY:
+            if len(body) > BIG_BODY.get(scope["path"], MAX_BODY):
                 return await JSONResponse({"error": "Demasiado grande."}, status_code=413)(scope, receive, send)
         sent = False
 
