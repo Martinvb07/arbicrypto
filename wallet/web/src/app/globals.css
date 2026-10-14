@@ -765,3 +765,61 @@ table.ledger td:last-child, table.ledger th:last-child { padding-right: 18px; }
 }
 .pm-txt { display: grid; line-height: 1.2; }
 .pm-txt small { font-size: 11px; font-weight: 500; color: var(--muted); }
+
+/* ---------- resultados: periodo, gráfica y "ahorita" ---------- */
+.period-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; }
+.period-sel { width: 230px; }
+.period-days { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+.range { display: flex; align-items: center; gap: 8px; }
+.range input[type=date] { height: 34px; width: 150px; font-size: 13px; }
+.overview-grid { align-items: start; }
+.chart-empty { height: 200px; display: grid; place-items: center; color: var(--muted); font-size: 13.5px; border: 1px dashed var(--border-2); border-radius: 12px; }
+.bars-wrap { position: relative; }
+.bars { display: flex; align-items: stretch; height: 200px; gap: 2px; border-bottom: 1px solid var(--border); }
+.bars.both { border-bottom: 0; background: linear-gradient(var(--border-2), var(--border-2)) 0 50% / 100% 1px no-repeat; }
+.bar-col { flex: 1 1 0; min-width: 2px; display: flex; flex-direction: column; cursor: pointer; border-radius: 4px; }
+.bar-col.on { background: var(--hover); }
+.bar-half { flex: 1; display: flex; justify-content: center; }
+.bars.pos .bar-half.down, .bars.neg .bar-half.up { display: none; }
+.bar-half.up { align-items: flex-end; }
+.bar-half.down { align-items: flex-start; }
+.bar { display: block; width: min(100%, 26px); }
+.bar.up { background: var(--up); border-radius: 4px 4px 0 0; }
+.bar.down { background: var(--down); border-radius: 0 0 4px 4px; }
+.bar-col.on .bar { filter: brightness(1.15); }
+.bars-axis { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+.bar-tip { position: absolute; top: -6px; transform: translate(-50%, -100%); z-index: 5; pointer-events: none; display: grid; gap: 2px; white-space: nowrap;
+  padding: 8px 11px; border-radius: 10px; background: var(--surface-3); border: 1px solid var(--border-2); box-shadow: var(--shadow-lg); font-size: 12px; color: var(--text-2); }
+.bar-tip > b { color: var(--text); font-size: 12.5px; }
+.now-head { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0 22px 8px; border-radius: 12px; overflow: hidden; background: var(--border); }
+.now-head > div { display: grid; gap: 2px; padding: 10px 12px; background: var(--surface-2); min-width: 0; }
+.now-head small { font-size: 11.5px; color: var(--muted); }
+.now-head b { font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now-list { display: grid; padding: 0 22px 10px; }
+.now-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--border); }
+.now-row:last-child { border-bottom: 0; }
+.now-main, .now-val { display: grid; min-width: 0; }
+.now-main b { font-variant-numeric: tabular-nums; }
+.now-main small, .now-val small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now-val { text-align: right; }
+.now-val b { font-variant-numeric: tabular-nums; }
+.now-val small.up { color: var(--up); } .now-val small.down { color: var(--down); }
+.op-what { display: inline-flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+@media (max-width: 760px) {
+  .period-bar { padding: 12px; }
+  .period-sel { width: 100%; }
+  .period-days { margin-left: 0; }
+  .now-head { margin: 0 16px 8px; }
+  .now-list { padding: 0 16px 10px; }
+  .now-head b { font-size: 13.5px; }
+}
+.show-sm { display: none; }
+.now-note { margin: 0 22px 4px; font-size: 12px; color: var(--muted); }
+.bar-tip { top: 4px; transform: translateX(-50%); }
+@media (max-width: 760px) {
+  .show-sm { display: block; }
+  .op-what { flex-wrap: wrap; gap: 4px 8px; }
+  .now-head b { white-space: normal; font-size: 13px; overflow-wrap: anywhere; }
+  .now-head > div { padding: 9px 8px; }
+  .now-note { margin: 0 16px 4px; }
+}

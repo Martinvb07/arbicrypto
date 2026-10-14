@@ -7,6 +7,7 @@ import { GmfQuestion } from "../GmfQuestion";
 import { Asset, Badge, Coin, Empty, Note, Skeleton } from "../ui";
 import { useWallet } from "../wallet";
 import { Gains } from "./Gains";
+import { Overview } from "./Overview";
 
 const MONTH = new Intl.DateTimeFormat("es-CO", { month: "long", timeZone: "UTC" });
 const monthName = (i: number) => {
@@ -14,11 +15,12 @@ const monthName = (i: number) => {
   return m.charAt(0).toUpperCase() + m.slice(1);
 };
 
-export type ResultsView = "resumen" | "rondas" | "operaciones";
+export type ResultsView = "resumen" | "rondas" | "estado" | "operaciones";
 const VIEWS: { id: ResultsView; label: string }[] = [
   { id: "resumen", label: "Resumen" },
-  { id: "rondas", label: "Rondas de arbitraje" },
-  { id: "operaciones", label: "Por operación" },
+  { id: "rondas", label: "Rondas" },
+  { id: "estado", label: "Estado de resultados" },
+  { id: "operaciones", label: "Detalle fiscal" },
 ];
 
 /** Resultados del año: estado de resultados, mes a mes, por moneda, rondas y cada operación. */
@@ -48,17 +50,20 @@ export function Results({ onTab, initialView = "resumen" }: { onTab: (t: TabId) 
       <div className="page-head">
         <div>
           <h1>Resultados {year}</h1>
-          <p>{live ? `Al ${date(Date.now() / 1000)}. Cuánto has ganado o perdido y de dónde sale.` : "Cuánto ganaste o perdiste en el año y de dónde salió."}</p>
+          <p>{view === "resumen" ? "Elige un periodo y mira cuánto compraste, cuánto ganaste en cada operación y cómo vas."
+            : live ? `Al ${date(Date.now() / 1000)}. Cuánto has ganado o perdido y de dónde sale.` : "Cuánto ganaste o perdiste en el año y de dónde salió."}</p>
         </div>
         <div className="seg">
           {VIEWS.map((v) => <button key={v.id} className={view === v.id ? "on" : ""} onClick={() => setView(v.id)}>{v.label}</button>)}
         </div>
       </div>
 
-      {view !== "operaciones" && <GmfQuestion operations={pnl.gross_profit + pnl.income} gmf={pnl.gmf} onSettings={() => onTab("ajustes")} />}
+      {(view === "estado" || view === "rondas") && <GmfQuestion operations={pnl.gross_profit + pnl.income} gmf={pnl.gmf} onSettings={() => onTab("ajustes")} />}
 
       {me.movements === 0 ? (
         <div className="card"><Empty icon="trend" title="Todavía no hay movimientos">Conecta tu Binance en Inicio y todo aparece solo.</Empty></div>
+      ) : view === "resumen" ? (
+        <Overview onDetail={() => setView("operaciones")} />
       ) : view === "operaciones" ? (
         <Gains embedded />
       ) : view === "rondas" ? (
