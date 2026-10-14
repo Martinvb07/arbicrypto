@@ -969,7 +969,10 @@ def guard():
     # la portada: siempre en arbicrypto.org; en el panel, a quien llega sin sesión (en este PC)
     g.landing = path == "/inicio" or (path == "/" and (on_site() or (not g.user and not SITE_DOMAIN)))
     if path == "/login" and g.user:  # ya entró: sigue directo a donde iba
-        return redirect(after_login(request.args.get("next")))
+        resp = redirect(after_login(request.args.get("next")))
+        if COOKIE_DOMAIN:  # sesión de antes de SITE_DOMAIN (solo de arbicrypto.org): sin esto panel. no la ve y el login da vueltas
+            set_session_cookie(resp, request.cookies.get(COOKIE))
+        return resp
     if g.user or g.landing or path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
         return None
     if path.startswith("/api/"):
@@ -1005,11 +1008,14 @@ def body():
     return data if isinstance(data, dict) else {}
 
 
-def with_session(token):
-    resp = jsonify(ok=True)
+def set_session_cookie(resp, token):
     resp.set_cookie(COOKIE, token, max_age=30 * 86400, httponly=True, samesite="Strict", secure=SECURE_COOKIE,
                     domain=COOKIE_DOMAIN)  # VPS: la misma sesión sirve en arbicrypto.org, panel. y wallet.
     return resp
+
+
+def with_session(token):
+    return set_session_cookie(jsonify(ok=True), token)
 
 
 def clear_session(resp):
