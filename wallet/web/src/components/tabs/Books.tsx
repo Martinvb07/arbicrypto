@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, type CashBook, type FsNote, type InventoryBook, type Libros } from "@/lib/api";
 import { date, money } from "@/lib/format";
+import { Select, type SelectOption } from "../Select";
 import { NoteModal } from "../NoteModal";
 import { BalanceView, CashBookView, CashFlowView, EquityView, IncomeView, InventoryView, JournalView, NotesView, TrialView } from "../Statements";
 import { Closings } from "./Closings";
@@ -36,6 +37,24 @@ const GROUPS: { label: string; views: { id: View; label: string; title: string }
   { label: "Control", views: [{ id: "cierres", label: "Cierres", title: "Cierres" }] },
 ];
 const ALL = GROUPS.flatMap((g) => g.views.map((v) => ({ ...v, group: g.label })));
+/** Los que más se usan, a un clic; los demás en el selector. */
+const QUICK: View[] = ["diario", "caja", "cripto", "resultados", "balance"];
+const QUICK_LABEL: Partial<Record<View, string>> = { diario: "Diario", caja: "Caja", cripto: "Kardex", resultados: "Resultados", balance: "Balance" };
+/** Qué es cada libro, en palabras simples. */
+const ABOUT: Record<View, string> = {
+  diario: "Cada operación que hiciste, con de dónde salió la plata y a dónde fue. Lo más reciente primero.",
+  mayor: "Cuánto se movió y cuánto quedó en cada cuenta (bancos, cripto, ingresos, gastos).",
+  inventarios: "Lo que tenías a la fecha de corte: cada cripto y cada cuenta con su valor.",
+  balance: "Lo que tienes (bancos y cripto), lo que debes y tu patrimonio a la fecha de corte.",
+  resultados: "Lo que ganaste o perdiste en el periodo, ya con gastos y 4x1000.",
+  patrimonio: "Cómo cambió tu patrimonio: aportes, retiros y la ganancia del periodo.",
+  flujo: "Cuánta plata entró y salió de tus cuentas, y por qué.",
+  notas: "Las explicaciones que acompañan los estados financieros.",
+  caja: "Cada día con movimiento en tus cuentas: con cuánto empezó, qué entró, qué salió y con cuánto cerró.",
+  cripto: "Cada cripto con sus compras, ventas y saldo, y el costo de cada salida.",
+  registro: "La lista de todas tus operaciones del año, numeradas.",
+  cierres: "Los cierres de mes y año que congelan los libros.",
+};
 const YEARLY: View[] = ["cripto", "registro", "notas"];  // libros anuales: el año se elige arriba
 const LEDGER: View[] = ["diario", "mayor", "balance", "resultados", "patrimonio", "flujo"];
 const AT_CUT: View[] = ["balance", "inventarios"];  // se presentan a una fecha de corte, no por periodo
@@ -86,7 +105,7 @@ export function Books({ initialView = "diario" }: { initialView?: BooksView }) {
   }
 
   const label = month ? `${MONTHS[month - 1]} ${year}` : `Año ${year}`;
-  const entries = data?.journal ?? [];
+  const entries = (data?.journal ?? []).slice().reverse();
   const pages = Math.ceil(entries.length / PAGE);
   const lock = (isLedger ? data?.lock_until : view === "caja" ? cash?.lock_until : 0) || 0;
   const cut = view === "balance" ? data?.balance.at : view === "inventarios" ? inv?.at : undefined;
@@ -97,7 +116,7 @@ export function Books({ initialView = "diario" }: { initialView?: BooksView }) {
       <div className="page-head">
         <div>
           <h1>Libros contables</h1>
-          <p>Libros oficiales, estados financieros completos con sus notas y auxiliares, en el orden en que los revisa tu contador.</p>
+          <p>Tu contabilidad lista para el contador. Elige un libro; si no sabes cuál, empieza por el Diario.</p>
         </div>
         <div className="actions no-print">
           <a className="btn" href={`/api/export/paquete-contador.zip?year=${year}`} download><Icon name="download" size={16} /> Paquete para el contador</a>
@@ -106,14 +125,13 @@ export function Books({ initialView = "diario" }: { initialView?: BooksView }) {
       </div>
 
       <nav className="book-nav no-print" aria-label="Libros">
-        {GROUPS.map((g) => (
-          <div key={g.label} className="book-nav-group">
-            <small>{g.label}</small>
-            <div className="seg">
-              {g.views.map((v) => <button key={v.id} className={view === v.id ? "on" : ""} onClick={() => setView(v.id)} aria-current={view === v.id ? "page" : undefined}>{v.label}</button>)}
-            </div>
-          </div>
-        ))}
+        <div className="seg">
+          {QUICK.map((id) => <button key={id} className={view === id ? "on" : ""} onClick={() => setView(id)} aria-current={view === id ? "page" : undefined}>{QUICK_LABEL[id]}</button>)}
+        </div>
+        <div className="filter-inline book-pick">
+          <Select label="Libro" value={view} onChange={(v) => setView(v as View)}
+            options={ALL.map((v): SelectOption => ({ value: v.id, label: v.label, search: `${v.label} ${v.group}`, hint: v.group, icon: <Icon name="book" size={16} /> }))} />
+        </div>
       </nav>
 
       {view === "cierres" ? <Closings embedded /> : (
@@ -122,13 +140,15 @@ export function Books({ initialView = "diario" }: { initialView?: BooksView }) {
             actions={<>
               {view === "diario" && <button className="btn btn-sm btn-primary" onClick={() => setNoteOpen(true)}><Icon name="plus" size={14} /> Nota de contabilidad</button>}
               {!YEARLY.includes(view) && (
-                <select value={month} onChange={(e) => setMonth(Number(e.target.value))} aria-label="Periodo" style={{ width: "auto" }}>
-                  <option value={0}>{AT_CUT.includes(view) ? `Corte: fin de ${year}` : `Todo el año ${year}`}</option>
-                  {MONTHS.map((m, i) => <option key={m} value={i + 1}>{AT_CUT.includes(view) ? `Corte: fin de ${m.toLowerCase()}` : m} {year}</option>)}
-                </select>
+                <div className="filter-inline">
+                  <Select label="Periodo" value={String(month)} onChange={(v) => setMonth(Number(v))} options={[
+                    { value: "0", label: AT_CUT.includes(view) ? `Corte: fin de ${year}` : `Todo ${year}`, icon: <Icon name="calendar" size={16} /> },
+                    ...MONTHS.map((m, i) => ({ value: String(i + 1), label: `${AT_CUT.includes(view) ? `Corte: fin de ${m.toLowerCase()}` : m} ${year}`, search: m })),
+                  ]} />
+                </div>
               )}
-              {view !== "notas" && <a className="btn btn-sm" href={csvHref(view, year, month)} download><Icon name="download" size={14} /> CSV</a>}
-              <button className="btn btn-sm" onClick={() => window.print()}><Icon name="print" size={14} /> Imprimir</button>
+              {view !== "notas" && <a className="btn btn-sm btn-icon" href={csvHref(view, year, month)} download title="Descargar CSV" aria-label="Descargar CSV"><Icon name="download" size={15} /></a>}
+              <button className="btn btn-sm btn-icon" onClick={() => window.print()} title="Imprimir" aria-label="Imprimir"><Icon name="print" size={15} /></button>
             </>} />
 
           {error ? <Note kind="bad">{error}</Note>
@@ -144,7 +164,7 @@ export function Books({ initialView = "diario" }: { initialView?: BooksView }) {
                     <JournalView entries={entries.slice(page * PAGE, page * PAGE + PAGE)} lock={data.lock_until} onDeleteNote={deleteNote} />
                     <Pager page={page} pages={pages} onPage={setPage} />
                     <p className="muted" style={{ fontSize: 12.5 }}>
-                      {entries.length} comprobantes · débitos {money(data.trial.totals.debit)} = créditos {money(data.trial.totals.credit)}
+                      {entries.length} comprobantes · todo cuadra: débitos {money(data.trial.totals.debit)} = créditos {money(data.trial.totals.credit)}
                     </p>
                   </>
                 ) : <div className="card"><Empty icon="book" title={`Sin comprobantes en ${label.toLowerCase()}`}>Aparecen solos cuando hay movimientos.</Empty></div>)}
@@ -162,22 +182,25 @@ export function Books({ initialView = "diario" }: { initialView?: BooksView }) {
   );
 }
 
-/** Encabezado igual en todos los libros: qué libro, de quién, qué periodo y en qué moneda. */
+/** Encabezado: qué libro es y para qué sirve. Los datos formales (contribuyente, NIT, moneda) salen al imprimir. */
 function BookHeader({ view, period, lock, actions }: { view: View; period: string; lock: number; actions: React.ReactNode }) {
   const { me } = useWallet();
   const v = ALL.find((x) => x.id === view)!;
   const method = view === "cripto" ? ` · ${me.profile.method === "fifo" ? "PEPS" : "Promedio ponderado"}` : "";
   return (
     <div className="card book-head">
-      <div>
-        <span className="book-kicker">{v.group}</span>
+      <div className="book-title">
         <h2>{v.title}{method}</h2>
-        <dl className="book-meta">
+        <p className="book-about no-print">{ABOUT[view]}</p>
+        <div className="book-tags no-print">
+          <span className="book-tag"><Icon name="calendar" size={12} /> {period}</span>
+          {!!lock && <span className="book-tag"><Icon name="lock" size={12} /> Cerrado hasta {date(lock)}</span>}
+        </div>
+        <dl className="book-meta print-only">
           <div><dt>Contribuyente</dt><dd>{me.profile.name || me.user.username}</dd></div>
           <div><dt>Cédula / NIT</dt><dd>{me.profile.nit || "—"}</dd></div>
           <div><dt>{AT_CUT.includes(view) ? "Corte" : "Periodo"}</dt><dd>{period}</dd></div>
           <div><dt>Moneda</dt><dd>Pesos colombianos (COP)</dd></div>
-          {!!lock && <div><dt>Congelado hasta</dt><dd><Icon name="lock" size={12} /> {date(lock)}</dd></div>}
         </dl>
       </div>
       <div className="actions no-print">{actions}</div>

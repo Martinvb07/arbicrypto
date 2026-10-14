@@ -267,7 +267,7 @@ export function CashBookView({ b, label }: { b: CashBook; label: string }) {
                 <tr><th>Día</th><th className="r">Saldo inicial</th><th className="r">Entradas</th><th className="r">Salidas</th><th className="r">4x1000</th><th className="r">Saldo final</th><th>Cierre</th></tr>
               </thead>
               <tbody>
-                {b.days.map((d) => (
+                {b.days.slice().reverse().map((d) => (
                   <Fragment key={d.day}>
                     <tr className="cash-day" onClick={() => toggle(d.day)} aria-expanded={open.has(d.day)}>
                       <td className="nowrap"><b>{dayLabel(d.day)}</b><span className="cell-sub">{d.entries.length} comprobantes{d.real != null ? ` · real ${money(d.real)}` : ""}</span></td>
@@ -278,7 +278,7 @@ export function CashBookView({ b, label }: { b: CashBook; label: string }) {
                       <td className="r"><b className={d.closing < 0 ? "warn" : ""}>{money(d.closing)}</b></td>
                       <td>{DAY_STATUS[d.status]}</td>
                     </tr>
-                    {open.has(d.day) && d.entries.map((e) => (
+                    {open.has(d.day) && d.entries.slice().reverse().map((e) => (
                       <tr key={e.number} className="cash-entry">
                         <td className="nowrap mono">{e.number} · {hour(e.t)}</td>
                         <td>{e.text}</td>
@@ -312,10 +312,91 @@ export function CashBookView({ b, label }: { b: CashBook; label: string }) {
 }
 
 /** Libro diario: un comprobante por operación. */
+/** Nombre corto de la cuenta para leerlo rápido: "Criptoactivos (inventario)" → "Criptoactivos", "Impuestos: 4×1000 (GMF)" → "4×1000". */
+function shortName(name: string) {
+  const n = name.replace(/\s*\(.*?\)\s*/g, " ").trim();
+  return n.includes(":") ? n.split(":").pop()!.trim() : n;
+}
+
+type Flow = { name: string; v: number };
+/** En palabras: de qué cuentas salió el valor, a cuáles fue, y si hubo ganancia (cuentas 4) o gasto (cuentas 5 y 6). */
+function flows(e: JournalEntry) {
+  const add = (m: Map<string, Flow>, k: string, name: string, v: number) => { const x = m.get(k) ?? { name, v: 0 }; x.v += v; m.set(k, x); };
+  const from = new Map<string, Flow>(), to = new Map<string, Flow>(), gain = new Map<string, Flow>(), cost = new Map<string, Flow>();
+  for (const l of e.lines) {
+    const c = l.account.charAt(0), name = shortName(l.name);
+    if (c === "4") add(gain, l.account, name, (l.credit || 0) - (l.debit || 0));
+    else if (c === "5" || c === "6" || c === "7") add(cost, l.account, name, (l.debit || 0) - (l.credit || 0));
+    else {
+      if (l.debit) add(to, l.account, name, l.debit);
+      if (l.credit) add(from, l.account, name, l.credit);
+    }
+  }
+  const list = (m: Map<string, Flow>) => [...m.values()].filter((x) => Math.abs(x.v) >= 0.5).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+  return { from: list(from), to: list(to), gain: list(gain), cost: list(cost) };
+}
+
+/** Libro diario: en pantalla, cada comprobante en palabras simples (de dónde salió y a dónde fue); al imprimir, débitos y créditos completos. */
 export function JournalView({ entries, lock, onDeleteNote }: { entries: JournalEntry[]; lock: number; onDeleteNote?: (id: number) => void }) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (n: string) => setOpen((s) => { const x = new Set(s); if (x.has(n)) x.delete(n); else x.add(n); return x; });
   return (
-    <div className="card">
-      <div className="table-wrap">
+    <>
+      <div className="card no-print">
+        <div className="jr-list">
+          {entries.map((e) => {
+            const f = flows(e);
+            const total = e.lines.reduce((a, l) => a + (l.debit || 0), 0);
+            const isOpen = open.has(e.number);
+            return (
+              <div key={e.number} className={`jr ${isOpen ? "open" : ""}`}>
+                <div className="jr-row">
+                  <div className="jr-when">
+                    <b>{date(e.t)}</b>
+                    <small>{hour(e.t)} · {e.number}{e.t <= lock && <span title="Periodo cerrado" className="lock-ic"><Icon name="lock" size={11} /></span>}</small>
+                  </div>
+                  <div className="jr-main">
+                    <b>{e.kind === "nota" && <Badge kind="info">Nota</Badge>} {e.text}</b>
+                    <div className="jr-flow">
+                      {f.from.length > 0 && <span className="jr-side"><small>Sale de</small>{f.from.map((x) => <span key={x.name} className="jr-chip out">{x.name} <b>{money(x.v)}</b></span>)}</span>}
+                      {f.from.length > 0 && f.to.length > 0 && <Icon name="arrowRight" size={14} className="jr-arrow" />}
+                      {f.to.length > 0 && <span className="jr-side"><small>Va a</small>{f.to.map((x) => <span key={x.name} className="jr-chip in">{x.name} <b>{money(x.v)}</b></span>)}</span>}
+                      {f.gain.map((x) => <span key={x.name} className={`jr-chip ${x.v >= 0 ? "gain" : "cost"}`} title={x.name}>{x.v >= 0 ? "Ganancia" : "Pérdida"} <b>{money(Math.abs(x.v))}</b></span>)}
+                      {f.cost.map((x) => <span key={x.name} className={`jr-chip ${x.v >= 0 ? "cost" : "gain"}`} title={x.name}>{x.v >= 0 ? "Gasto" : "Menos gasto"}: {x.name} <b>{money(Math.abs(x.v))}</b></span>)}
+                    </div>
+                    {e.support && <span className="cell-sub">Soporte: {e.support}</span>}
+                  </div>
+                  <div className="jr-side-r">
+                    <b className="num">{money(total)}</b>
+                    <button className="btn btn-sm btn-ghost" onClick={() => toggle(e.number)} aria-expanded={isOpen}>
+                      {isOpen ? "Ocultar" : "Ver asiento"} <Icon name="chevronDown" size={14} className="jr-caret" />
+                    </button>
+                    {e.kind === "nota" && e.ref != null && e.t > lock && onDeleteNote && (
+                      <button className="btn btn-sm btn-ghost" title="Borrar nota" aria-label="Borrar nota" onClick={() => onDeleteNote(e.ref!)}><Icon name="trash" size={13} /></button>
+                    )}
+                  </div>
+                </div>
+                {isOpen && (
+                  <table className="jr-lines">
+                    <thead><tr><th>Cuenta</th><th className="r">Débito</th><th className="r">Crédito</th></tr></thead>
+                    <tbody>
+                      {e.lines.map((l, i) => (
+                        <tr key={i}>
+                          <td><span className="acc">{l.account}</span>{l.name}</td>
+                          <td className="r">{l.debit ? money(l.debit) : ""}</td>
+                          <td className="r">{l.credit ? money(l.credit) : ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="card print-only">
         <table className="t journal">
           <thead>
             <tr><th>Comprobante</th><th>Fecha</th><th>Detalle</th><th>Cuenta</th><th className="r">Débito</th><th className="r">Crédito</th></tr>
@@ -323,15 +404,9 @@ export function JournalView({ entries, lock, onDeleteNote }: { entries: JournalE
           <tbody>
             {entries.flatMap((e) => e.lines.map((l, i) => (
               <tr key={`${e.number}-${i}`} className={i === 0 ? "first" : "cont"}>
-                <td className="nowrap">{i === 0 && <>{e.number}{e.t <= lock && <span title="Periodo cerrado" className="lock-ic"><Icon name="lock" size={12} /></span>}</>}</td>
+                <td className="nowrap">{i === 0 && e.number}</td>
                 <td className="nowrap">{i === 0 && date(e.t)}</td>
-                <td>{i === 0 && <>
-                  {e.kind === "nota" && <Badge kind="info">Nota</Badge>} {e.text}
-                  {e.support && <span className="cell-sub">Soporte: {e.support}</span>}
-                  {e.kind === "nota" && e.ref != null && e.t > lock && onDeleteNote && (
-                    <button className="btn btn-sm btn-ghost no-print" onClick={() => onDeleteNote(e.ref!)}><Icon name="trash" size={12} /> Borrar</button>
-                  )}
-                </>}</td>
+                <td>{i === 0 && <>{e.text}{e.support && <span className="cell-sub">Soporte: {e.support}</span>}</>}</td>
                 <td><span className="acc">{l.account}</span>{l.name}</td>
                 <td className="r">{l.debit ? money(l.debit) : ""}</td>
                 <td className="r">{l.credit ? money(l.credit) : ""}</td>
@@ -340,6 +415,6 @@ export function JournalView({ entries, lock, onDeleteNote }: { entries: JournalE
           </tbody>
         </table>
       </div>
-    </div>
+    </>
   );
 }

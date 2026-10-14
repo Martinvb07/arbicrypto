@@ -823,3 +823,55 @@ table.ledger td:last-child, table.ledger th:last-child { padding-right: 18px; }
   .now-head > div { padding: 9px 8px; }
   .now-note { margin: 0 16px 4px; }
 }
+
+/* ---------- libros: navegación simple y diario legible ---------- */
+.book-nav { align-items: center; }
+.book-pick { width: 260px; }
+.book-head h2 { margin: 0 0 4px; }
+.book-about { color: var(--muted); font-size: 13.5px; margin: 0 0 10px; max-width: 640px; }
+.book-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.book-tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border);
+  font-size: 12px; font-weight: 600; color: var(--text-2); }
+.jr-list { display: grid; }
+.jr { border-bottom: 1px solid var(--border); }
+.jr:last-child { border-bottom: 0; }
+.jr.open { background: var(--surface-2); }
+.jr-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 16px; align-items: start; padding: 14px 22px; }
+.jr-when { display: grid; gap: 2px; }
+.jr-when b { font-size: 13.5px; white-space: nowrap; }
+.jr-when small { font-size: 11.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.jr-main { display: grid; gap: 7px; min-width: 0; }
+.jr-main > b { font-size: 14px; font-weight: 650; }
+.jr-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.jr-side { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.jr-side small { font-size: 11px; color: var(--muted); font-weight: 600; margin-right: 1px; }
+.jr-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 8px; font-size: 12.5px; font-weight: 560; background: var(--surface-3); color: var(--text-2); white-space: nowrap; }
+.jr-chip b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 700; }
+.jr-chip.out { box-shadow: inset 2px 0 0 var(--down); }
+.jr-chip.in { box-shadow: inset 2px 0 0 var(--up); }
+.jr-arrow { color: var(--muted); flex: none; }
+.jr-side-r { display: grid; justify-items: end; gap: 4px; }
+.jr-side-r > b { font-size: 15px; }
+.jr-caret { transition: transform .2s; }
+.jr.open .jr-caret { transform: rotate(180deg); }
+.jr-lines { width: calc(100% - 44px); margin: 0 22px 14px; border-collapse: collapse; font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.jr-lines th { text-align: left; font-size: 11.5px; color: var(--muted); font-weight: 600; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.jr-lines td { padding: 7px 12px; border-bottom: 1px solid var(--border); }
+.jr-lines tr:last-child td { border-bottom: 0; }
+.jr-lines .r { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .book-pick { width: 100%; }
+  .jr-row { grid-template-columns: minmax(0, 1fr) auto; padding: 12px 16px; gap: 8px 12px; }
+  .jr-main { grid-column: 1 / -1; grid-row: 2; }
+  .jr-side-r { grid-row: 1; grid-column: 2; }
+  .jr-lines { width: calc(100% - 32px); margin: 0 16px 12px; }
+}
+.jr-chip.gain { background: var(--up-soft); color: var(--up); }
+.jr-chip.gain b { color: var(--up); }
+.jr-chip.cost { background: var(--down-soft); color: var(--down); }
+.jr-chip.cost b { color: var(--down); }
+@media (max-width: 760px) {
+  .book-nav .seg { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; }
+  .jr-arrow { display: none; }
+  .jr-flow { flex-direction: column; align-items: flex-start; }
+}

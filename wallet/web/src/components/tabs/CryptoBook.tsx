@@ -166,16 +166,7 @@ export function Kardex() {
                       </tr>
                     </thead>
                     <tbody>
-                      <tr className="opening">
-                        <td className="c-n" />
-                        <td className="c-date">01/01/{year}</td>
-                        <td><b>Saldo inicial</b></td>
-                        <td colSpan={6} />
-                        <td className="r">{q8(a.opening.qty)}</td>
-                        <td className="r">{money(a.opening.cost)}</td>
-                        <td colSpan={2} />
-                      </tr>
-                      {a.rows.map((r, i) => (
+                      {a.rows.map((r, i) => ({ r, i })).reverse().map(({ r, i }) => (
                         <tr key={i} className={r.out_qty != null ? "is-out" : "is-in"}>
                           <td className="c-n">{i + 1}</td>
                           <When t={r.t} />
@@ -192,6 +183,15 @@ export function Kardex() {
                           <td className={`r ${r.gain != null && r.out_qty != null ? tone(r.gain) : ""}`}>{r.out_qty != null && r.gain != null ? signedMoney(r.gain) : ""}</td>
                         </tr>
                       ))}
+                      <tr className="opening">
+                        <td className="c-n" />
+                        <td className="c-date">01/01/{year}</td>
+                        <td><b>Saldo inicial</b></td>
+                        <td colSpan={6} />
+                        <td className="r">{q8(a.opening.qty)}</td>
+                        <td className="r">{money(a.opening.cost)}</td>
+                        <td colSpan={2} />
+                      </tr>
                     </tbody>
                     <tfoot>
                       <tr>
