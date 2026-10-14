@@ -900,7 +900,7 @@ def run_loop(name, step, interval):
 
 PUBLIC_PATHS = {"/login", "/login.html", "/favicon.ico", "/robots.txt", "/api/auth/login", "/api/auth/register",
                 "/inicio", "/api/public/mercado", "/api/auth/logout", "/salir",
-                "/internal/binance"}  # solo responde a la wallet de este servidor, con firma (ver internal_binance)  # cerrar sesión funciona aunque ya haya vencido
+                "/internal/binance", "/internal/avatar"}  # solo responde a la wallet de este servidor, con firma (ver internal_binance)  # cerrar sesión funciona aunque ya haya vencido
 PUBLIC_PREFIXES = ("/_next/", "/coins/", "/brand/", "/icons/")
 # Lo único que responde arbicrypto.org (la portada): el resto vive en panel.arbicrypto.org
 SITE_PATHS = PUBLIC_PATHS | {"/", "/wallet", "/panel"}
@@ -1894,6 +1894,25 @@ def internal_binance():
     name = next((n for n, u in auth.users.items() if u.get("uid") == uid), None)
     keys = vault.all().get(name) if name else None
     resp = jsonify(connected=bool(keys), key=keys[0] if keys else None, secret=keys[1] if keys else None)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.get("/internal/avatar")
+def internal_avatar():
+    """La foto de perfil de una persona para la wallet de ESTE servidor (la wallet vive en otro dominio y no tiene
+    la sesión del panel). Mismas reglas que /internal/binance: solo 127.0.0.1, firmada con SSO_SECRET, vale 30 s."""
+    if not is_local() or request.headers.get("x-forwarded-for"):
+        abort(404)
+    uid, ts = request.args.get("uid", ""), request.args.get("ts", 0, type=int)
+    sig = request.headers.get("x-wallet-sig", "")
+    if not re.fullmatch(r"[0-9a-f]{16}", uid) or abs(time.time() - ts) > 30 \
+            or not hmac.compare_digest(sig, sso.sign(sso_secret, f"avatar|{uid}|{ts}")):
+        abort(404)
+    doc = store.load(f"avatar_{uid}", None)
+    if not doc or not doc.get("data"):
+        abort(404)
+    resp = Response(base64.b64decode(doc["data"]), mimetype=f"image/{doc['type']}")
     resp.headers["Cache-Control"] = "no-store"
     return resp
 

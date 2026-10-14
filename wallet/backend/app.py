@@ -96,7 +96,7 @@ def security_headers(r):
     h["Referrer-Policy"] = "no-referrer"
     h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
     h["Cross-Origin-Opener-Policy"] = "same-origin"
-    if request.path.startswith("/api/"):
+    if request.path.startswith("/api/") and request.path != "/api/me/avatar":  # la foto se puede guardar unos minutos
         h["Cache-Control"] = "no-store"
     if SECURE:
         h["Strict-Transport-Security"] = "max-age=31536000"
@@ -460,6 +460,27 @@ def panel_binance(panel_uid):
     if not d:
         raise PanelDown("No hay conexión con el panel: se reintenta sola.")
     return (d["key"], d["secret"]) if d.get("connected") and d.get("key") else None
+
+
+@app.get("/api/me/avatar")
+@with_session
+def my_avatar():
+    """La foto de perfil que la persona puso en el panel (se pide al panel por la ruta interna firmada)."""
+    u = db.one("SELECT panel_uid FROM users WHERE id=?", (g.user["id"],))
+    if not u or not u["panel_uid"]:
+        abort(404)
+    key, ts = sso.secret(_env, PANEL_ENV), int(time.time())
+    try:
+        r = requests.get(f"{PANEL_INTERNAL}/internal/avatar", params={"uid": u["panel_uid"], "ts": ts},
+                         headers={"X-Wallet-Sig": sso.sign(key, f"avatar|{u['panel_uid']}|{ts}")}, timeout=5)
+    except requests.RequestException:
+        abort(404)
+    kind = r.headers.get("content-type", "").split(";")[0].strip()
+    if r.status_code != 200 or kind not in ("image/jpeg", "image/png", "image/webp"):
+        abort(404)
+    resp = Response(r.content, mimetype=kind)
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    return resp
 
 
 def forget_binance(uid):

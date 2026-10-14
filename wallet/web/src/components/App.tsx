@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { api } from "@/lib/api";
 import { yearLabel } from "@/lib/format";
 import { BrandMark, Icon } from "./ui";
+import { Select } from "./Select";
 import { useWallet } from "./wallet";
 import { Home } from "./tabs/Home";
 import { Movements } from "./tabs/Movements";
@@ -77,6 +78,19 @@ function LivePill({ onClick }: { onClick: () => void }) {
   );
 }
 
+/** Foto de perfil del panel (la trae la wallet por /api/me/avatar); si no hay, la inicial. */
+function Avatar({ name, size }: { name: string; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  const style = size ? { width: size, height: size, fontSize: size * 0.42 } : undefined;
+  return (
+    <span className={`avatar ${failed ? "" : "has-img"}`} style={style}>
+      {failed ? name.slice(0, 1).toUpperCase()
+        // eslint-disable-next-line @next/next/no-img-element
+        : <img src="/api/me/avatar" alt="" onError={() => setFailed(true)} />}
+    </span>
+  );
+}
+
 function UserMenu({ onTab, onLogout }: { onTab: (t: TabId) => void; onLogout: () => void }) {
   const { me } = useWallet();
   const [open, setOpen] = useState(false);
@@ -92,15 +106,19 @@ function UserMenu({ onTab, onLogout }: { onTab: (t: TabId) => void; onLogout: ()
   const name = me.user.username;
   return (
     <div className="menu" ref={ref}>
-      <button className="chip user-btn" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu">
-        <span className="avatar">{name.slice(0, 1).toUpperCase()}</span>
+      <button className={`chip user-btn ${open ? "open" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu">
+        <Avatar name={name} />
         <span className="user-name">{name}</span>
+        <Icon name="chevronDown" size={14} className="user-caret" />
       </button>
       {open && (
         <div className="menu-pop" role="menu">
-          <div className="menu-who">
-            <b>{me.profile.name || name}</b>
-            <small>{me.user.role === "admin" ? "Administrador" : "Usuario"}{me.profile.nit ? ` · CC ${me.profile.nit}` : ""}</small>
+          <div className="menu-who menu-who-photo">
+            <Avatar name={name} size={40} />
+            <div>
+              <b>{me.profile.name || name}</b>
+              <small>{me.user.role === "admin" ? "Administrador" : "Usuario"}{me.profile.nit ? ` · CC ${me.profile.nit}` : ""}</small>
+            </div>
           </div>
           <a role="menuitem" href={me.panel}><Icon name="back" size={16} /> Volver al panel</a>
           <button role="menuitem" onClick={() => { setOpen(false); onTab("ajustes"); }}><Icon name="settings" size={16} /> Ajustes y perfil fiscal</button>
@@ -164,10 +182,10 @@ export function App() {
           </div>
           <LivePill onClick={() => setTab("inicio")} />
           <div className="top-actions">
-            <label className="sr-only" htmlFor="year">Año gravable</label>
-            <select id="year" className="year" value={year} onChange={(e) => setYear(Number(e.target.value))} title="Año gravable">
-              {me.years.map((y) => <option key={y} value={y}>{yearLabel(y)}</option>)}
-            </select>
+            <div className="year-select">
+              <Select label="Año gravable" value={String(year)} searchable={false} onChange={(v) => setYear(Number(v))}
+                options={me.years.map((y) => ({ value: String(y), label: yearLabel(y), icon: <Icon name="calendar" size={16} /> }))} />
+            </div>
             <button className="icon-btn hide-sm" onClick={toggleTheme} title={light ? "Tema oscuro" : "Tema claro"} aria-label="Cambiar tema">
               <Icon name={light ? "moon" : "sun"} />
             </button>
