@@ -4,12 +4,21 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type AccountKind, type BankAccount, type BankCategory, type BanksSummary, type StatementPreview } from "@/lib/api";
 import { date, dateTime, money, num, signedMoney, tone } from "@/lib/format";
 import { methodName } from "../GmfChoice";
-import { Badge, Empty, Field, Icon, Modal, Note, Pager, Skeleton } from "../ui";
+import { INSTITUTIONS, institutionOf, type Institution } from "@/lib/banks";
+import { Select, type SelectOption } from "../Select";
+import { BankLogo, Badge, Empty, Field, Icon, Modal, Note, Pager, Skeleton } from "../ui";
 import { useWallet } from "../wallet";
 
-const KIND_LABEL: Record<AccountKind, string> = { ahorros: "Cuenta de ahorros", corriente: "Cuenta corriente", billetera: "Billetera (Nequi, Daviplata…)", tarjeta: "Tarjeta de crédito" };
+const KIND_LABEL: Record<AccountKind, string> = { ahorros: "Cuenta de ahorros", corriente: "Cuenta corriente", billetera: "Billetera digital", tarjeta: "Tarjeta de crédito" };
+const KIND_ICON: Record<AccountKind, string> = { ahorros: "bank", corriente: "bank", billetera: "wallet", tarjeta: "file" };
+const KIND_HINT: Record<AccountKind, string> = { ahorros: "La más común", corriente: "Con chequera", billetera: "Nequi, Daviplata, Movii…", tarjeta: "Compras y avances" };
 const CAT_BADGE: Partial<Record<BankCategory, string>> = { binance_p2p: "brand", gmf: "bad", traslado: "", salario: "good", ingreso: "good", rendimientos: "good", otro: "warn" };
 const PAGE = 50;
+/** " · Nequi" si el nombre de la cuenta no dice ya de qué entidad es */
+const instSuffix = (name: string) => {
+  const i = institutionOf(name);
+  return i && !name.toLowerCase().includes(i.name.toLowerCase().split(" ")[0]) ? ` · ${i.name}` : "";
+};
 const fmtDay = (d: string | null) => (d ? date(Date.parse(d + "T12:00:00-05:00") / 1000) : "—");
 
 /** Cuentas y extractos: tu plata fuera de Binance, organizada para el año. */
@@ -95,6 +104,9 @@ export function Banks() {
 
       {!data.accounts.length ? (
         <div className="card card-pad">
+          <div className="inst-strip" aria-hidden="true">
+            {["Bancolombia", "Nequi", "Davivienda", "Daviplata", "Banco de Bogotá", "BBVA", "Nu Colombia", "Banco Popular", "Lulo Bank", "Scotiabank Colpatria"].map((n) => <BankLogo key={n} name={n} size={34} />)}
+          </div>
           <h2 style={{ marginBottom: 10 }}>Organiza todas tus cuentas en 3 pasos</h2>
           <ol className="steps big">
             <li><b>Crea tus cuentas</b>: Nequi, Bancolombia, Banco Popular, Daviplata… Dile a cada una qué medio de pago de Binance usa (por ejemplo Nequi o Bre-B).</li>
@@ -117,10 +129,10 @@ export function Banks() {
             {data.accounts.map((a) => (
               <div key={a.id} className="card acc-card">
                 <div className="acc-top">
-                  <span className="acc-ic"><Icon name={a.kind === "billetera" ? "wallet" : "bank"} size={18} /></span>
+                  <BankLogo name={a.name} kind={a.kind} size={40} />
                   <div>
                     <b>{a.name}</b>
-                    <small>{KIND_LABEL[a.kind]}{a.pay_methods.length ? ` · Binance: ${a.pay_methods.map(methodName).join(", ")}` : ""}</small>
+                    <small>{KIND_LABEL[a.kind]}{instSuffix(a.name)}</small>
                   </div>
                   <button className="btn btn-sm btn-icon btn-ghost" title="Editar cuenta" onClick={() => { setEditing(a); setModal("account"); }}><Icon name="edit" size={15} /></button>
                 </div>
@@ -128,6 +140,12 @@ export function Banks() {
                   <span>{a.last_balance != null ? money(a.last_balance) : "Sin extracto"}</span>
                   <small>{a.last_day ? `Saldo al ${fmtDay(a.last_day)}` : "Sube el primero"}</small>
                 </div>
+                {a.pay_methods.length > 0 && (
+                  <div className="acc-pms">
+                    <span>Binance P2P</span>
+                    {a.pay_methods.map((m) => <span key={m} className="pm-chip">{methodName(m)}</span>)}
+                  </div>
+                )}
                 <div className="acc-stats">
                   <span>Entró <b className="up">{money(a.in)}</b></span>
                   <span>Salió <b className="down">{money(a.out)}</b></span>
@@ -195,15 +213,23 @@ export function Banks() {
             <div className="card">
               <div className="card-head">
                 <div className="actions">
-                  <select value={acc} onChange={(e) => setAcc(e.target.value === "all" ? "all" : Number(e.target.value))} style={{ width: "auto", height: 34 }} aria-label="Cuenta">
-                    <option value="all">Todas las cuentas</option>
-                    {data.accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                  <select value={cat} onChange={(e) => setCat(e.target.value as BankCategory | "all")} style={{ width: "auto", height: 34 }} aria-label="Categoría">
-                    <option value="all">Todas las categorías</option>
-                    {(Object.keys(names) as BankCategory[]).map((c) => <option key={c} value={c}>{names[c]}</option>)}
-                  </select>
-                  <input type="search" placeholder="Buscar en la descripción…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220, height: 34 }} aria-label="Buscar" />
+                  <div className="filter-inline">
+                    <Select label="Cuenta" value={String(acc)} onChange={(v) => setAcc(v === "all" ? "all" : Number(v))} options={[
+                      { value: "all", label: "Todas las cuentas", icon: <Icon name="bank" size={16} /> },
+                      ...data.accounts.map((a) => ({ value: String(a.id), label: a.name, search: a.name, icon: <BankLogo name={a.name} kind={a.kind} size={20} />, hint: a.n || undefined })),
+                    ]} />
+                  </div>
+                  <div className="filter-inline">
+                    <Select label="Categoría" value={cat} onChange={(v) => setCat(v as BankCategory | "all")} options={[
+                      { value: "all", label: "Todas las categorías", icon: <Icon name="list" size={16} /> },
+                      ...(Object.keys(names) as BankCategory[]).map((c) => ({ value: c, label: names[c], search: names[c], icon: <span className={`kind-dot cat-${CAT_BADGE[c] ?? "info"}`} />,
+                        hint: data.transactions.filter((t) => t.category === c).length || undefined })),
+                    ] satisfies SelectOption[]} />
+                  </div>
+                  <label className="search-field">
+                    <Icon name="search" size={15} />
+                    <input type="search" placeholder="Buscar en la descripción…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar" />
+                  </label>
                   {pending > 0 && <button className="btn btn-sm" onClick={() => setCat("otro")}><Icon name="alert" size={14} /> {pending} sin clasificar</button>}
                 </div>
                 <label className="check"><input type="checkbox" checked={similar} onChange={(e) => setSimilar(e.target.checked)} /> Aplicar a los parecidos</label>
@@ -273,11 +299,25 @@ export function Banks() {
 
 function AccountModal({ account, onClose, onDone }: { account: BankAccount | null; onClose: () => void; onDone: () => void }) {
   const { me, toast } = useWallet();
+  const [inst, setInst] = useState<Institution | "otra" | null>(account ? institutionOf(account.name) ?? "otra" : null);
   const [name, setName] = useState(account?.name ?? "");
   const [kind, setKind] = useState<AccountKind>(account?.kind ?? "ahorros");
   const [pms, setPms] = useState<string[]>(account?.pay_methods ?? []);
+  const [find, setFind] = useState("");
   const [error, setError] = useState("");
   const known = Array.from(new Set([...(me.pay_methods ?? []).map((p) => p.method), ...pms]));
+  const picking = !account && inst === null;
+
+  const needle = find.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const list = INSTITUTIONS.filter((i) => !needle || i.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(needle));
+
+  function pick(i: Institution | "otra") {
+    setInst(i);
+    if (i !== "otra") {
+      setName(i.name);
+      setKind(i.kind);
+    }
+  }
 
   async function save() {
     setError("");
@@ -296,25 +336,73 @@ function AccountModal({ account, onClose, onDone }: { account: BankAccount | nul
     onDone();
   }
 
+  if (picking) {
+    const groups: [string, Institution[]][] = [["Bancos", list.filter((i) => i.group === "banco")], ["Billeteras y bancos digitales", list.filter((i) => i.group === "digital")]];
+    return (
+      <Modal title="Nueva cuenta" onClose={onClose} wide>
+        <p className="muted" style={{ marginBottom: 12 }}>¿De qué banco o billetera es?</p>
+        <label className="search-field wide">
+          <Icon name="search" size={15} />
+          <input type="search" placeholder="Buscar: Bancolombia, Nequi, Nu…" value={find} onChange={(e) => setFind(e.target.value)} autoFocus aria-label="Buscar entidad" />
+        </label>
+        <div className="inst-scroll">
+          {groups.map(([title, items]) => items.length > 0 && (
+            <section key={title}>
+              <h3 className="inst-title">{title}</h3>
+              <div className="inst-grid">
+                {items.map((i) => (
+                  <button key={i.id} type="button" className="inst-tile" onClick={() => pick(i)}>
+                    <BankLogo name={i.name} size={34} />
+                    <span>{i.name}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))}
+          <section>
+            <h3 className="inst-title">¿No está en la lista?</h3>
+            <div className="inst-grid">
+              <button type="button" className="inst-tile" onClick={() => pick("otra")}>
+                <BankLogo name="" size={34} />
+                <span>Otra entidad</span>
+              </button>
+            </div>
+          </section>
+        </div>
+      </Modal>
+    );
+  }
+
+  const instName = inst && inst !== "otra" ? inst.name : "";
   return (
     <Modal title={account ? "Editar cuenta" : "Nueva cuenta"} onClose={onClose}>
+      <div className="inst-picked">
+        <BankLogo name={name || instName} kind={kind} size={44} />
+        <div>
+          <b>{name.trim() || instName || "Cuenta nueva"}</b>
+          <small>{instName || "Entidad sin logo"} · {KIND_LABEL[kind]}</small>
+        </div>
+        {!account && <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setInst(null); setName(""); }}>Cambiar</button>}
+      </div>
       <div className="form">
-        <Field label="Nombre" wide hint="Como la reconozcas: Nequi, Bancolombia ahorros, Banco Popular…">
+        <Field label="Nombre" wide hint={instName ? `Si tienes varias en ${instName}, diferéncialas: “${instName} ahorros”, “${instName} nómina”…` : "Como la reconozcas: Banco Popular, Cooperativa…"}>
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} autoFocus />
         </Field>
         <Field label="Tipo" wide>
-          <select value={kind} onChange={(e) => setKind(e.target.value as AccountKind)}>
-            {(Object.keys(KIND_LABEL) as AccountKind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
-          </select>
+          <Select label="Tipo de cuenta" value={kind} searchable={false} onChange={(v) => setKind(v as AccountKind)}
+            options={(Object.keys(KIND_LABEL) as AccountKind[]).map((k) => ({ value: k, label: KIND_LABEL[k], icon: <Icon name={KIND_ICON[k]} size={16} />, hint: KIND_HINT[k] }))} />
         </Field>
         {known.length > 0 && (
           <Field label="Medios de pago de Binance que salen de esta cuenta" wide hint="Sirve para cruzar tus órdenes P2P con el extracto correcto.">
-            <div className="actions">
-              {known.map((m) => (
-                <label key={m} className="check">
-                  <input type="checkbox" checked={pms.includes(m)} onChange={(e) => setPms(e.target.checked ? [...pms, m] : pms.filter((x) => x !== m))} /> {methodName(m)}
-                </label>
-              ))}
+            <div className="pm-toggles">
+              {known.map((m) => {
+                const on = pms.includes(m);
+                return (
+                  <button key={m} type="button" className={`pm-toggle ${on ? "on" : ""}`} aria-pressed={on} onClick={() => setPms(on ? pms.filter((x) => x !== m) : [...pms, m])}>
+                    <BankLogo name={methodName(m)} size={20} /> {methodName(m)} {on && <Icon name="check" size={14} />}
+                  </button>
+                );
+              })}
             </div>
           </Field>
         )}
@@ -382,9 +470,8 @@ function UploadModal({ accounts, initial, onClose, onDone }: { accounts: BankAcc
     <Modal title="Subir extracto" onClose={onClose} wide>
       <div className="form">
         <Field label="Cuenta">
-          <select value={aid} onChange={(e) => { setAid(Number(e.target.value)); setPreview(null); }}>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+          <Select label="Cuenta" value={String(aid)} onChange={(v) => { setAid(Number(v)); setPreview(null); }}
+            options={accounts.map((a) => ({ value: String(a.id), label: a.name, search: a.name, icon: <BankLogo name={a.name} kind={a.kind} size={22} />, hint: KIND_LABEL[a.kind] }))} />
         </Field>
         <Field label="Clave del PDF (si tiene)" hint="Muchos bancos usan tu número de cédula.">
           <input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setPreview(null); }} disabled={!isPdf} autoComplete="off" placeholder={isPdf ? "Opcional" : "Solo para PDF"} />

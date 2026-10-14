@@ -2,6 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { institutionOf } from "@/lib/banks";
 import { money, signedMoney, tone } from "@/lib/format";
 
 const ICONS: Record<string, ReactNode> = {
@@ -186,5 +187,23 @@ export function Note({ children, kind = "" }: { children: ReactNode; kind?: "" |
       <Icon name={kind === "good" ? "check" : kind ? "alert" : "info"} size={16} />
       <div>{children}</div>
     </div>
+  );
+}
+
+/** Logo de la entidad (Bancolombia, Nequi…) con sus colores; si no se reconoce, ícono de banco o billetera. */
+export function BankLogo({ name, kind, size = 36 }: { name: string; kind?: string; size?: number }) {
+  const inst = institutionOf(name);
+  if (!inst) {
+    return (
+      <span className="bank-logo generic" style={{ width: size, height: size }} aria-hidden="true">
+        <Icon name={kind === "billetera" ? "wallet" : "bank"} size={Math.round(size * 0.5)} />
+      </span>
+    );
+  }
+  const fs = size * (inst.mark.length >= 4 ? 0.26 : inst.mark.length === 3 ? 0.3 : inst.mark.length === 2 ? 0.38 : 0.5);
+  return (
+    <span className="bank-logo" style={{ width: size, height: size, background: inst.bg, color: inst.fg, fontSize: fs }} title={inst.name} aria-hidden="true">
+      {inst.mark}
+    </span>
   );
 }

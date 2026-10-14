@@ -724,3 +724,42 @@ table.ledger td:last-child, table.ledger th:last-child { padding-right: 18px; }
   .mv-head .actions:first-child { width: 100%; }
   .search-field { flex: 1 1 100%; width: auto; }
 }
+
+/* ---------- cuentas: logos de bancos y billeteras ---------- */
+.bank-logo { display: inline-grid; place-items: center; flex: none; border-radius: 28%; font-weight: 800; letter-spacing: -.03em; line-height: 1;
+  box-shadow: inset 0 0 0 1px #ffffff1a, 0 1px 2px #0000002e; user-select: none; text-transform: none; }
+.bank-logo.generic { background: var(--surface-3); color: var(--muted); }
+.acc-card { transition: border-color .15s, transform .15s; }
+.acc-card:hover { border-color: var(--border-2); }
+.acc-top b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acc-pms { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); }
+.acc-pms > span:first-child { margin-right: 2px; }
+.pm-chip { padding: 2px 8px; border-radius: 999px; background: var(--brand-soft); color: var(--brand-text); font-weight: 650; }
+.filter-inline { width: 210px; }
+.filter-inline .select-btn { height: 34px; font-size: 13px; }
+.kind-dot.cat-brand { background: var(--brand); } .kind-dot.cat-bad { background: var(--down); } .kind-dot.cat-good { background: var(--up); }
+.kind-dot.cat-warn { background: var(--warn); } .kind-dot.cat-info { background: var(--accent); } .kind-dot.cat- { background: var(--muted); }
+.search-field.wide { width: 100%; height: 40px; }
+.inst-scroll { max-height: min(460px, 58vh); overflow-y: auto; margin: 12px -4px 0; padding: 0 4px 2px; display: grid; gap: 14px; }
+.inst-title { font-size: 11px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 0 0 8px; }
+.inst-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.inst-tile { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text); font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; transition: border-color .15s, background-color .15s, transform .15s; }
+.inst-tile > span:last-child { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.25; }
+.inst-tile:hover { border-color: color-mix(in srgb, var(--brand) 45%, var(--border-2)); background: var(--surface-3); }
+.inst-tile:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.inst-picked { display: flex; align-items: center; gap: 12px; padding: 12px; margin-bottom: 16px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); }
+.inst-picked > div { display: grid; min-width: 0; flex: 1; }
+.inst-picked b { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inst-picked small { color: var(--muted); font-size: 12.5px; }
+.inst-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.pm-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
+.pm-toggle { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 12px 0 8px; border-radius: 11px; border: 1px solid var(--border-2);
+  background: var(--surface); color: var(--text-2); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s; }
+.pm-toggle:hover { color: var(--text); }
+.pm-toggle.on { border-color: var(--brand); background: var(--brand-soft); color: var(--text); }
+.pm-toggle.on .icon { color: var(--brand-text); }
+@media (max-width: 760px) {
+  .filter-inline { width: calc(50% - 4px); }
+  .inst-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
