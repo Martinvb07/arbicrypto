@@ -52,7 +52,7 @@ Lo que no esté en Binance (otros exchanges, billeteras propias) se agrega a man
 
 | Pestaña | Qué hay |
 |---|---|
-| **Inicio** | Tus saldos hoy: total del negocio, Binance por moneda y billetera (Spot, Funding, Earn) a precio de hoy y si cuadra con tus libros, pesos por cuenta (Nequi, Bre-B, bancos), resultado, últimos movimientos y rondas |
+| **Inicio** | Lo simple: cuánto tienes en total, en Binance, en pesos y cuánto vas ganando en el año; tu Binance por moneda con **los mismos saldos y precios que Mi Binance en el panel** (se refresca cada minuto, igual que allá), tu caja en pesos y los últimos movimientos |
 | **Movimientos** | Todas las operaciones, gastos, aportes y retiros. Agregar a mano o subir archivo |
 | **Cuentas** | Tus bancos y billeteras fuera de Binance: subes los extractos (PDF con o sin clave, Excel o CSV) y la app clasifica cada movimiento (Binance P2P, 4x1000, entre tus cuentas, salario, consumos, cuota de manejo…), los cruza con tus órdenes P2P y te da los valores para la declaración (saldos al 31/12, consignaciones, 4x1000 real) |
 | **Resultados** | Resumen (estado de resultados, mes a mes, por moneda), rondas de arbitraje y cada operación |

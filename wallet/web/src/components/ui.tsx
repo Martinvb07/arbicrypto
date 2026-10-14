@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { institutionOf } from "@/lib/banks";
 import { money, signedMoney, tone } from "@/lib/format";
@@ -205,5 +205,46 @@ export function BankLogo({ name, kind, size = 36 }: { name: string; kind?: strin
     <span className="bank-logo" style={{ width: size, height: size, background: inst.bg, color: inst.fg, fontSize: fs }} title={inst.name} aria-hidden="true">
       {inst.mark}
     </span>
+  );
+}
+
+/** Mide el botón elegido dentro de `ref` para que un fondo lo siga deslizándose (igual que en el panel). */
+export function useThumb(ref: React.RefObject<HTMLElement | null>, index: number) {
+  const [thumb, setThumb] = useState<{ x: number; w: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const b = el.querySelectorAll<HTMLElement>(":scope > button")[index];
+      setThumb(b ? { x: b.offsetLeft, w: b.offsetWidth } : null);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    el.querySelectorAll(":scope > button").forEach((b) => ro.observe(b));
+    return () => ro.disconnect();
+  }, [ref, index]);
+  return thumb ? { transform: `translateX(${thumb.x}px)`, width: thumb.w } : undefined;
+}
+
+/** Grupo de opciones: el fondo de la elegida se desliza como un switch (el mismo del panel). */
+export function Segmented<T extends string | number>({ value, options, onChange, label, className = "" }: {
+  value: T;
+  options: readonly (readonly [T, ReactNode])[];
+  onChange: (v: T) => void;
+  label?: string;
+  className?: string;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const thumb = useThumb(box, options.findIndex(([v]) => v === value));
+  return (
+    <div className={`seg ${className}`} ref={box} role="radiogroup" aria-label={label}>
+      {thumb && <span className="seg-thumb" style={thumb} aria-hidden="true" />}
+      {options.map(([v, l]) => (
+        <button key={String(v)} type="button" role="radio" aria-checked={v === value} className={v === value ? "on" : ""} onClick={() => onChange(v)}>
+          {l}
+        </button>
+      ))}
+    </div>
   );
 }

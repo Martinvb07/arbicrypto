@@ -900,7 +900,7 @@ def run_loop(name, step, interval):
 
 PUBLIC_PATHS = {"/login", "/login.html", "/favicon.ico", "/robots.txt", "/api/auth/login", "/api/auth/register",
                 "/inicio", "/api/public/mercado", "/api/auth/logout", "/salir",
-                "/internal/binance", "/internal/avatar"}  # solo responde a la wallet de este servidor, con firma (ver internal_binance)  # cerrar sesión funciona aunque ya haya vencido
+                "/internal/binance", "/internal/avatar", "/internal/cuenta"}  # solo responde a la wallet de este servidor, con firma (ver internal_binance)  # cerrar sesión funciona aunque ya haya vencido
 PUBLIC_PREFIXES = ("/_next/", "/coins/", "/brand/", "/icons/")
 # Lo que puede abrir en el panel alguien con acceso solo a la wallet (entrar, ir a su wallet y salir)
 WALLET_ONLY_PATHS = PUBLIC_PATHS | {"/wallet", "/login"}
@@ -2031,6 +2031,27 @@ def internal_avatar():
     if not doc or not doc.get("data"):
         abort(404)
     resp = Response(base64.b64decode(doc["data"]), mimetype=f"image/{doc['type']}")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.get("/internal/cuenta")
+def internal_account():
+    """Los saldos de Binance de una persona tal como los muestra Mi Binance, para que la wallet muestre los mismos
+    números (mismo precio, misma hora). Mismas protecciones que /internal/binance."""
+    if not is_local() or request.headers.get("x-forwarded-for"):
+        abort(404)
+    uid, ts = request.args.get("uid", ""), request.args.get("ts", 0, type=int)
+    sig = request.headers.get("x-wallet-sig", "")
+    if not uid or abs(time.time() - ts) > 30 or not hmac.compare_digest(sig, sso.sign(sso_secret, f"{uid}|{ts}")):
+        abort(404)
+    name = next((n for n, u in auth.users.items() if u.get("uid") == uid), None)
+    with lock:
+        view = account_view(name) if name else None
+        error = acc_errors.get(name) if name else None
+    keep = ("t", "spot", "funding", "total_usdt", "usdt_fiat", "total_fiat")
+    resp = jsonify(connected=bool(name and name in accounts), account={k: view[k] for k in keep} if view else None,
+                   error=error["msg"] if error else None, fiat=FIAT)
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
