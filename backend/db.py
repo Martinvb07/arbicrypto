@@ -323,8 +323,8 @@ class DB:
             out[""] = {"last": self._msg(rows[0]), "unread": n}
         last = self._all(
             "SELECT * FROM messages WHERE id IN (SELECT MAX(id) FROM messages WHERE recipient IS NOT NULL "
-            "AND recipient NOT LIKE '#%' AND (sender = ? OR recipient = ?) GROUP BY CASE WHEN sender = ? THEN recipient ELSE sender END)",
-            (user, user, user))
+            "AND recipient NOT LIKE ? AND (sender = ? OR recipient = ?) GROUP BY CASE WHEN sender = ? THEN recipient ELSE sender END)",
+            ("#%", user, user, user))  # el patrón va como parámetro: un % escrito en la consulta rompe pymysql (MySQL)
         for r in last:
             peer = r["recipient"] if r["sender"] == user else r["sender"]
             out[peer] = {"last": self._msg(r), "unread": 0}
