@@ -113,27 +113,44 @@ export function CopyBoxes({ report }: { report: Report }) {
     }
   };
 
+  const copyAll = async () => {
+    const text = rows.map((x) => `Casilla ${x.n} (${x.name}): ${Math.round(c[x.n] ?? 0)}`).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Casillas copiadas", `${rows.length} valores`, "good");
+    } catch {
+      toast("No se pudo copiar", undefined, "bad");
+    }
+  };
+
   return (
     <div className="card">
       <div className="card-head">
         <div>
-          <h2>{live ? "Así quedaría tu formulario si el año cerrara hoy" : "Copia esto en el formulario de la DIAN"}</h2>
-          <p className="sub">Formulario 210 · cada número va en la casilla que dice</p>
+          <h2>{live ? "Así quedaría tu formulario si el año cerrara hoy" : "Copia esto en el formulario 210"}</h2>
+          <p className="sub">Cada número va en la casilla que dice. La DIAN calcula sola el resto.</p>
         </div>
+        {!live && <button className="btn btn-sm" onClick={copyAll}><Icon name="copy" size={14} /> Copiar todo</button>}
       </div>
-      <div className="boxes">
+      <div className="box-grid">
         {rows.map((x) => (
-          <div key={x.n} className="box-row">
-            <span className="casilla">{x.n}</span>
-            <div className="box-txt"><b>{x.name}</b>{x.hint && <span className="cell-sub">{x.hint}</span>}</div>
-            <b className="num box-val">{money(c[x.n] ?? 0)}</b>
-            {!live && <button className="btn btn-sm" onClick={() => copy(x.n, c[x.n] ?? 0)}><Icon name="copy" size={14} /> Copiar</button>}
+          <div key={x.n} className="box-tile">
+            <div className="box-tile-top">
+              <span className="casilla">Casilla {x.n}</span>
+              {!live && <button className="btn btn-sm btn-ghost btn-icon" title={`Copiar casilla ${x.n}`} aria-label={`Copiar casilla ${x.n}`} onClick={() => copy(x.n, c[x.n] ?? 0)}><Icon name="copy" size={14} /></button>}
+            </div>
+            <b className="num box-tile-val">{money(c[x.n] ?? 0)}</b>
+            <span className="box-tile-name">{x.name}</span>
+            {x.hint && <small>{x.hint}</small>}
           </div>
         ))}
       </div>
-      <div className="card-body box-foot">
-        <span className="muted">La DIAN calcula sola el resto. Te debe dar una ganancia de <b>{money(c["87"] || 0)}</b>
-          {c["88"] > 0 && <> o una pérdida de <b>{money(c["88"])}</b></>}.</span>
+      <div className="box-result">
+        {c["88"] > 0 ? (
+          <><span>Al final la DIAN te debe mostrar una <b>pérdida</b> de</span><b className="num down">{money(c["88"])}</b><small>Casilla 88 · se puede restar en los años siguientes</small></>
+        ) : (
+          <><span>Al final la DIAN te debe mostrar una <b>ganancia</b> de</span><b className={`num ${(c["87"] || 0) > 0 ? "up" : ""}`}>{money(c["87"] || 0)}</b><small>Casilla 87 · ya con la mitad del 4x1000 restada</small></>
+        )}
       </div>
     </div>
   );

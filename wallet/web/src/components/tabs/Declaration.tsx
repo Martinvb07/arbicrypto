@@ -11,6 +11,8 @@ import { Asset, Field, Icon, Note, Skeleton } from "../ui";
 import { useWallet } from "../wallet";
 import { ExcelButton } from "./CryptoBook";
 
+type Step = "revisa" | "casillas" | "presenta";
+
 function Line({ label, v, signed, total, hint }: { label: string; v: number; signed?: boolean; total?: boolean; hint?: string }) {
   return (
     <div className={`line ${total ? "total" : ""}`}>
@@ -32,7 +34,7 @@ function DeclarationBody({ report, onTab }: { report: Report; onTab: (t: TabId) 
   const [upload, setUpload] = useState(false);
   const [detail, setDetail] = useState(false);
   const [extraOpen, setExtraOpen] = useState(false);
-  const [topesOpen, setTopesOpen] = useState(false);
+  const [step, setStep] = useState<Step>("revisa");
   const todos = useTodos(report, onTab, () => setUpload(true));
   const s = report.summary;
   const f = s.f210;
@@ -70,83 +72,150 @@ function DeclarationBody({ report, onTab }: { report: Report; onTab: (t: TabId) 
     : c87 > 0 ? `Tu ganancia de ${money(c87)} está en la parte que no paga (hasta ${money(1090 * s.uvt)})`
     : "No hubo ganancia";
 
+  const verdict = mustFile ? "yes" : soon ? "maybe" : "no";
+  const verdictTitle = mustFile ? (live ? `Sí, declaras en ${year + 1}` : "Sí, debes declarar")
+    : soon ? "Probablemente declares" : live ? "Por ahora no declaras" : "Por tus cripto, no declaras";
+  const verdictWhy = mustFile ? `Pasas el tope de ${new Intl.ListFormat("es", { type: "conjunction" }).format(over.map(([k]) => TOPE_NAME[k]))}.`
+    : soon ? "A este ritmo pasas un tope antes del 31 de diciembre."
+    : "No llegas a ninguno de los topes con tus cripto. Si tienes salario u otros bienes, escríbelos en el paso 1.";
+  const blocking = todos.filter((t) => !t.optional).length;
+  const STEPS: { id: Step; n: number; title: string; sub: string; done: boolean }[] = [
+    { id: "revisa", n: 1, title: "Revisa", sub: blocking ? `Falta${blocking > 1 ? "n" : ""} ${blocking} cosa${blocking > 1 ? "s" : ""}` : "Todo completo", done: !blocking },
+    { id: "casillas", n: 2, title: "Copia las casillas", sub: "Formulario 210", done: false },
+    { id: "presenta", n: 3, title: "Presenta", sub: live ? `En ${year + 1}` : "En la DIAN", done: false },
+  ];
+
   return (
     <div className="stack">
       <div className="page-head no-print">
         <div>
           <h1>Declaración {year}</h1>
-          <p>{live ? `Así vas este año. La presentas en ${year + 1}.` : "Lo que necesitas para presentarla en la DIAN."}</p>
+          <p>{live ? `Así vas este año. La presentas en ${year + 1}.` : "Tres pasos para presentarla en la DIAN."}</p>
         </div>
         <div className="actions">
-          <button className="btn" onClick={printIt}><Icon name="print" size={16} /> Imprimir</button>
-          <a className="btn" href={`/api/export/paquete-contador.zip?year=${year}`} download title="El Excel más los CSV, en un .zip"><Icon name="download" size={16} /> Paquete para el contador</a>
+          <button className="btn btn-icon" onClick={printIt} title="Imprimir resumen" aria-label="Imprimir"><Icon name="print" size={16} /></button>
           <ExcelButton />
         </div>
       </div>
 
-      <div className="hero no-print">
-        <div className={`hero-cell ${mustFile || soon ? "warn-cell" : "ok-cell"}`}>
-          <small>{live ? `¿Declaras en ${year + 1}?` : "¿Debes declarar?"}</small>
-          <b>{mustFile ? "Sí" : soon ? "Probablemente" : live ? "Por ahora no" : "Por tus cripto, no"}</b>
-          <span>
-            {mustFile ? `Pasas el tope de ${over.map(([k]) => TOPE_NAME[k]).join(" y ")}`
-              : soon ? "A este ritmo pasas un tope antes del 31 de diciembre"
-              : "Según tus cripto"}{" · "}
-            <button className="link" onClick={() => setTopesOpen(!topesOpen)}>{topesOpen ? "ocultar topes" : "ver topes"}</button>
-          </span>
-        </div>
-        <div className="hero-cell">
-          <small>Impuesto por tus cripto</small>
-          <b>{money(s.tax_total)}</b>
-          <span>{taxSmall}</span>
-        </div>
-        <div className="hero-cell">
-          <small>Fecha límite</small>
-          <b>{deadlineBig}</b>
-          <span>{deadlineSmall}</span>
-        </div>
-      </div>
-
-      {topesOpen && <div className="card no-print"><TopesList report={report} /></div>}
-
-      <div className="no-print"><TodoList todos={todos} /></div>
-      <div className="no-print"><CopyBoxes report={report} /></div>
-
-      <div className="card no-print">
-        <div className="card-head">
+      <div className={`card verdict-card ${verdict} no-print`}>
+        <div className="verdict-main">
+          <span className="verdict-ic"><Icon name={verdict === "no" ? "check" : "alert"} size={22} /></span>
           <div>
-            <h2>{live ? "Tus cripto hoy (patrimonio)" : `Patrimonio al 31 de diciembre de ${year}`}</h2>
-            <p className="sub">Se declaran por lo que te costaron (art. 267 ET), no por lo que valen. Esto va en la casilla 29.</p>
+            <small>{live ? `¿Declaras en ${year + 1}?` : "¿Debes declarar?"}</small>
+            <h2>{verdictTitle}</h2>
+            <p>{verdictWhy}</p>
           </div>
         </div>
-        {!report.holdings.length ? (
-          <div className="card-body"><p className="muted">{live ? "Hoy no tienes cripto: todo está en pesos." : "No tenías cripto al cierre del año."}</p></div>
-        ) : (
-          <div className="table-wrap">
-            <table className="t">
-              <thead><tr><th>Cripto</th><th className="r">Cantidad</th><th className="r">Costo fiscal</th><th className="r hide-sm">Desde</th></tr></thead>
-              <tbody>
-                {report.holdings.map((h) => (
-                  <tr key={h.asset}><td><Asset asset={h.asset} /></td><td className="r">{qty(h.qty)}</td><td className="r"><b>{money(h.cost)}</b></td><td className="r hide-sm muted">{date(h.since)}</td></tr>
-                ))}
-              </tbody>
-              <tfoot><tr><td colSpan={2}>Total</td><td className="r">{money(report.holdings.reduce((a, h) => a + h.cost, 0))}</td><td className="hide-sm" /></tr></tfoot>
-            </table>
-          </div>
-        )}
+        <div className="verdict-stats">
+          <div><small>Impuesto por tus cripto</small><b>{money(s.tax_total)}</b><span>{taxSmall}</span></div>
+          <div><small>Fecha límite</small><b>{deadlineBig}</b><span>{deadlineSmall}</span></div>
+        </div>
       </div>
-      {!live && <div className="no-print"><HowToFile report={report} /></div>}
 
-      <div className="card no-print">
-        <button className="fold" onClick={() => setExtraOpen(!extraOpen)} aria-expanded={extraOpen}>
-          <span><b>¿Tienes salario, arriendos u otros bienes?</b><span className="cell-sub">Escríbelos para saber si debes declarar y cuánto pagarías en total. Opcional.</span></span>
-          <Icon name="chevron" size={18} />
-        </button>
-        {extraOpen && <ExtraForm key={year} initial={report.extra} />}
+      <div className="steps-nav no-print" role="tablist" aria-label="Pasos">
+        {STEPS.map((x) => (
+          <button key={x.id} role="tab" aria-selected={step === x.id} className={`step-tab ${step === x.id ? "on" : ""} ${x.done ? "done" : ""}`} onClick={() => setStep(x.id)}>
+            <span className="step-n">{x.done ? <Icon name="check" size={14} /> : x.n}</span>
+            <span><b>{x.title}</b><small>{x.sub}</small></span>
+          </button>
+        ))}
       </div>
+
+      {step === "revisa" && (
+        <div className="stack no-print">
+          <TodoList todos={todos} />
+          <div className="card">
+            <div className="card-head">
+              <div>
+                <h2>Los topes que obligan a declarar</h2>
+                <p className="sub">Si pasas uno solo, declaras. Valores {year} en pesos.</p>
+              </div>
+            </div>
+            <TopesList report={report} />
+          </div>
+          <div className="card">
+            <button className="fold" onClick={() => setExtraOpen(!extraOpen)} aria-expanded={extraOpen}>
+              <span><b>¿Tienes salario, arriendos u otros bienes?</b><span className="cell-sub">Escríbelos para saber si debes declarar y cuánto pagarías en total. Opcional.</span></span>
+              <Icon name="chevron" size={18} />
+            </button>
+            {extraOpen && <ExtraForm key={year} initial={report.extra} />}
+          </div>
+          <div className="step-next"><button className="btn btn-primary" onClick={() => setStep("casillas")}>Siguiente: copiar las casillas <Icon name="arrowRight" size={15} /></button></div>
+        </div>
+      )}
+
+      {step === "casillas" && (
+        <div className="stack no-print">
+          <CopyBoxes report={report} />
+          <div className="card">
+            <div className="card-head">
+              <div>
+                <h2>{live ? "Tus cripto hoy" : `Tus cripto al 31 de diciembre de ${year}`}</h2>
+                <p className="sub">Van en la casilla 29 por lo que te costaron, no por lo que valen (art. 267 ET).</p>
+              </div>
+            </div>
+            {!report.holdings.length ? (
+              <div className="card-body"><p className="muted">{live ? "Hoy no tienes cripto: todo está en pesos." : "No tenías cripto al cierre del año."}</p></div>
+            ) : (
+              <div className="table-wrap">
+                <table className="t">
+                  <thead><tr><th>Cripto</th><th className="r">Cantidad</th><th className="r">Te costó</th><th className="r hide-sm">Desde</th></tr></thead>
+                  <tbody>
+                    {report.holdings.map((h) => (
+                      <tr key={h.asset}><td><Asset asset={h.asset} /></td><td className="r">{qty(h.qty)}</td><td className="r"><b>{money(h.cost)}</b></td><td className="r hide-sm muted">{date(h.since)}</td></tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr><td colSpan={2}>Total casilla 29</td><td className="r">{money(report.holdings.reduce((a, h) => a + h.cost, 0))}</td><td className="hide-sm" /></tr></tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+          <div className="step-next">
+            <button className="btn btn-ghost" onClick={() => setStep("revisa")}>Atrás</button>
+            <button className="btn btn-primary" onClick={() => setStep("presenta")}>Siguiente: presentar <Icon name="arrowRight" size={15} /></button>
+          </div>
+        </div>
+      )}
+
+      {step === "presenta" && (
+        <div className="stack no-print">
+          <div className="grid-2">
+            <HowToFile report={report} />
+            <div className="card card-pad">
+              <h2 style={{ marginBottom: 12 }}>Para tu contador</h2>
+              <div className="dl-list">
+                <a className="dl-row" href={`/api/export/paquete-contador.zip?year=${year}`} download>
+                  <span className="dl-ic"><Icon name="download" size={16} /></span>
+                  <span><b>Paquete completo (.zip)</b><small>El Excel y todos los CSV</small></span>
+                </a>
+                <a className="dl-row" href={`/api/export/movimientos.csv?year=${year}`} download>
+                  <span className="dl-ic"><Icon name="list" size={16} /></span>
+                  <span><b>Movimientos</b><small>Cada compra, venta y cambio</small></span>
+                </a>
+                <a className="dl-row" href={`/api/export/ganancias.csv?year=${year}`} download>
+                  <span className="dl-ic"><Icon name="trend" size={16} /></span>
+                  <span><b>Ganancias</b><small>Lo que ganaste en cada venta</small></span>
+                </a>
+                <a className="dl-row" href={`/api/export/patrimonio.csv?year=${year}`} download>
+                  <span className="dl-ic"><Icon name="wallet" size={16} /></span>
+                  <span><b>Patrimonio</b><small>Tus cripto al cierre</small></span>
+                </a>
+              </div>
+              <h3 className="dl-title">Guarda también</h3>
+              <ul className="checklist">
+                <li>El certificado del 4x1000 de cada banco (para restar la mitad).</li>
+                <li>Los extractos de las cuentas con que pagaste y recibiste en P2P.</li>
+                <li>El historial de Binance del año.</li>
+              </ul>
+            </div>
+          </div>
+          <div className="step-next"><button className="btn btn-ghost" onClick={() => setStep("casillas")}>Atrás</button></div>
+        </div>
+      )}
 
       <div className="no-print" style={{ display: "flex", justifyContent: "center" }}>
-        <button className="btn btn-ghost" onClick={() => setDetail(!detail)}>{detail ? "Ocultar el detalle" : "Ver el detalle completo"}</button>
+        <button className="btn btn-ghost" onClick={() => setDetail(!detail)}>{detail ? "Ocultar el detalle" : "Ver el cálculo completo, casilla por casilla"} <Icon name="chevronDown" size={14} /></button>
       </div>
 
       {detail && (
