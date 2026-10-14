@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { api, type GastoCategory, type Kind, type Movement, type MovementInput } from "@/lib/api";
 import { cashValue, fromLocalInput, GASTO_LABEL, KIND_HINT, KIND_LABEL, money, num, parseNum, toLocalInput } from "@/lib/format";
+import { Select } from "./Select";
 import { Field, Icon, Modal } from "./ui";
 import { useWallet } from "./wallet";
 
@@ -140,9 +141,8 @@ export function MoveModal({ move, onClose }: { move?: Movement; onClose: () => v
             </Field>
             {kind === "gasto" ? (
               <Field label="Tipo de gasto">
-                <select value={category} onChange={(e) => setCategory(e.target.value as GastoCategory)}>
-                  {(Object.keys(GASTO_LABEL) as GastoCategory[]).map((c) => <option key={c} value={c}>{GASTO_LABEL[c]}</option>)}
-                </select>
+                <Select label="Tipo de gasto" value={category} searchable={false} onChange={(v) => setCategory(v as GastoCategory)}
+                  options={(Object.keys(GASTO_LABEL) as GastoCategory[]).map((c) => ({ value: c, label: GASTO_LABEL[c] }))} />
               </Field>
             ) : <div />}
             <Field label={kind === "gasto" ? "En qué fue" : "Nota (opcional)"} wide hint={kind === "gasto" ? "Guarda la factura o el recibo: es tu soporte." : undefined}>
