@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { perUsd } from "@/lib/format";
+import { goWithSplash } from "./splash";
 import { avatarImage, chatUnread, useChat } from "@/lib/chat";
 import { useLive } from "@/lib/live";
 import { Menu, Modal, Sheet } from "./overlay";
@@ -229,7 +230,7 @@ export function Header({ onTab }: { onTab: (t: TabId) => void }) {
                     </div>
                   </div>
                   {/* su propia wallet (wallet.arbicrypto.org), con esta misma sesión */}
-                  <button onClick={() => { close(); window.location.href = "/wallet"; }}><Icon name="wallet" size={16} /> Wallet</button>
+                  <button onClick={() => { close(); goWithSplash("/wallet", "Abriendo tu wallet", "Contabilidad y declaración"); }}><Icon name="wallet" size={16} /> Wallet</button>
                   <button onClick={() => { close(); photoInput.current?.click(); }}><Icon name="pencil" size={16} /> {myPhoto ? "Cambiar foto" : "Poner foto de perfil"}</button>
                   {myPhoto && <button onClick={() => { close(); void removePhoto(); }}><Icon name="trash" size={16} /> Quitar foto</button>}
                   <button onClick={() => { close(); setModal("password"); }}><Icon name="key" size={16} /> Cambiar contraseña</button>

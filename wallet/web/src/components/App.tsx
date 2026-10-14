@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { yearLabel } from "@/lib/format";
 import { BrandMark, Icon } from "./ui";
 import { Select } from "./Select";
+import { goWithSplash } from "./splash";
 import { useWallet } from "./wallet";
 import { Home } from "./tabs/Home";
 import { Movements } from "./tabs/Movements";
@@ -120,7 +121,7 @@ function UserMenu({ onTab, onLogout }: { onTab: (t: TabId) => void; onLogout: ()
               <small>{me.user.role === "admin" ? "Administrador" : "Usuario"}{me.profile.nit ? ` · CC ${me.profile.nit}` : ""}</small>
             </div>
           </div>
-          <a role="menuitem" href={me.panel}><Icon name="back" size={16} /> Volver al panel</a>
+          <a role="menuitem" href={me.panel} onClick={(e) => { e.preventDefault(); setOpen(false); goWithSplash(me.panel, "Volviendo al panel"); }}><Icon name="back" size={16} /> Volver al panel</a>
           <button role="menuitem" onClick={() => { setOpen(false); onTab("ajustes"); }}><Icon name="settings" size={16} /> Ajustes y perfil fiscal</button>
           <button role="menuitem" className="danger" onClick={onLogout}><Icon name="logout" size={16} /> Cerrar sesión</button>
         </div>
@@ -166,7 +167,7 @@ export function App() {
   // cierra la sesión de la wallet y la del panel (es la misma persona y la misma sesión)
   const logout = async () => {
     const r = await api.logout().catch(() => ({ panel: me.panel }));
-    window.location.href = `${r.panel}/salir`;
+    goWithSplash(`${r.panel}/salir`, "Cerrando sesión");
   };
 
   return (

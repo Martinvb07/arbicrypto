@@ -13,6 +13,7 @@ import { Sell } from "@/components/tabs/Sell";
 import { Team } from "@/components/tabs/Team";
 import { LiveProvider, useLive } from "@/lib/live";
 import { ConfirmHost } from "@/components/overlay";
+import { Splash } from "@/components/splash";
 
 function Banners() {
   const { state } = useLive();
@@ -52,8 +53,10 @@ function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
+  const { state } = useLive();
   return (
     <>
+      <Splash text="Abriendo el panel" sub="Conectando con Binance en vivo" show={!state} />
       <ConfirmHost />
       <Header onTab={go} />
       <Nav tab={tab} onTab={go} />

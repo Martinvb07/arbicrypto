@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { App } from "@/components/App";
-import { Skeleton } from "@/components/ui";
+import { Splash } from "@/components/splash";
 import { WalletProvider } from "@/components/wallet";
 import { api, ApiError, type Me } from "@/lib/api";
 
@@ -19,7 +19,7 @@ export default function Page() {
 
   useEffect(() => { void load(); }, []);
 
-  if (state === "loading") return <main><Skeleton rows={5} /></main>;
+  if (state === "loading") return <Splash text="Abriendo tu wallet" sub="Trayendo tus movimientos y tus libros" />;
   if (state === "offline") {
     return (
       <div className="login">
@@ -30,10 +30,11 @@ export default function Page() {
       </div>
     );
   }
-  if (!me) return <main><Skeleton rows={5} /></main>;
+  if (!me) return <Splash text="Abriendo tu wallet" />;
   return (
     <WalletProvider initial={me}>
       <App />
+      <Splash text="Abriendo tu wallet" show={false} />
     </WalletProvider>
   );
 }
