@@ -33,10 +33,13 @@ En este PC: panel en http://127.0.0.1:8787 → menú → Wallet (abre http://127
 1. **Inicio → Conecta tu Binance**: crea en Binance una API Key **solo de lectura** y pégala una vez. Desde ahí la app trae sola tus P2P, Convert y Spot cada 30 minutos.
 2. **P2P de hace más de 6 meses**: Binance no los entrega por API. Descárgalos en Binance (P2P → Órdenes → Exportar) y súbelos una vez en *Subir archivo*, sin abrirlos antes en Excel.
 3. **Ajustes**: escribe tu cédula (para la fecha límite) y deja marcado *Compro y vendo de forma habitual* si haces arbitraje o trading.
-4. **Inicio → Inicia tu caja**: escribe la cuenta (por ejemplo Nequi) y cuánta plata tienes hoy en ella. Desde ahí la app
-   lleva tu caja: lo de Binance entra solo y lo demás lo anotas con **Entrada** (plata tuya que metes) o **Salida** (para ti
-   o gasto del negocio, con su 4x1000). La tarjeta dice cuánto debes tener en la cuenta y sus últimos movimientos; el registro
-   completo está en Libros → Caja diaria.
+4. **Inicio → Abre tu caja del día**: cada mañana escribe la cuenta (por ejemplo Nequi) y con cuánta plata arrancas. Desde
+   ahí cada compra y venta de Binance se suma sola con su 4x1000 (mientras la caja está abierta, la wallet trae tus órdenes
+   cada 5 minutos; *Actualizar* las trae ya). Lo que no es de Binance lo anotas con **Entrada** o **Salida**. La tarjeta dice
+   cuánto debes tener en la cuenta y cuánto vas ganando. Al final del día toca **Cerrar caja**, escribe cuánto tienes de
+   verdad (opcional) y sale el **informe del día**: compras, ventas, 4x1000, cuánto debías tener contra lo que tienes, la
+   ganancia de las vueltas del día por cripto y cada operación, con descarga a Excel. Los días anteriores quedan en la
+   misma tarjeta. Es tu control diario: no cambia la contabilidad ni la declaración.
 5. Revisa **Resultados → Cada operación**: si alguna venta dice *Sin costo*, falta su compra. Agrégala, aunque sea de años anteriores.
 
 ## A fin de año (para declarar)

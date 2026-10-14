@@ -1144,3 +1144,30 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
   .quick-btn small { display: none; }
   .home-todos { flex-wrap: wrap; }
 }
+
+/* ---------- Inicio: caja del día ---------- */
+.cd-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--border); }
+.cd-stats > div { display: grid; gap: 2px; padding: 12px 22px; min-width: 0; }
+.cd-stats > div:nth-child(even) { border-left: 1px solid var(--border); }
+.cd-stats > div:nth-child(n + 3) { border-top: 1px solid var(--border); }
+.cd-stats small { font-size: 12px; color: var(--muted); }
+.cd-stats b { font-size: 17px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cd-history { border-top: 1px solid var(--border); padding: 12px 0 6px; }
+.cd-history-head { display: flex; justify-content: space-between; align-items: center; padding: 0 22px 6px; font-size: 13px; }
+.cd-day { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; width: 100%; padding: 9px 22px;
+  border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; transition: background-color .12s; }
+.cd-day:hover { background: var(--hover); }
+.cd-day > span { display: grid; min-width: 0; }
+.cd-day small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cd-day .icon { color: var(--muted); }
+.cd-lines { display: grid; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.cd-lines > div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 14px; font-size: 14px; }
+.cd-lines > div + div { border-top: 1px solid var(--border); }
+.cd-lines .cd-total { background: var(--surface-2); font-weight: 700; }
+.cd-h { font-size: 14px; margin: 18px 0 8px; }
+.cd-ops { max-height: 320px; overflow-y: auto; }
+.modal .table-wrap table.t th:first-child, .modal .table-wrap table.t td:first-child { padding-left: 8px; }
+.modal .table-wrap table.t th:last-child, .modal .table-wrap table.t td:last-child { padding-right: 8px; }
+@media (max-width: 640px) {
+  .cd-stats > div, .cd-history-head, .cd-day { padding-left: 16px; padding-right: 16px; }
+}

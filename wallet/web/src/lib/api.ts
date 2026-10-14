@@ -357,6 +357,43 @@ export interface PanelBinance {
   error: string | null;
 }
 
+/** Caja del día: una operación entre que abriste y cerraste. delta = cuánto cambió la plata de tu cuenta. */
+export interface JornadaOp {
+  t: number; kind: Kind; asset: string | null; qty: number | null; price: number | null; pesos: number; gmf: number; fee_qty: number;
+  delta: number; counterpart: string; method: string; ref: string; note: string; text: string;
+}
+
+export interface JornadaAsset {
+  asset: string; bought_qty: number; bought: number; sold_qty: number; sold: number; buy_avg: number | null; sell_avg: number | null;
+  /** lo que compraste y vendiste ese mismo día */
+  matched: number; gain: number;
+  /** + te quedó sin vender · − vendiste de lo que ya tenías */
+  left: number;
+}
+
+export interface JornadaReport {
+  id: number; opened: number; closed: number | null; account: string; opening: number;
+  cash_real: number | null; expected: number; diff: number | null;
+  /** ganancia de las vueltas del día, ya con 4x1000 */
+  gain: number; gain_gross: number;
+  totals: { buys: number; sells: number; bought: number; sold: number; gmf: number; fees: number; in: number; out: number; other: number };
+  ops: JornadaOp[]; assets: JornadaAsset[];
+  by_method: { method: string; in: number; out: number; gmf: number; ops: number }[];
+  synced: number | null;
+}
+
+export interface JornadaSummary {
+  id: number; opened: number; closed: number; account: string; opening: number; cash_real: number | null;
+  expected: number | null; diff: number | null; gain: number | null; ops: number;
+}
+
+export interface JornadaState {
+  open: JornadaReport | null;
+  history: JornadaSummary[];
+  suggest: { account: string; amount: number | null };
+  sync_every: number;
+}
+
 export interface Saldos {
   binance: {
     connected: boolean; synced: number | null; rows: SaldoRow[]; trm: number | null; total_cop: number; total_usd: number; total_cost: number; ok: boolean;
@@ -539,6 +576,11 @@ export const api = {
   puc: () => get<{ accounts: PucAccount[] }>("/api/puc"),
   notaCrear: (n: NoteInput) => post<{ id: number }>("/api/notas", n),
   notaBorrar: (id: number) => post(`/api/notas/${id}/borrar`),
+  jornada: () => get<JornadaState>("/api/jornada"),
+  jornadaAbrir: (amount: number, account: string) => post<{ id: number }>("/api/jornada/abrir", { amount, account }),
+  jornadaCerrar: (cash_real: number | null) => post<{ report: JornadaReport }>("/api/jornada/cerrar", { cash_real }),
+  jornadaVer: (id: number) => get<{ report: JornadaReport }>(`/api/jornada/${id}`),
+  jornadaBorrar: (id: number) => post(`/api/jornada/${id}/borrar`),
   caja: () => get<Caja>("/api/caja"),
   cajaIniciar: (cash_real: number, account: string) => post<{ id: number }>("/api/caja/iniciar", { cash_real, account }),
   cierres: () => get<{ closings: Closing[]; lock_until: number; cash_now: number; auto: AutoClose }>("/api/cierres"),

@@ -154,6 +154,14 @@ CREATE TABLE IF NOT EXISTS notes (
   created {real} NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS jornadas (
+  id {id},
+  user_id {ref} NOT NULL,
+  opened {real} NOT NULL, account TEXT NOT NULL, opening {real} NOT NULL,
+  closed {real}, cash_real {real}, report {long},
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS jornadas_user ON jornadas(user_id, opened);
 CREATE TABLE IF NOT EXISTS trm (day {key} PRIMARY KEY, value {real} NOT NULL);
 CREATE TABLE IF NOT EXISTS prices (asset {key} NOT NULL, hour {big} NOT NULL, usd {real} NOT NULL, PRIMARY KEY (asset, hour));
 """
@@ -176,7 +184,7 @@ ADDED_COLUMNS = (
 
 # Orden para copiar de SQLite a MySQL: primero lo que otras tablas necesitan
 TABLES = ("users", "sessions", "invites", "profile", "year_extra", "movements", "binance", "closings", "accounts",
-          "bank_files", "bank_tx", "bank_rules", "notes", "trm", "prices")
+          "bank_files", "bank_tx", "bank_rules", "notes", "jornadas", "trm", "prices")
 
 MOVE_FIELDS = ("t", "kind", "out_asset", "out_qty", "in_asset", "in_qty", "cop_value", "fee_cop", "gmf_cop",
                "platform", "counterpart", "ext_id", "source", "note", "category", "pay_method", "fee_qty", "fee_asset")
@@ -374,6 +382,31 @@ class DB:
             return None
         self.run("DELETE FROM closings WHERE id=?", (last["id"],))
         return last["id"]
+
+    # ------------------------------------------------------------ caja del día (no toca la contabilidad)
+
+    def jornada_open(self, uid):
+        return self.one("SELECT * FROM jornadas WHERE user_id=? AND closed IS NULL ORDER BY opened DESC LIMIT 1", (uid,))
+
+    def jornada(self, uid, jid):
+        return self.one("SELECT * FROM jornadas WHERE user_id=? AND id=?", (uid, jid))
+
+    def jornadas(self, uid, limit=60):
+        return self.q("SELECT * FROM jornadas WHERE user_id=? AND closed IS NOT NULL ORDER BY opened DESC LIMIT ?", (uid, limit))
+
+    def open_jornada(self, uid, t, account, opening):
+        return self.run("INSERT INTO jornadas (user_id, opened, account, opening) VALUES (?,?,?,?)", (uid, t, account, opening))[0]
+
+    def close_jornada(self, uid, jid, t, cash_real, report):
+        self.run("UPDATE jornadas SET closed=?, cash_real=?, report=? WHERE user_id=? AND id=? AND closed IS NULL",
+                 (t, cash_real, report, uid, jid))
+
+    def delete_jornada(self, uid, jid):
+        self.run("DELETE FROM jornadas WHERE user_id=? AND id=?", (uid, jid))
+
+    def jornada_users(self):
+        """Usuarios con la caja del día abierta: se sincronizan más seguido."""
+        return {r["user_id"] for r in self.q("SELECT DISTINCT user_id FROM jornadas WHERE closed IS NULL")}
 
     def lock_until(self, uid):
         """Fecha hasta la que los movimientos están congelados por un cierre (0 si no hay)."""

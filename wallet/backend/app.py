@@ -47,6 +47,7 @@ PANEL_ENV = os.path.join(ROOT, "..", "backend", ".env")  # el panel vive en el m
 # El panel en este mismo servidor: de ahí sale la llave de Binance de cada persona (una sola conexión para los dos)
 PANEL_INTERNAL = (_env("PANEL_INTERNAL_URL") or f"http://127.0.0.1:{storage.read_env_file(PANEL_ENV).get('PORT', '8787')}").rstrip("/")
 SYNC_EVERY = 30 * 60  # segundos entre sincronizaciones automáticas con Binance
+SYNC_EVERY_OPEN = 5 * 60  # con la caja del día abierta: cada 5 minutos, para ver tus compras y ventas casi en vivo
 AUTO_CLOSE_AFTER = 3 * 86400  # el cierre automático de un mes se hace 3 días después de terminado
 MONTHS = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
           "noviembre", "diciembre")
@@ -609,8 +610,12 @@ def scheduler():
         try:
             due = db.q("SELECT u.id FROM users u LEFT JOIN binance b ON b.user_id=u.id "
                        "WHERE u.panel_uid IS NOT NULL AND (b.last_run IS NULL OR b.last_run<?)", (time.time() - SYNC_EVERY,))
-            for u in due:
-                sync_now(u["id"])
+            ids = {u["id"] for u in due}
+            if open_ := db.jornada_users():  # caja del día abierta: cada 5 minutos
+                ids |= {u["id"] for u in db.q("SELECT user_id AS id FROM binance WHERE last_run IS NULL OR last_run<?",
+                                               (time.time() - SYNC_EVERY_OPEN,)) if u["id"] in open_}
+            for uid in ids:
+                sync_now(uid)
         except Exception:
             log.exception("sincronización automática")
         if time.time() >= next_close:
@@ -1176,6 +1181,186 @@ def caja():
     book = cash_book(uid, start["t"] + 1e-3, time.time() + 86400)
     return jsonify(start={"t": start["t"], "amount": start["cash_real"]}, account=db.profile(uid)["cash_account"],
                    balance=book["closing"], **book)
+
+
+# ------------------------------------------------------------ caja del día
+# Abres el día con lo que tienes en la cuenta, las compras y ventas de Binance se suman solas y al cerrar queda el
+# informe del día. Es tu control diario: no toca la contabilidad ni la declaración.
+
+def jornada_report(uid, j, end):
+    """Todo lo que pasó entre que abriste la caja y `end`: cada operación, totales, cuánto deberías tener en la
+    cuenta y la ganancia de las vueltas del día (lo que compraste y vendiste de la misma cripto ese día)."""
+    ops, assets = [], {}
+    tot = {"buys": 0, "sells": 0, "bought": 0.0, "sold": 0.0, "gmf": 0.0, "fees": 0.0, "in": 0.0, "out": 0.0, "other": 0}
+    by_method = {}
+    for m in moves(uid, start=j["opened"], end=end):
+        k, gmf = m["kind"], float(m.get("gmf_cop") or 0)
+        row = {"t": m["t"], "kind": k, "counterpart": m.get("counterpart") or "", "method": m.get("pay_method") or "",
+               "ref": tax.ref_label(m.get("ext_id")), "note": m.get("note") or "", "gmf": gmf, "fee_qty": float(m.get("fee_qty") or 0)}
+        if k == "compra":  # pagas pesos, te llega la cripto (ya sin la comisión)
+            a, q, pesos = m["in_asset"], float(m["in_qty"]), float(m["out_qty"])
+            x = assets.setdefault(a, {"asset": a, "bought_qty": 0.0, "bought": 0.0, "sold_qty": 0.0, "sold": 0.0})
+            x["bought_qty"] += q
+            x["bought"] += pesos
+            tot["buys"] += 1
+            tot["bought"] += pesos
+            delta = -pesos - gmf
+        elif k == "venta":  # entregas la cripto (con la comisión), te llegan pesos
+            a, q, pesos = m["out_asset"], float(m["out_qty"]), float(m["in_qty"])
+            x = assets.setdefault(a, {"asset": a, "bought_qty": 0.0, "bought": 0.0, "sold_qty": 0.0, "sold": 0.0})
+            x["sold_qty"] += q
+            x["sold"] += pesos
+            tot["sells"] += 1
+            tot["sold"] += pesos
+            delta = pesos
+        elif k == "aporte":
+            a, q, pesos = None, None, float(m["cop_value"])
+            tot["in"] += pesos
+            delta = pesos
+        elif k in ("retiro", "gasto"):
+            a, q, pesos = None, None, float(m["cop_value"])
+            tot["out"] += pesos
+            delta = -pesos - gmf
+        else:  # cambios en Spot, comisiones aparte, ingresos: no mueven pesos
+            tot["other"] += 1
+            ops.append({**row, "asset": m.get("in_asset") or m.get("out_asset"), "qty": float(m.get("in_qty") or m.get("out_qty") or 0),
+                        "pesos": 0.0, "price": None, "delta": 0.0,
+                        "text": f"{m.get('out_asset') or ''} → {m.get('in_asset') or ''}".strip(" →") if k == "permuta" else k})
+            continue
+        tot["gmf"] += gmf
+        tot["fees"] += float(m.get("fee_cop") or 0)
+        if k in ("compra", "venta"):
+            meth = by_method.setdefault(row["method"] or "Sin medio de pago", {"method": row["method"] or "Sin medio de pago", "in": 0.0, "out": 0.0, "gmf": 0.0, "ops": 0})
+            meth["in" if k == "venta" else "out"] += pesos
+            meth["gmf"] += gmf
+            meth["ops"] += 1
+        ops.append({**row, "asset": a, "qty": q, "pesos": pesos, "price": pesos / q if q else None, "delta": delta, "text": ""})
+    gain = 0.0
+    for x in assets.values():
+        x["buy_avg"] = x["bought"] / x["bought_qty"] if x["bought_qty"] else None
+        x["sell_avg"] = x["sold"] / x["sold_qty"] if x["sold_qty"] else None
+        x["matched"] = min(x["bought_qty"], x["sold_qty"])  # lo que compraste y vendiste ese mismo día
+        x["gain"] = x["matched"] * (x["sell_avg"] - x["buy_avg"]) if x["matched"] else 0.0
+        x["left"] = x["bought_qty"] - x["sold_qty"]  # + te quedó sin vender (a su costo) · − vendiste de lo que ya tenías
+        gain += x["gain"]
+    expected = j["opening"] + tot["sold"] - tot["bought"] - tot["gmf"] + tot["in"] - tot["out"]
+    real = j.get("cash_real")
+    b = db.binance(uid)
+    return {"id": j["id"], "opened": j["opened"], "closed": j.get("closed"), "account": j["account"], "opening": j["opening"],
+            "cash_real": real, "expected": expected, "diff": real - expected if real is not None else None,
+            "gain": gain - tot["gmf"], "gain_gross": gain, "totals": tot, "ops": ops,
+            "assets": sorted(assets.values(), key=lambda x: -(x["bought"] + x["sold"])),
+            "by_method": sorted(by_method.values(), key=lambda r: -(r["in"] + r["out"])),
+            "synced": b["last_ok"] if b else None}
+
+
+def jornada_summary(j):
+    r = json.loads(j["report"] or "{}")
+    return {"id": j["id"], "opened": j["opened"], "closed": j["closed"], "account": j["account"], "opening": j["opening"],
+            "cash_real": j["cash_real"], "expected": r.get("expected"), "diff": r.get("diff"), "gain": r.get("gain"),
+            "ops": (r.get("totals") or {}).get("buys", 0) + (r.get("totals") or {}).get("sells", 0)}
+
+
+@app.get("/api/jornada")
+@with_session
+def jornada_get():
+    uid = g.user["id"]
+    j = db.jornada_open(uid)
+    history = [jornada_summary(x) for x in db.jornadas(uid)]
+    last = history[0] if history else None
+    return jsonify(open=jornada_report(uid, j, time.time() + 1) if j else None, history=history,
+                   suggest={"account": (j or last or {}).get("account") or db.profile(uid)["cash_account"] or "Nequi",
+                            "amount": last["cash_real"] if last and last["cash_real"] is not None else (last or {}).get("expected")},
+                   sync_every=SYNC_EVERY_OPEN)
+
+
+@app.post("/api/jornada/abrir")
+@with_session
+@needs_binance
+def jornada_abrir():
+    uid = g.user["id"]
+    d = body()
+    if db.jornada_open(uid):
+        raise Bad("Ya tienes la caja abierta. Ciérrala antes de abrir otra.")
+    opening = num(d.get("amount"), "Saldo con el que arrancas")
+    account = text(d.get("account"), 40) or "Nequi"
+    jid = db.open_jornada(uid, time.time(), account, opening)
+    db.set_cash_account(uid, account)
+    sync_now(uid)  # arranca con lo último de Binance
+    return jsonify(id=jid)
+
+
+@app.post("/api/jornada/cerrar")
+@with_session
+@needs_binance
+def jornada_cerrar():
+    """Cierra la caja: guarda el informe del día. El saldo real es opcional (si lo escribes, sale la diferencia)."""
+    uid = g.user["id"]
+    d = body()
+    j = db.jornada_open(uid)
+    if not j:
+        raise Bad("No tienes la caja abierta.")
+    if jobs.running(uid):
+        return jsonify(error="Estoy trayendo tus últimas órdenes de Binance. Intenta en unos segundos.", syncing=True), 409
+    real = None if d.get("cash_real") in (None, "") else num(d.get("cash_real"), "Saldo real", minimum=-1e15)
+    t = time.time()
+    rep = jornada_report(uid, {**j, "closed": t, "cash_real": real}, t + 1e-3)
+    db.close_jornada(uid, j["id"], t, real, json.dumps(rep))
+    return jsonify(report=rep)
+
+
+@app.post("/api/jornada/<int:jid>/borrar")
+@with_session
+def jornada_borrar(jid):
+    """Quita una caja del día (abierta o cerrada). Solo es tu control: no cambia ningún movimiento."""
+    body()
+    if not db.jornada(g.user["id"], jid):
+        return jsonify(error="No existe esa caja."), 404
+    db.delete_jornada(g.user["id"], jid)
+    return jsonify(ok=True)
+
+
+@app.get("/api/jornada/<int:jid>")
+@with_session
+def jornada_detail(jid):
+    j = db.jornada(g.user["id"], jid)
+    if not j:
+        return jsonify(error="No existe esa caja."), 404
+    return jsonify(report=json.loads(j["report"]) if j["report"] else jornada_report(g.user["id"], j, time.time() + 1))
+
+
+@app.get("/api/jornada/<int:jid>.csv")
+@with_session
+def jornada_csv(jid):
+    j = db.jornada(g.user["id"], jid)
+    if not j:
+        return jsonify(error="No existe esa caja."), 404
+    r = json.loads(j["report"]) if j["report"] else jornada_report(g.user["id"], j, time.time() + 1)
+    kinds = {"compra": "Compra", "venta": "Venta", "aporte": "Entrada", "retiro": "Salida para ti", "gasto": "Gasto"}
+    rows = [["", fmt_t(r["opened"]), f"Abres la caja en {r['account']}", "", "", "", "", "", "", "", r["opening"]]]
+    bal = r["opening"]
+    for o in r["ops"]:
+        bal += o["delta"]
+        rows.append([o["ref"], fmt_t(o["t"]), kinds.get(o["kind"], o["text"] or o["kind"]), o["asset"] or "", o["qty"] if o["qty"] is not None else "",
+                     round(o["price"], 2) if o["price"] is not None else "", o["pesos"] or "", o["gmf"] or "", o["counterpart"], o["method"], bal])
+    tot = r["totals"]
+    rows += [[], ["", "", "Resumen"],
+             ["", "", "Saldo con el que abriste", "", "", "", r["opening"]],
+             ["", "", f"Compras ({tot['buys']})", "", "", "", -tot["bought"]],
+             ["", "", f"Ventas ({tot['sells']})", "", "", "", tot["sold"]],
+             ["", "", "4x1000", "", "", "", -tot["gmf"]],
+             ["", "", "Entradas", "", "", "", tot["in"]],
+             ["", "", "Salidas y gastos", "", "", "", -tot["out"]],
+             ["", "", "Debes tener", "", "", "", r["expected"]],
+             ["", "", "Tenías de verdad", "", "", "", r["cash_real"] if r["cash_real"] is not None else "No lo escribiste"],
+             ["", "", "Diferencia", "", "", "", r["diff"] if r["diff"] is not None else ""],
+             ["", "", "Ganancia de las vueltas del día (ya con 4x1000)", "", "", "", r["gain"]],
+             [], ["", "", "Por cripto", "Cripto", "Compraste", "Precio promedio", "Vendiste", "Precio promedio", "Ganancia", "Te quedó"]]
+    for x in r["assets"]:
+        rows.append(["", "", "", x["asset"], x["bought_qty"], x["buy_avg"] or "", x["sold_qty"], x["sell_avg"] or "", x["gain"], x["left"]])
+    day = datetime.fromtimestamp(r["opened"], tax.CO_TZ).date().isoformat()
+    return csv_response(f"caja-del-dia-{day}.csv", ["Referencia", "Fecha", "Detalle", "Cripto", "Cantidad", "Precio", "Pesos",
+                                                     "4x1000", "Contraparte", "Medio de pago", "Saldo"], rows)
 
 
 @app.get("/api/libro-cripto")
