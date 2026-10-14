@@ -64,6 +64,22 @@ def http():
     return s
 
 
+def market_get(path, **kw):
+    """Precios publicos de Binance: del espejo de datos y, si no responde (corte de red o se demora), de la API
+    principal, que tiene los mismos datos. En un servidor de un pais bloqueado la principal da 451: ahi queda el error
+    del espejo, que es el que dice que paso."""
+    try:
+        return http().get(f"{MARKET}{path}", **kw)
+    except (requests.ConnectionError, requests.Timeout) as first:
+        try:
+            r = http().get(f"{API}{path}", **kw)
+        except requests.RequestException:
+            raise first
+        if r.status_code == 451:
+            raise first
+        return r
+
+
 def _json(r):
     try:
         data = r.json()
@@ -82,7 +98,7 @@ def _json(r):
 # ---------------------------------------------------------------- spot
 
 def load_pairs():
-    r = http().get(f"{MARKET}/api/v3/exchangeInfo",
+    r = market_get("/api/v3/exchangeInfo",
                    params={"symbolStatus": "TRADING", "showPermissionSets": "false"}, timeout=30)
     symbols = _json(r)["symbols"]
     for s in symbols:
@@ -122,7 +138,7 @@ def spot_fill(graph, a, c, qty, fee):
 def fetch_book():
     """Mejor compra y venta de todos los pares: {simbolo: (bid, bid_qty, ask, ask_qty)}."""
     return {d["symbol"]: (float(d["bidPrice"]), float(d["bidQty"]), float(d["askPrice"]), float(d["askQty"]))
-            for d in _json(http().get(f"{MARKET}/api/v3/ticker/bookTicker", timeout=10))}
+            for d in _json(market_get("/api/v3/ticker/bookTicker", timeout=10))}
 
 
 def build_graph(pairs, book):
@@ -145,7 +161,7 @@ def load_graph(pairs):
 # ---------------------------------------------------------------- precio real segun el monto (profundidad del libro)
 
 def depth(symbol, limit=20):
-    d = _json(http().get(f"{MARKET}/api/v3/depth", params={"symbol": symbol, "limit": limit}, timeout=10))
+    d = _json(market_get("/api/v3/depth", params={"symbol": symbol, "limit": limit}, timeout=10))
     return ([(float(p), float(q)) for p, q in d["bids"]], [(float(p), float(q)) for p, q in d["asks"]])
 
 
@@ -522,7 +538,7 @@ class Account:
         # Usa la hora del servidor de Binance para evitar el error -1021 si el reloj del PC esta corrido
         if time.time() - self._synced > 600:
             sent = time.time()
-            server = _json(http().get(f"{MARKET}/api/v3/time", timeout=10))["serverTime"]
+            server = _json(market_get("/api/v3/time", timeout=10))["serverTime"]
             now = time.time()
             # la hora de Binance corresponde a la mitad del viaje de ida y vuelta
             self._offset, self._synced = server - int((sent + now) / 2 * 1000), now
