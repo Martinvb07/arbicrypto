@@ -13,6 +13,13 @@ type Mode = "mine" | "take";
 const MODES = [["mine", "Mi anuncio"], ["take", "Tomar un anuncio"]] as const;
 const BEAT = 1; // "superar al 1.º": un peso mejor que él
 
+/** El panel solo lee tu cuenta: publicar, editar o quitar anuncios y chatear con la contraparte se hace en Binance. */
+const BINANCE_LINKS = [
+  ["https://p2p.binance.com/es/postAd", "plus", "Publicar anuncio"],
+  ["https://p2p.binance.com/es/myads", "megaphone", "Mis anuncios · editar o quitar"],
+  ["https://p2p.binance.com/es/fiatOrder", "listChecks", "Mis órdenes y chat"],
+] as const;
+
 /** Número escrito en un campo; vacío o inválido = null. */
 const parse = (v: string) => (v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : null);
 
@@ -262,6 +269,13 @@ export function AdSim() {
               {state.p2p_fee_min_usd ? ` (mínimo ${num(state.p2p_fee_min_usd, 2)} USDT por orden)` : ""}
             </small>
           </label>
+        </div>
+        <div className="sim-links">
+          {BINANCE_LINKS.map(([href, icon, label]) => (
+            <a key={href} className="btn btn-sm" href={href} target="_blank" rel="noopener noreferrer">
+              <Icon name={icon} size={15} /> {label} <Icon name="external" size={13} />
+            </a>
+          ))}
         </div>
       </section>
 

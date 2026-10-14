@@ -209,6 +209,7 @@
 /* ---------- simular anuncios ---------- */
 .sim-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; align-items: start; }
 .sim-fields .login-field { align-content: start; }
+.sim-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .sim-fields .login-field, .sim-side .login-field { margin-bottom: 0; }
 .sim-fields .login-field input, .sim-side .login-field input { height: 42px; font-variant-numeric: tabular-nums; }
 .sim-hint { display: block; font-size: 12px; font-weight: 500; color: var(--muted); }
