@@ -902,6 +902,8 @@ PUBLIC_PATHS = {"/login", "/login.html", "/favicon.ico", "/robots.txt", "/api/au
                 "/inicio", "/api/public/mercado", "/api/auth/logout", "/salir",
                 "/internal/binance", "/internal/avatar"}  # solo responde a la wallet de este servidor, con firma (ver internal_binance)  # cerrar sesión funciona aunque ya haya vencido
 PUBLIC_PREFIXES = ("/_next/", "/coins/", "/brand/", "/icons/")
+# Lo que puede abrir en el panel alguien con acceso solo a la wallet (entrar, ir a su wallet y salir)
+WALLET_ONLY_PATHS = PUBLIC_PATHS | {"/wallet", "/login"}
 # Lo único que responde arbicrypto.org (la portada): el resto vive en panel.arbicrypto.org
 SITE_PATHS = PUBLIC_PATHS | {"/", "/wallet", "/panel"}
 
@@ -968,6 +970,11 @@ def guard():
         return redirect(panel_home().rstrip("/") + path)  # arbicrypto.org/algo-del-panel -> panel.arbicrypto.org/algo
     # la portada: siempre en arbicrypto.org; en el panel, a quien llega sin sesión (en este PC)
     g.landing = path == "/inicio" or (path == "/" and (on_site() or (not g.user and not SITE_DOMAIN)))
+    if g.user and g.user.get("access") == "wallet" and not g.landing and path not in WALLET_ONLY_PATHS \
+            and not path.startswith(PUBLIC_PREFIXES):  # su usuario solo tiene la wallet: el panel lo manda allá
+        if path.startswith("/api/"):
+            return jsonify(error="Tu usuario solo tiene acceso a la wallet."), 403
+        return redirect("/wallet")
     if path == "/login" and g.user:  # ya entró: sigue directo a donde iba
         resp = redirect(after_login(request.args.get("next")))
         if COOKIE_DOMAIN:  # sesión de antes de SITE_DOMAIN (solo de arbicrypto.org): sin esto panel. no la ve y el login da vueltas
@@ -1202,6 +1209,17 @@ def api_team_role():
     b = body()
     try:
         auth.set_role(str(b.get("username", "")), str(b.get("role", "")), g.user["name"])
+    except AuthError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True)
+
+
+@app.post("/api/team/access")
+@admin_only
+def api_team_access():
+    b = body()
+    try:
+        auth.set_access(str(b.get("username", "")), str(b.get("access", "")), g.user["name"])
     except AuthError as e:
         return jsonify(error=str(e)), 400
     return jsonify(ok=True)
@@ -1876,6 +1894,8 @@ def go_wallet():
     """Menú del usuario -> Wallet: entra a SU wallet con un pase de un solo uso, sin volver a iniciar sesión."""
     if not g.user.get("uid"):
         abort(403)
+    if g.user.get("access") == "panel":  # su usuario solo tiene el panel
+        return redirect(panel_home() + "#sin-wallet")
     resp = redirect(f"{wallet_url()}/sso?t={sso.ticket(sso_secret, g.user)}")
     resp.headers["Cache-Control"] = "no-store"
     return resp

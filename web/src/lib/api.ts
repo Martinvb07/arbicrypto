@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatSummary, ExitResult, HistPoint, HourBest, Invite, Order, PastOpp, PriceAlert, Settings, State, TeamUser } from "./types";
+import type { Access, ChatMessage, ChatSummary, ExitResult, HistPoint, HourBest, Invite, Order, PastOpp, PriceAlert, Settings, State, TeamUser } from "./types";
 
 async function getJson<T>(url: string): Promise<T> {
   const r = await fetch(url, { cache: "no-store" });
@@ -43,6 +43,7 @@ export const api = {
   deleteUser: (username: string) => post("/api/team/delete-user", { username }),
   resetPassword: (username: string, password: string) => post("/api/team/reset-password", { username, password }),
   setRole: (username: string, role: "admin" | "user") => post("/api/team/role", { username, role }),
+  setAccess: (username: string, access: Access) => post("/api/team/access", { username, access }),
   renameUser: (username: string, next: string) => post<{ ok: boolean; username: string }>("/api/team/rename", { username, new: next }),
   tgConnect: (token: string) => post<{ ok: boolean; bot: string }>("/api/telegram/connect", { token }),
   tgDetect: () => post<{ ok: boolean; chat: string }>("/api/telegram/detect"),

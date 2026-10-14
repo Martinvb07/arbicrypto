@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { dateTime } from "@/lib/format";
 import { useLive } from "@/lib/live";
-import type { Invite, TeamUser } from "@/lib/types";
+import type { Access, Invite, TeamUser } from "@/lib/types";
 import { ask, Modal, Select } from "../overlay";
 import { Badge, EmptyBox, Icon, PasswordInput, Skeleton, UserAvatar } from "../ui";
+
+const ACCESS_TEXT: Record<Access, string> = { ambos: "al panel y a la wallet", panel: "solo al panel", wallet: "solo a la wallet" };
 
 /** El administrador cambia el nombre de usuario (con el que se entra al panel). */
 function RenameModal({ username, onClose, onDone }: { username: string; onClose: () => void; onDone: () => void }) {
@@ -139,6 +141,11 @@ export function Team() {
       .catch((e: Error) => toast("No se pudo cambiar el rol", e.message, "bad"));
     void load();
   };
+  const changeAccess = async (u: string, access: Access) => {
+    await api.setAccess(u, access).then(() => toast("Acceso actualizado", `${u} ahora entra ${ACCESS_TEXT[access]}.`, "good"))
+      .catch((e: Error) => toast("No se pudo cambiar el acceso", e.message, "bad"));
+    void load();
+  };
   const remove = async (u: string) => {
     if (!(await ask({ title: `¿Borrar a ${u}?`, body: "Ya no podrá entrar al panel y se cerrarán sus sesiones. Esto no se puede deshacer.",
       confirm: "Borrar usuario", tone: "danger", icon: "trash" }))) return;
@@ -205,6 +212,15 @@ export function Team() {
                               options={[
                                 { value: "user", label: "Equipo", hint: "ve y opera" },
                                 { value: "admin", label: "Administrador", hint: "todo" },
+                              ]} />
+                          </div>
+                          <div className="role-select access-select">
+                            <Select label={`Acceso de ${u.username}`} value={u.role === "admin" ? "ambos" : u.access} searchable={false}
+                              onChange={(v) => u.role === "admin" ? toast("Los administradores entran a los dos", "Para limitar su acceso, cámbialo a Equipo primero.", "info") : void changeAccess(u.username, v as Access)}
+                              options={[
+                                { value: "ambos", label: "Panel y wallet", icon: <Icon name="layers" size={15} />, hint: "todo" },
+                                { value: "panel", label: "Solo panel", icon: <Icon name="chart" size={15} />, hint: "sin contabilidad" },
+                                { value: "wallet", label: "Solo wallet", icon: <Icon name="wallet" size={15} />, hint: "solo su contabilidad" },
                               ]} />
                           </div>
                           <button className="icon-btn" onClick={() => setResetting(u.username)} title="Cambiar contraseña" aria-label={`Cambiar contraseña de ${u.username}`}><Icon name="key" size={16} /></button>

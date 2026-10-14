@@ -291,6 +291,8 @@ def sso_enter():
     info = sso.verify(sso.secret(_env, PANEL_ENV), request.args.get("t", ""))
     if not info:  # vencido, usado o falso: se pide uno nuevo al panel (si la sesión del panel sigue abierta, es automático)
         return redirect(f"{panel_url()}/wallet")
+    if info.get("a") == "panel":  # en el panel le quitaron la wallet
+        return redirect(f"{panel_url()}/#sin-wallet")
     uid = auth.account_for(str(info["id"])[:64], str(info["u"])[:64], info.get("r"))
     resp = redirect("/")
     resp.headers["Cache-Control"] = "no-store"

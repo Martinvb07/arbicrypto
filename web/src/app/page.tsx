@@ -36,9 +36,11 @@ function Banners() {
 
 function App() {
   const [tab, setTab] = useState<TabId>("inicio");
+  const [noWallet, setNoWallet] = useState(false);
 
   useEffect(() => {
     const read = () => {
+      if (window.location.hash === "#sin-wallet") setNoWallet(true);
       const h = window.location.hash.slice(1) as TabId;
       setTab(TABS.some((t) => t.id === h) ? h : "inicio");
     };
@@ -62,6 +64,12 @@ function App() {
       <Nav tab={tab} onTab={go} />
       <main className="wrap">
         <Banners />
+        {noWallet && (
+          <div className="banner err">
+            <b>!</b>
+            <span>Tu usuario no tiene acceso a la wallet. Pídele a un administrador que te lo active en Equipo.</span>
+          </div>
+        )}
         {tab === "inicio" && <Home onTab={go} />}
         {tab === "vender" && <Sell />}
         {tab === "mercado" && <Market />}

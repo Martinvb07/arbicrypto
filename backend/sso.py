@@ -29,7 +29,7 @@ def sign(secret, message):
 
 def ticket(secret, user):
     """user: {"uid", "name", "role"} del panel."""
-    payload = _b64(json.dumps({"id": user["uid"], "u": user["name"], "r": user["role"],
+    payload = _b64(json.dumps({"id": user["uid"], "u": user["name"], "r": user["role"], "a": user.get("access", "ambos"),
                                "exp": int(time.time()) + TTL, "n": secrets.token_hex(8)}).encode())
     sig = _b64(hmac.new(secret.encode(), payload.encode(), hashlib.sha256).digest())
     return f"{payload}.{sig}"

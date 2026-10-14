@@ -230,7 +230,7 @@ export function Header({ onTab }: { onTab: (t: TabId) => void }) {
                     </div>
                   </div>
                   {/* su propia wallet (wallet.arbicrypto.org), con esta misma sesión */}
-                  <button onClick={() => { close(); goWithSplash("/wallet", "Abriendo tu wallet", "Contabilidad y declaración"); }}><Icon name="wallet" size={16} /> Wallet</button>
+                  {state.user.access !== "panel" && <button onClick={() => { close(); goWithSplash("/wallet", "Abriendo tu wallet", "Contabilidad y declaración"); }}><Icon name="wallet" size={16} /> Wallet</button>}
                   <button onClick={() => { close(); photoInput.current?.click(); }}><Icon name="pencil" size={16} /> {myPhoto ? "Cambiar foto" : "Poner foto de perfil"}</button>
                   {myPhoto && <button onClick={() => { close(); void removePhoto(); }}><Icon name="trash" size={16} /> Quitar foto</button>}
                   <button onClick={() => { close(); setModal("password"); }}><Icon name="key" size={16} /> Cambiar contraseña</button>

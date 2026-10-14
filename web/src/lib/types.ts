@@ -293,14 +293,19 @@ export interface HistPoint {
   p: Record<string, [number | null, number | null]>;
 }
 
+export type Access = "ambos" | "panel" | "wallet";
+
 export interface User {
   name: string;
   role: "admin" | "user";
+  /** a qué entra: panel y wallet, solo panel o solo wallet */
+  access?: Access;
 }
 
 export interface TeamUser {
   username: string;
   role: "admin" | "user";
+  access: Access;
   created: number;
   last_login: number | null;
   invited_by: string | null;

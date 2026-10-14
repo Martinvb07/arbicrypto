@@ -23,6 +23,9 @@ CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # sin 0/O ni 1/I para que no 
 USERNAME_RE = re.compile(r"^[a-z0-9._-]{3,30}$")
 
 
+
+ACCESS = ("ambos", "panel", "wallet")  # a qué puede entrar cada usuario
+
 class AuthError(Exception):
     pass
 
@@ -170,6 +173,23 @@ class Auth:
             if user["role"] == "admin" and role != "admin" and sum(u["role"] == "admin" for u in self.users.values()) <= 1:
                 raise AuthError("Debe quedar al menos un administrador.")
             user["role"] = role
+            if role == "admin":
+                user["access"] = "ambos"
+            self._persist("users")
+
+    def set_access(self, username, access, by):
+        """A qué entra: "ambos" (panel y wallet), "panel" o "wallet". Los administradores siempre entran a los dos."""
+        if access not in ACCESS:
+            raise AuthError("Acceso inválido.")
+        with self.lock:
+            user = self.users.get(username)
+            if not user:
+                raise AuthError("Ese usuario no existe.")
+            if username == by:
+                raise AuthError("No puedes cambiar tu propio acceso.")
+            if user["role"] == "admin" and access != "ambos":
+                raise AuthError("Un administrador entra al panel y a la wallet. Cámbialo a Equipo primero.")
+            user["access"] = access
             self._persist("users")
 
     def delete_user(self, username, by):
@@ -186,7 +206,7 @@ class Auth:
             self._persist("users", "sessions")
 
     def list_users(self):
-        return [{"username": n, "role": u["role"], "created": u["created"], "last_login": u.get("last_login"),
+        return [{"username": n, "role": u["role"], "access": u.get("access", "ambos"), "created": u["created"], "last_login": u.get("last_login"),
                  "invited_by": u.get("invited_by")} for n, u in sorted(self.users.items())]
 
     # ------------------------------------------------------------ sesiones
@@ -254,7 +274,7 @@ class Auth:
         if not session or session["expires"] < time.time():
             return None
         user = self.users.get(session["user"])
-        return {"name": session["user"], "role": user["role"], "uid": user.get("uid")} if user else None
+        return {"name": session["user"], "role": user["role"], "uid": user.get("uid"), "access": user.get("access", "ambos")} if user else None
 
     def logout(self, token):
         with self.lock:
