@@ -85,8 +85,9 @@ export function Select({ value, options, onChange, label, searchable }: {
     }
   };
 
+  // preventDefault: dentro de un <label> (Field) un clic en la lista no debe "re-clicar" el botón y reabrirla
   return (
-    <div className={`select ${open ? "open" : ""}`} ref={ref} onKeyDown={keys}>
+    <div className={`select ${open ? "open" : ""}`} ref={ref} onKeyDown={keys} onClick={(e) => e.preventDefault()}>
       <button type="button" ref={trigger} className="select-btn" aria-haspopup="listbox" aria-expanded={open} aria-label={label}
         onClick={() => (open ? close() : show())}>
         {current?.icon}

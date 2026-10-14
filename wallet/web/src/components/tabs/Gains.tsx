@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Disposal } from "@/lib/api";
 import { currentYear, date, KIND_LABEL, money, num, qty, signedMoney, tone } from "@/lib/format";
-import { Asset, Badge, Empty, Icon, Note, Pager, Pnl, Skeleton } from "../ui";
+import { Asset, Badge, Empty, Icon, Note, Pager, Pnl, Segmented, Skeleton } from "../ui";
 import { useWallet } from "../wallet";
 import { KIND_BADGE } from "./Movements";
 
@@ -72,11 +72,8 @@ export function Gains({ embedded }: { embedded?: boolean }) {
 
       <div className="card">
         <div className="card-head">
-          <div className="seg">
-            {([["todas", "Todas"], ["gana", "Con ganancia"], ["pierde", "Con pérdida"], ["sin", `Sin costo (${report.warnings_total})`]] as const).map(([k, l]) => (
-              <button key={k} className={filter === k ? "on" : ""} onClick={() => setFilter(k)}>{l}</button>
-            ))}
-          </div>
+          <Segmented value={filter} onChange={setFilter} label="Filtro"
+            options={[["todas", "Todas"], ["gana", "Con ganancia"], ["pierde", "Con pérdida"], ["sin", `Sin costo (${report.warnings_total})`]] as const} />
           <span className="sub">Verde gana · rojo pierde</span>
         </div>
         {!rows.length ? (

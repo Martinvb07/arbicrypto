@@ -17,7 +17,29 @@ import { KIND_BADGE } from "./Movements";
 
 /** useTodos necesita un reporte; mientras carga no hay pendientes que mostrar. */
 const EMPTY_REPORT = { warnings_total: 0, unvalued: 0, cuadre: null, profile: { nit: "x", name: "x" } } as unknown as Report;
-const WALLET: Record<string, string> = { spot: "Spot", funding: "Funding", earn: "Earn" };
+const WALLET: Record<string, string> = { spot: "Spot", funding: "Fondos", earn: "Earn" };
+
+/** Una moneda en Binance, venga del panel (en vivo) o de la última sincronización de la wallet. */
+interface Holding { asset: string; qty: number; value: number | null; usdt: number | null; cost: number; wallets: Record<string, number>; ok: boolean; app_qty: number }
+
+/** Lo de Binance: los mismos saldos del panel (Mi Binance). Si el panel no responde, los de la última sincronización. */
+function binanceCoins(s: Saldos | null): { coins: Holding[]; total: number | null; usdt: number | null; live: boolean; t: number | null } {
+  const b = s?.binance;
+  if (!b) return { coins: [], total: null, usdt: null, live: false, t: null };
+  const p = b.panel;
+  if (p) {
+    return {
+      coins: p.rows.filter((r) => (r.usdt ?? 1) >= 0.01).map((r) => ({
+        asset: r.asset, qty: r.qty, value: r.fiat, usdt: r.usdt, cost: r.cost, wallets: r.wallets as Record<string, number>, ok: r.ok, app_qty: r.app_qty,
+      })),
+      total: p.total_fiat, usdt: p.total_usdt, live: true, t: p.t,
+    };
+  }
+  return {
+    coins: b.rows.map((r) => ({ asset: r.asset, qty: r.qty, value: r.cop, usdt: r.usd, cost: r.cost, wallets: r.wallets, ok: r.ok, app_qty: r.app_qty })),
+    total: b.total_cop, usdt: b.total_usd, live: false, t: b.synced,
+  };
+}
 
 function ago(t: number | null | undefined): string {
   if (!t) return "nunca";
@@ -37,9 +59,12 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
 
   useEffect(() => {
     let alive = true;
-    api.saldos().then((d) => alive && setS(d), (e: Error) => alive && setError(e.message));
+    const load = () => api.saldos().then((d) => { if (alive) { setS(d); setError(""); } }, (e: Error) => alive && setError(e.message));
+    load();
+    // el panel actualiza Binance cada minuto: la wallet lo sigue igual para mostrar siempre lo mismo
+    const timer = setInterval(load, 60000);
     api.movements(currentYear()).then((r) => alive && setRecent(r.movements.slice(-6).reverse()), () => alive && setRecent([]));
-    return () => { alive = false; };
+    return () => { alive = false; clearInterval(timer); };
   }, [version, lastOk]);
 
   async function sync() {
@@ -51,18 +76,18 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
   }
 
   const running = binance?.job.state === "running";
-  const bal = s?.binance;
+  const bn = binanceCoins(s);
   const banks = s?.banks;
-  const closing = banks?.last_closing;
   const pnl = report?.books.pnl;
   const live = year >= currentYear();
-  const pesos = closing ? banks!.books : 0;
-  const crypto = bal?.total_cop ?? 0;
+  const pesos = Math.max(0, banks?.books ?? 0);
+  const crypto = bn.total ?? 0;
   const total = crypto + pesos;
+  const bad = bn.coins.filter((c) => !c.ok);
   const cryptoShare = total > 0 ? Math.max(0, Math.min(100, (crypto / total) * 100)) : 0;
   const nowMonth = Number(new Intl.DateTimeFormat("en", { timeZone: "America/Bogota", month: "numeric" }).format(new Date())) - 1;
   const month = live ? report?.books.months[nowMonth] : undefined;
-  const unreal = bal ? bal.rows.reduce((a, r) => a + (r.cop != null ? r.cop - r.cost : 0), 0) : 0;
+  const unreal = bn.coins.reduce((a, c) => a + (c.value != null && c.cost > 0 ? c.value - c.cost : 0), 0);
   const todos = report ? todoList : [];
   const pending = todos.filter((t) => !t.optional).length;
   const hour = Number(new Intl.DateTimeFormat("en", { timeZone: "America/Bogota", hour: "numeric", hour12: false }).format(new Date()));
@@ -88,8 +113,8 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
                 <i className="p" style={{ width: `${100 - cryptoShare}%` }} />
               </div>
               <div className="home-legend">
-                <span><i className="c" /> Binance <b>{money(crypto)}</b>{bal ? <small> · US$ {num(bal.total_usd, 2)}</small> : null}</span>
-                <span><i className="p" /> Pesos en tus cuentas <b>{closing ? money(pesos) : "—"}</b>{!closing && <small> · haz un cierre de caja para sumarlos</small>}</span>
+                <span><i className="c" /> Binance <b>{money(crypto)}</b>{bn.usdt != null ? <small> · ≈ {num(bn.usdt, 2)} USDT</small> : null}</span>
+                <span><i className="p" /> Pesos en tus cuentas <b>{money(pesos)}</b><small> · Nequi, banco…</small></span>
               </div>
             </>
           )}
@@ -107,7 +132,7 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
               <span>{num(month.ops)} operaciones · compraste {money(month.bought)}</span>
             </div>
           )}
-          {bal && bal.rows.length > 0 && (
+          {bn.coins.some((c) => c.cost > 0) && (
             <div className="home-stat">
               <small>Si vendieras hoy tus cripto</small>
               <b className={tone(unreal)}>{signedMoney(unreal)}</b>
@@ -140,9 +165,9 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
             <div className="bn-title">
               <span className="bn-logo"><Coin asset="BNB" size={22} /></span>
               <div>
-                <h2>Tus cripto en Binance {bal && !bal.ok && <Badge kind="warn">No cuadra</Badge>}{bal?.ok && bal.rows.length > 0 && <Badge kind="good"><Icon name="check" size={11} /> Cuadra</Badge>}</h2>
+                <h2>Tus cripto en Binance {bad.length > 0 && <Badge kind="warn">No cuadra</Badge>}{!bad.length && bn.coins.length > 0 && <Badge kind="good"><Icon name="check" size={11} /> Cuadra</Badge>}</h2>
                 <span className="sub">
-                  {!binance?.connected ? "Sin conectar" : running ? binance.job.step : `Actualizado ${ago(lastOk)} · solo cada 30 min`}
+                  {!binance?.connected ? "Sin conectar" : running ? binance.job.step : bn.live ? `Igual que en el panel · ${ago(bn.t)}` : `Última lectura ${ago(bn.t)}`}
                 </span>
               </div>
             </div>
@@ -152,43 +177,55 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
               </button>
             )}
           </div>
-          {!s ? <div className="card-body"><Skeleton rows={2} /></div> : !bal?.rows.length ? (
+          {!s ? <div className="card-body"><Skeleton rows={2} /></div> : !bn.coins.length ? (
             <Empty icon="wallet" title="No tienes cripto en Binance ahora">
               {binance?.connected ? "Todo está en pesos. Cuando compres, aparece aquí." : "Conecta tu Binance para ver tus saldos."}
             </Empty>
           ) : (
             <div className="hold-list">
-              {bal.rows.map((r) => {
-                const share = bal.total_cop > 0 && r.cop != null ? (r.cop / bal.total_cop) * 100 : 0;
-                const diff = r.cop != null ? r.cop - r.cost : null;
-                const where = Object.entries(r.wallets).filter(([, v]) => v > 0).map(([w]) => WALLET[w]).join(" · ");
+              {bn.coins.map((c) => {
+                const share = crypto > 0 && c.value != null ? (c.value / crypto) * 100 : 0;
+                const diff = c.value != null && c.cost > 0 ? c.value - c.cost : null;
+                const where = Object.entries(c.wallets).filter(([, v]) => v > 0).map(([w]) => WALLET[w] ?? w).join(" · ");
+                const unit = c.value != null && c.qty > 0 ? c.value / c.qty : null;
                 return (
-                  <div key={r.asset} className="hold">
-                    <Coin asset={r.asset} size={34} />
+                  <div key={c.asset} className="hold">
+                    <Coin asset={c.asset} size={34} />
                     <div className="hold-main">
                       <div className="hold-top">
-                        <b>{r.asset}</b>
-                        <span className="muted">{qty(r.qty)}{where ? ` · ${where}` : ""}</span>
-                        {!r.ok && <span className="warn hold-flag" title={`Según tus movimientos: ${qty(r.app_qty)}`}>Revisar</span>}
+                        <b>{c.asset}</b>
+                        <span className="muted">{qty(c.qty)}{where ? ` · ${where}` : ""}</span>
+                        {!c.ok && <span className="warn hold-flag" title={`Según tus movimientos: ${qty(c.app_qty)}`}>Revisar</span>}
                       </div>
                       <div className="hold-bar"><i style={{ width: `${Math.max(share, 1.5)}%` }} /></div>
-                      <small>{r.usd_price != null ? `1 ${r.asset} = US$ ${num(r.usd_price, r.usd_price < 10 ? 4 : 2)}` : "Sin precio"} · {num(share, 1)} % de tu Binance</small>
+                      <small>{unit != null ? `1 ${c.asset} = ${money(unit)}` : "Sin precio"} · {num(share, 1)} % de tu Binance</small>
                     </div>
                     <div className="hold-val">
-                      <b>{r.cop != null ? money(r.cop) : "—"}</b>
-                      {diff != null && r.cost > 0 ? <small className={tone(diff)}>{signedMoney(diff)}</small> : <small className="muted">Te costó {money(r.cost)}</small>}
+                      <b>{c.value != null ? money(c.value) : "—"}</b>
+                      {diff != null ? <small className={tone(diff)}>{signedMoney(diff)}</small> : <small className="muted">{c.usdt != null ? `≈ ${num(c.usdt, 2)} USDT` : ""}</small>}
                     </div>
                   </div>
                 );
               })}
             </div>
           )}
-          {bal && !bal.ok && (
+          {bad.length > 0 && (
             <div className="card-body" style={{ paddingTop: 12 }}>
-              <Note kind="warn">Lo que tienes en Binance no coincide con tus movimientos: falta alguna entrada (un depósito, P2P viejos) o salida (un retiro). Agrégalo en Movimientos.</Note>
+              <Note kind="warn">
+                <b>{bad.map((c) => c.asset).join(", ")}</b> no coincide con tus movimientos
+                {bad.length === 1 ? ` (según ellos tienes ${qty(bad[0].app_qty)})` : ""}. Falta anotar alguna entrada o salida.{" "}
+                <button className="link" onClick={() => onTab("movimientos")}>Ir a Movimientos</button>
+              </Note>
             </div>
           )}
-          {bal?.trm && <div className="card-body small-print">Valor de hoy: precio de Binance × TRM {money(bal.trm)}. En la declaración va lo que te costó, no esto.</div>}
+          {s && bn.coins.length > 0 && (
+            <div className="card-body small-print">
+              {bn.live && s.binance.panel?.usdt_fiat
+                ? `Mismos saldos y precios que Mi Binance: USDT a ${money(s.binance.panel.usdt_fiat)} (mejor venta P2P).`
+                : s.binance.trm ? `Precio de Binance × TRM ${money(s.binance.trm)}.` : ""}
+              {" "}En la declaración va lo que te costó, no este valor.
+            </div>
+          )}
         </div>
 
         {/* ---------- caja en pesos ---------- */}

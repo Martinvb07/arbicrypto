@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { currentYear, date, dateTime, money, num, signedMoney, tone } from "@/lib/format";
 import type { TabId } from "../App";
 import { GmfQuestion } from "../GmfQuestion";
-import { Asset, Badge, Coin, Empty, Note, Skeleton } from "../ui";
+import { Asset, Badge, Coin, Empty, Note, Segmented, Skeleton } from "../ui";
 import { useWallet } from "../wallet";
 import { Gains } from "./Gains";
 import { Overview } from "./Overview";
@@ -53,9 +53,7 @@ export function Results({ onTab, initialView = "resumen" }: { onTab: (t: TabId) 
           <p>{view === "resumen" ? "Elige un periodo y mira cuánto compraste, cuánto ganaste en cada operación y cómo vas."
             : live ? `Al ${date(Date.now() / 1000)}. Cuánto has ganado o perdido y de dónde sale.` : "Cuánto ganaste o perdiste en el año y de dónde salió."}</p>
         </div>
-        <div className="seg">
-          {VIEWS.map((v) => <button key={v.id} className={view === v.id ? "on" : ""} onClick={() => setView(v.id)}>{v.label}</button>)}
-        </div>
+        <Segmented value={view} onChange={setView} label="Vista" options={VIEWS.map((v) => [v.id, v.label] as const)} />
       </div>
 
       {(view === "estado" || view === "rondas") && <GmfQuestion operations={pnl.gross_profit + pnl.income} gmf={pnl.gmf} onSettings={() => onTab("ajustes")} />}
