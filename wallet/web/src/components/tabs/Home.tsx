@@ -10,11 +10,14 @@ import { methodName } from "../GmfChoice";
 import { GmfQuestion } from "../GmfQuestion";
 import { ImportModal } from "../ImportModal";
 import { MoveModal } from "../MoveModal";
-import { Asset, Badge, Coin, Empty, Icon, Note, Skeleton } from "../ui";
+import { Asset, Badge, Empty, Icon, Note, Skeleton } from "../ui";
 import { useWallet } from "../wallet";
 import { KIND_BADGE } from "./Movements";
 
-const WALLET: Record<string, string> = { spot: "Spot", funding: "Funding", earn: "Earn" };
+const WALLET: Record<string, string> = { spot: "Spot", funding: "Fondos", earn: "Earn" };
+
+/** Una moneda en Binance, venga del panel (en vivo) o de la última sincronización de la wallet. */
+interface Coin { asset: string; qty: number; value: number | null; usdt: number | null; wallets: Record<string, number>; ok: boolean; app_qty: number }
 
 function ago(t: number | null | undefined): string {
   if (!t) return "nunca";
@@ -22,7 +25,26 @@ function ago(t: number | null | undefined): string {
   return m < 1 ? "hace un momento" : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} días`;
 }
 
-/** Inicio: todos tus saldos (Binance y bancos), el resultado y lo último que pasó. */
+/** Lo de Binance: los mismos saldos del panel (Mi Binance). Si el panel no responde, los de la última sincronización. */
+function binanceCoins(s: Saldos | null): { coins: Coin[]; total: number | null; usdt: number | null; live: boolean; t: number | null } {
+  const b = s?.binance;
+  if (!b) return { coins: [], total: null, usdt: null, live: false, t: null };
+  const p = b.panel;
+  if (p) {
+    return {
+      coins: p.rows.filter((r) => (r.usdt ?? 1) >= 0.01).map((r) => ({
+        asset: r.asset, qty: r.qty, value: r.fiat, usdt: r.usdt, wallets: r.wallets as Record<string, number>, ok: r.ok, app_qty: r.app_qty,
+      })),
+      total: p.total_fiat, usdt: p.total_usdt, live: true, t: p.t,
+    };
+  }
+  return {
+    coins: b.rows.map((r) => ({ asset: r.asset, qty: r.qty, value: r.cop, usdt: r.usd, wallets: r.wallets, ok: r.ok, app_qty: r.app_qty })),
+    total: b.total_cop, usdt: b.total_usd, live: false, t: b.synced,
+  };
+}
+
+/** Inicio: cuánto tienes hoy, dónde está y lo último que pasó. Nada más. */
 export function Home({ onTab }: { onTab: (t: TabId) => void }) {
   const { me, binance, setBinance, version, report, year, toast } = useWallet();
   const [s, setS] = useState<Saldos | null>(null);
@@ -33,9 +55,12 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
 
   useEffect(() => {
     let alive = true;
-    api.saldos().then((d) => alive && setS(d), (e: Error) => alive && setError(e.message));
+    const load = () => api.saldos().then((d) => { if (alive) { setS(d); setError(""); } }, (e: Error) => alive && setError(e.message));
+    load();
+    // el panel actualiza Binance cada minuto: la wallet lo sigue igual para mostrar siempre lo mismo
+    const timer = setInterval(load, 60000);
     api.movements(currentYear()).then((r) => alive && setRecent(r.movements.slice(-6).reverse()), () => alive && setRecent([]));
-    return () => { alive = false; };
+    return () => { alive = false; clearInterval(timer); };
   }, [version, lastOk]);
 
   async function sync() {
@@ -47,18 +72,20 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
   }
 
   const running = binance?.job.state === "running";
-  const bal = s?.binance;
+  const bn = binanceCoins(s);
   const banks = s?.banks;
-  const closing = banks?.last_closing;
   const pnl = report?.books.pnl;
-  const total = (bal?.total_cop ?? 0) + (closing ? banks!.books : 0);
+  const pesos = banks?.books ?? null;
+  const total = bn.total != null || pesos != null ? (bn.total ?? 0) + Math.max(0, pesos ?? 0) : null;
+  const bad = bn.coins.filter((c) => !c.ok);
+  const first = me.profile.name ? me.profile.name.split(" ")[0] : me.user.username;
 
   return (
     <div className="stack">
       <div className="page-head">
         <div>
-          <h1>Hola{me.profile.name ? `, ${me.profile.name.split(" ")[0]}` : ""}</h1>
-          <p>Tus saldos y tu negocio al {date(Date.now() / 1000)}.</p>
+          <h1>Hola, {first}</h1>
+          <p>Así está tu plata hoy, {date(Date.now() / 1000)}.</p>
         </div>
         <div className="actions">
           <button className="btn" onClick={() => setModal("import")}><Icon name="upload" size={16} /> Subir archivo</button>
@@ -71,42 +98,42 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
       {pnl && year === currentYear() && <GmfQuestion operations={pnl.gross_profit + pnl.income} gmf={pnl.gmf} onSettings={() => onTab("ajustes")} />}
       {error && <Note kind="bad">{error}</Note>}
 
-      {/* ---------- totales ---------- */}
+      {/* ---------- los 4 números que importan ---------- */}
       <div className="kpis">
         <div className="kpi accent">
-          <small>Total de tu negocio</small>
-          <b>{s ? money(total) : "…"}</b>
-          <span>{closing ? "Binance + pesos en tus cuentas" : "Binance (haz un cierre de caja para sumar tus pesos)"}</span>
+          <small>Tienes en total</small>
+          <b>{total != null ? money(total) : "…"}</b>
+          <span>Binance + pesos</span>
         </div>
         <div className="kpi">
           <small>En Binance</small>
-          <b>{bal ? money(bal.total_cop) : "…"}</b>
-          <span>{bal ? `US$ ${num(bal.total_usd, 2)} · precio de hoy` : " "}</span>
+          <b>{bn.total != null ? money(bn.total) : "…"}</b>
+          <span>{bn.usdt != null ? `≈ ${num(bn.usdt, 2)} USDT` : " "}</span>
         </div>
         <div className="kpi">
-          <small>Pesos en tus cuentas</small>
-          <b className={banks && banks.books < 0 ? "warn" : ""}>{banks ? money(banks.books) : "…"}</b>
-          <span>{closing ? `Último cierre: ${date(closing.t)}` : "Según tus movimientos"}</span>
+          <small>En pesos</small>
+          <b className={pesos != null && pesos < 0 ? "warn" : ""}>{pesos != null ? money(pesos) : "…"}</b>
+          <span>En tus cuentas (Nequi, banco…)</span>
         </div>
         <div className="kpi">
-          <small>Resultado {year}</small>
+          <small>Ganancia {year}</small>
           <b className={pnl ? tone(pnl.net) : ""}>{pnl ? signedMoney(pnl.net) : "…"}</b>
-          <span>{pnl ? `Operaciones ${signedMoney(pnl.gross_profit + pnl.income)}${pnl.gmf ? ` · 4x1000 −${money(pnl.gmf)}` : ""}` : " "}</span>
+          <span>Ya con comisiones y 4x1000</span>
         </div>
       </div>
 
       <div className="home-grid">
-        {/* ---------- Binance ---------- */}
+        {/* ---------- Binance: lo mismo que Mi Binance en el panel ---------- */}
         <div className="card">
           <div className="card-head">
-            <div className="bn-title">
-              <span className="bn-logo"><Coin asset="BNB" size={22} /></span>
-              <div>
-                <h2>Binance {bal && !bal.ok && <Badge kind="warn">No cuadra</Badge>}{bal?.ok && bal.rows.length > 0 && <Badge kind="good">Cuadra con tus libros</Badge>}</h2>
-                <span className="sub">
-                  {!binance?.connected ? "Sin conectar" : running ? binance.job.step : `Actualizado ${ago(lastOk)} · se actualiza solo cada 30 min`}
-                </span>
-              </div>
+            <div>
+              <h2>Tu Binance</h2>
+              <span className="sub">
+                {!binance?.connected ? "Sin conectar"
+                  : running ? binance.job.step
+                  : bn.live ? <>Igual que en el panel · {ago(bn.t)}</>
+                  : <>Última lectura {ago(bn.t)}</>}
+              </span>
             </div>
             {binance?.connected && (
               <button className="btn btn-sm" onClick={sync} disabled={running}>
@@ -114,97 +141,72 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
               </button>
             )}
           </div>
-          {!s ? <div className="card-body"><Skeleton rows={2} /></div> : !bal?.rows.length ? (
+          {!s ? <div className="card-body"><Skeleton rows={2} /></div> : !bn.coins.length ? (
             <Empty icon="wallet" title="No tienes cripto en Binance ahora">
               {binance?.connected ? "Todo está en pesos. Cuando compres, aparece aquí." : "Conecta tu Binance para ver tus saldos."}
             </Empty>
           ) : (
-            <div className="table-wrap">
-              <table className="t">
-                <thead>
-                  <tr><th>Moneda</th><th className="r">Cantidad</th><th className="hide-sm">Dónde</th><th className="r hide-sm">Precio</th><th className="r">Valor hoy</th><th className="r hide-sm">Te costó</th><th className="r">Libros</th></tr>
-                </thead>
-                <tbody>
-                  {bal.rows.map((r) => (
-                    <tr key={r.asset}>
-                      <td><Asset asset={r.asset} /></td>
-                      <td className="r">{qty(r.qty)}</td>
-                      <td className="hide-sm">
-                        <span className="chips">
-                          {Object.entries(r.wallets).filter(([, v]) => v > 0).map(([w, v]) => <span key={w} className="chip-mini" title={`${qty(v)} ${r.asset}`}>{WALLET[w]}</span>)}
-                        </span>
-                      </td>
-                      <td className="r hide-sm">{r.usd_price != null ? `US$ ${num(r.usd_price, r.usd_price < 10 ? 4 : 2)}` : "—"}</td>
-                      <td className="r"><b>{r.cop != null ? money(r.cop) : "—"}</b>{r.usd != null && <span className="cell-sub">US$ {num(r.usd, 2)}</span>}</td>
-                      <td className="r hide-sm">{money(r.cost)}{r.cop != null && r.cost > 0 && <span className={`cell-sub ${tone(r.cop - r.cost)}`}>{signedMoney(r.cop - r.cost)}</span>}</td>
-                      <td className="r">{r.ok ? <Icon name="check" size={16} /> : <span className="warn" title={`Según tus movimientos: ${qty(r.app_qty)}`}>Revisar</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="coin-list">
+              {bn.coins.map((c) => (
+                <div key={c.asset} className="coin-row">
+                  <Asset asset={c.asset} />
+                  <span className="coin-where">
+                    {Object.entries(c.wallets).filter(([, v]) => v > 0).map(([w]) => WALLET[w] ?? w).join(" · ")}
+                  </span>
+                  <span className="coin-val">
+                    <b className="num">{c.value != null ? money(c.value) : "—"}</b>
+                    <small className="num">{qty(c.qty)} {c.asset}</small>
+                  </span>
+                </div>
+              ))}
             </div>
           )}
-          {bal && !bal.ok && (
+          {bad.length > 0 && (
             <div className="card-body" style={{ paddingTop: 12 }}>
-              <Note kind="warn">Lo que tienes en Binance no coincide con tus movimientos: falta alguna entrada (un depósito, P2P viejos) o salida (un retiro). Agrégalo en Movimientos.</Note>
+              <Note kind="warn">
+                <b>{bad.map((c) => c.asset).join(", ")}</b> no coincide con tus movimientos
+                {bad.length === 1 ? ` (según ellos tienes ${qty(bad[0].app_qty)})` : ""}. Falta anotar alguna entrada o salida.{" "}
+                <button className="link" onClick={() => onTab("movimientos")}>Ir a Movimientos</button>
+              </Note>
             </div>
           )}
-          {bal?.trm && <div className="card-body small-print">Valor de hoy: precio de Binance × TRM {money(bal.trm)}. Lo que se declara es lo que te costó.</div>}
+          {s && bn.coins.length > 0 && (
+            <div className="card-body small-print">
+              {bn.live && s.binance.panel?.usdt_fiat
+                ? `Mismos saldos y precios que Mi Binance: USDT a ${money(s.binance.panel.usdt_fiat)} (mejor venta P2P).`
+                : s.binance.trm ? `Precio de Binance × TRM ${money(s.binance.trm)}.` : ""}
+              {" "}Para la DIAN cuenta lo que te costó, no este valor.
+            </div>
+          )}
         </div>
 
-        {/* ---------- caja en pesos ---------- */}
+        {/* ---------- pesos ---------- */}
         <CajaCard onTab={onTab} />
       </div>
 
-      <div className="grid-2">
-        {/* ---------- últimos movimientos ---------- */}
-        <div className="card">
-          <div className="card-head">
-            <h2>Últimos movimientos</h2>
-            <button className="btn btn-sm btn-ghost" onClick={() => onTab("movimientos")}>Ver todos <Icon name="chevron" size={14} /></button>
-          </div>
-          {!recent ? <div className="card-body"><Skeleton rows={2} /></div> : !recent.length ? (
-            <Empty icon="list" title="Sin movimientos este año" />
-          ) : (
-            <div className="feed">
-              {recent.map((m) => (
-                <div key={m.id} className="feed-row">
-                  <Badge kind={KIND_BADGE[m.kind]}>{KIND_LABEL[m.kind]}</Badge>
-                  <span className="feed-txt">
-                    {m.kind === "compra" ? `${qty(m.in_qty)} ${m.in_asset}` : m.kind === "venta" ? `${qty(m.out_qty)} ${m.out_asset}`
-                      : m.kind === "permuta" ? `${m.out_asset} → ${m.in_asset}` : m.note || KIND_LABEL[m.kind]}
-                    <small>{dateTime(m.t)}{m.pay_method ? ` · ${methodName(m.pay_method)}` : ""}</small>
-                  </span>
-                  <b className="num">{money(cashValue(m))}</b>
-                </div>
-              ))}
-            </div>
-          )}
+      {/* ---------- últimos movimientos ---------- */}
+      <div className="card">
+        <div className="card-head">
+          <h2>Últimos movimientos</h2>
+          <button className="btn btn-sm btn-ghost" onClick={() => onTab("movimientos")}>Ver todos <Icon name="chevron" size={14} /></button>
         </div>
-
-        {/* ---------- rondas recientes ---------- */}
-        <div className="card">
-          <div className="card-head">
-            <h2>Rondas de arbitraje</h2>
-            <button className="btn btn-sm btn-ghost" onClick={() => onTab("resultados")}>Ver resultados <Icon name="chevron" size={14} /></button>
+        {!recent ? <div className="card-body"><Skeleton rows={2} /></div> : !recent.length ? (
+          <Empty icon="list" title="Sin movimientos este año" />
+        ) : (
+          <div className="feed">
+            {recent.map((m) => (
+              <div key={m.id} className="feed-row">
+                <Badge kind={KIND_BADGE[m.kind]}>{KIND_LABEL[m.kind]}</Badge>
+                <span className="feed-txt">
+                  {m.kind === "compra" ? `${qty(m.in_qty)} ${m.in_asset}` : m.kind === "venta" ? `${qty(m.out_qty)} ${m.out_asset}`
+                    : m.kind === "permuta" ? `${m.out_asset} → ${m.in_asset}` : m.note || KIND_LABEL[m.kind]}
+                  <small>{dateTime(m.t)}{m.pay_method ? ` · ${methodName(m.pay_method)}` : ""}</small>
+                </span>
+                <b className="num">{money(cashValue(m))}</b>
+              </div>
+            ))}
           </div>
-          {!report ? <div className="card-body"><Skeleton rows={2} /></div> : !report.books.rounds.length ? (
-            <Empty icon="trend" title={`Sin rondas en ${year}`}>Una ronda es cada vuelta de pesos a cripto y de vuelta a pesos.</Empty>
-          ) : (
-            <div className="feed">
-              {report.books.rounds.slice(-5).reverse().map((r) => (
-                <div key={r.start} className="feed-row">
-                  <span className="route">{["COP", ...r.assets, ...(r.open ? [] : ["COP"])].map((a, i) => <Coin key={i} asset={a} size={18} />)}</span>
-                  <span className="feed-txt">
-                    {r.open ? "En curso" : `Recibiste ${money(r.received)}`}
-                    <small>{dateTime(r.start)} · pagaste {money(r.paid)}{r.gmf ? ` · 4x1000 ${money(r.gmf)}` : ""}{r.binance_fees ? ` · Binance ${money(r.binance_fees)}` : ""}</small>
-                  </span>
-                  {r.open ? <Badge kind="info">En curso</Badge> : <b className={`num ${tone(r.result)}`}>{signedMoney(r.result)}</b>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
       {modal === "add" && <MoveModal onClose={() => setModal("")} />}

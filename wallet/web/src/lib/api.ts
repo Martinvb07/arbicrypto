@@ -328,8 +328,34 @@ export interface SaldoRow {
   ok: boolean;
 }
 
+/** Una moneda tal como la muestra el panel (Mi Binance): Spot, Fondos y Earn juntos, a precio del panel. */
+export interface LiveRow {
+  asset: string;
+  qty: number;
+  usdt: number | null;
+  fiat: number | null;
+  wallets: Partial<Record<"spot" | "funding" | "earn", number>>;
+  cost: number;
+  app_qty: number;
+  ok: boolean;
+}
+
+/** Los saldos de Binance del panel: los mismos números que se ven en Mi Binance. */
+export interface PanelBinance {
+  t: number;
+  fiat: string;
+  usdt_fiat: number | null;
+  total_usdt: number;
+  total_fiat: number | null;
+  rows: LiveRow[];
+  error: string | null;
+}
+
 export interface Saldos {
-  binance: { connected: boolean; synced: number | null; rows: SaldoRow[]; trm: number | null; total_cop: number; total_usd: number; total_cost: number; ok: boolean };
+  binance: {
+    connected: boolean; synced: number | null; rows: SaldoRow[]; trm: number | null; total_cop: number; total_usd: number; total_cost: number; ok: boolean;
+    panel: PanelBinance | null;
+  };
   banks: {
     books: number;
     by_method: { method: string; in: number; out: number; gmf: number; ops: number; net: number }[];

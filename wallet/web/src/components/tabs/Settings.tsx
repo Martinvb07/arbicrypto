@@ -5,7 +5,7 @@ import { api, type GmfMode, type Profile } from "@/lib/api";
 import { money } from "@/lib/format";
 import { BinanceCard } from "../BinanceCard";
 import { GmfChoice, methodName } from "../GmfChoice";
-import { Field, Note, Switch } from "../ui";
+import { Field, Note, Segmented, Select, Switch } from "../ui";
 import { useWallet } from "../wallet";
 
 export function Settings() {
@@ -74,19 +74,18 @@ function ProfileForm() {
               {me.pay_methods.map((pm) => (
                 <div key={pm.method} className="per-row">
                   <span><b>{methodName(pm.method)}</b><small>{pm.n} compra{pm.n > 1 ? "s" : ""} · {money(pm.total)}</small></span>
-                  <select value={p.gmf_methods?.[pm.method] ?? ""} onChange={(e) => {
-                    const v = e.target.value as GmfMode | "";
+                  <Select compact label={`4x1000 de ${methodName(pm.method)}`} value={p.gmf_methods?.[pm.method] ?? ""} onChange={(v) => {
                     setP((x) => {
                       const next = { ...(x.gmf_methods ?? {}) };
-                      if (v) next[pm.method] = v; else delete next[pm.method];
+                      if (v) next[pm.method] = v as GmfMode; else delete next[pm.method];
                       return { ...x, gmf_methods: next };
                     });
-                  }}>
-                    <option value="">Igual que arriba</option>
-                    <option value="todas">Sí me cobra 4x1000</option>
-                    <option value="exenta">No me cobra (exenta)</option>
-                    <option value="tope350">Exenta hasta el tope del mes</option>
-                  </select>
+                  }} options={[
+                    { value: "", label: "Igual que arriba" },
+                    { value: "todas", label: "Sí me cobra 4x1000" },
+                    { value: "exenta", label: "No me cobra (exenta)" },
+                    { value: "tope350", label: "Exenta hasta el tope del mes" },
+                  ]} />
                 </div>
               ))}
             </div>
@@ -97,10 +96,7 @@ function ProfileForm() {
             <b>Método de costo</b>
             <small>{p.method === "fifo" ? "PEPS: lo primero que compraste es lo primero que vendes." : "Promedio: cada venta toma el costo promedio de lo que tienes."}</small>
           </span>
-          <div className="seg">
-            <button type="button" className={p.method === "fifo" ? "on" : ""} onClick={() => set("method", "fifo")}>PEPS</button>
-            <button type="button" className={p.method === "promedio" ? "on" : ""} onClick={() => set("method", "promedio")}>Promedio</button>
-          </div>
+          <Segmented value={p.method} onChange={(v) => set("method", v)} label="Método de costo" options={[["fifo", "PEPS"], ["promedio", "Promedio"]] as const} />
         </div>
       </div>
       <div className="form-actions">

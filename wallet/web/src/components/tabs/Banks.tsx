@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type AccountKind, type BankAccount, type BankCategory, type BanksSummary, type StatementPreview } from "@/lib/api";
 import { date, dateTime, money, num, signedMoney, tone } from "@/lib/format";
 import { methodName } from "../GmfChoice";
-import { Badge, Empty, Field, Icon, Modal, Note, Pager, Skeleton } from "../ui";
+import { Badge, Empty, Field, Icon, Modal, Note, Pager, Select, Skeleton } from "../ui";
 import { useWallet } from "../wallet";
 
 const KIND_LABEL: Record<AccountKind, string> = { ahorros: "Cuenta de ahorros", corriente: "Cuenta corriente", billetera: "Billetera (Nequi, Daviplata…)", tarjeta: "Tarjeta de crédito" };
@@ -195,14 +195,10 @@ export function Banks() {
             <div className="card">
               <div className="card-head">
                 <div className="actions">
-                  <select value={acc} onChange={(e) => setAcc(e.target.value === "all" ? "all" : Number(e.target.value))} style={{ width: "auto", height: 34 }} aria-label="Cuenta">
-                    <option value="all">Todas las cuentas</option>
-                    {data.accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                  <select value={cat} onChange={(e) => setCat(e.target.value as BankCategory | "all")} style={{ width: "auto", height: 34 }} aria-label="Categoría">
-                    <option value="all">Todas las categorías</option>
-                    {(Object.keys(names) as BankCategory[]).map((c) => <option key={c} value={c}>{names[c]}</option>)}
-                  </select>
+                  <Select compact label="Cuenta" value={String(acc)} onChange={(v) => setAcc(v === "all" ? "all" : Number(v))}
+                    options={[{ value: "all", label: "Todas las cuentas" }, ...data.accounts.map((a) => ({ value: String(a.id), label: a.name }))]} />
+                  <Select compact label="Categoría" value={cat} onChange={(v) => setCat(v as BankCategory | "all")}
+                    options={[{ value: "all", label: "Todas las categorías" }, ...(Object.keys(names) as BankCategory[]).map((c) => ({ value: c, label: names[c] }))]} />
                   <input type="search" placeholder="Buscar en la descripción…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220, height: 34 }} aria-label="Buscar" />
                   {pending > 0 && <button className="btn btn-sm" onClick={() => setCat("otro")}><Icon name="alert" size={14} /> {pending} sin clasificar</button>}
                 </div>
@@ -303,9 +299,8 @@ function AccountModal({ account, onClose, onDone }: { account: BankAccount | nul
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} autoFocus />
         </Field>
         <Field label="Tipo" wide>
-          <select value={kind} onChange={(e) => setKind(e.target.value as AccountKind)}>
-            {(Object.keys(KIND_LABEL) as AccountKind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
-          </select>
+          <Select label="Tipo" value={kind} onChange={(v) => setKind(v as AccountKind)}
+            options={(Object.keys(KIND_LABEL) as AccountKind[]).map((k) => ({ value: k, label: KIND_LABEL[k] }))} />
         </Field>
         {known.length > 0 && (
           <Field label="Medios de pago de Binance que salen de esta cuenta" wide hint="Sirve para cruzar tus órdenes P2P con el extracto correcto.">
@@ -382,9 +377,8 @@ function UploadModal({ accounts, initial, onClose, onDone }: { accounts: BankAcc
     <Modal title="Subir extracto" onClose={onClose} wide>
       <div className="form">
         <Field label="Cuenta">
-          <select value={aid} onChange={(e) => { setAid(Number(e.target.value)); setPreview(null); }}>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+          <Select label="Cuenta" value={String(aid)} onChange={(v) => { setAid(Number(v)); setPreview(null); }}
+            options={accounts.map((a) => ({ value: String(a.id), label: a.name }))} />
         </Field>
         <Field label="Clave del PDF (si tiene)" hint="Muchos bancos usan tu número de cédula.">
           <input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setPreview(null); }} disabled={!isPdf} autoComplete="off" placeholder={isPdf ? "Opcional" : "Solo para PDF"} />

@@ -1898,6 +1898,27 @@ def internal_binance():
     return resp
 
 
+@app.get("/internal/cuenta")
+def internal_account():
+    """Los saldos de Binance de una persona tal como los muestra Mi Binance, para que la wallet muestre los mismos
+    números (mismo precio, misma hora). Mismas protecciones que /internal/binance."""
+    if not is_local() or request.headers.get("x-forwarded-for"):
+        abort(404)
+    uid, ts = request.args.get("uid", ""), request.args.get("ts", 0, type=int)
+    sig = request.headers.get("x-wallet-sig", "")
+    if not uid or abs(time.time() - ts) > 30 or not hmac.compare_digest(sig, sso.sign(sso_secret, f"{uid}|{ts}")):
+        abort(404)
+    name = next((n for n, u in auth.users.items() if u.get("uid") == uid), None)
+    with lock:
+        view = account_view(name) if name else None
+        error = acc_errors.get(name) if name else None
+    keep = ("t", "spot", "funding", "total_usdt", "usdt_fiat", "total_fiat")
+    resp = jsonify(connected=bool(name and name in accounts), account={k: view[k] for k in keep} if view else None,
+                   error=error["msg"] if error else None, fiat=FIAT)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.get("/panel")
 def go_panel():
     """Después del login en arbicrypto.org: al panel (panel.arbicrypto.org; en este PC, la misma página)."""

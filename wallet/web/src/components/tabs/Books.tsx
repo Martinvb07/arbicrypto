@@ -7,7 +7,7 @@ import { NoteModal } from "../NoteModal";
 import { BalanceView, CashBookView, CashFlowView, EquityView, IncomeView, InventoryView, JournalView, NotesView, TrialView } from "../Statements";
 import { Closings } from "./Closings";
 import { ExcelButton, Kardex, OpsRegister } from "./CryptoBook";
-import { Empty, Icon, Note, Pager, Skeleton } from "../ui";
+import { Empty, Icon, Note, Pager, Segmented, Select, Skeleton } from "../ui";
 import { useWallet } from "../wallet";
 
 export type BooksView = "diario" | "mayor" | "inventarios" | "balance" | "resultados" | "patrimonio" | "flujo" | "notas"
@@ -109,9 +109,7 @@ export function Books({ initialView = "diario" }: { initialView?: BooksView }) {
         {GROUPS.map((g) => (
           <div key={g.label} className="book-nav-group">
             <small>{g.label}</small>
-            <div className="seg">
-              {g.views.map((v) => <button key={v.id} className={view === v.id ? "on" : ""} onClick={() => setView(v.id)} aria-current={view === v.id ? "page" : undefined}>{v.label}</button>)}
-            </div>
+            <Segmented value={view} options={g.views.map((v) => [v.id, v.label] as const)} onChange={setView} label={g.label} />
           </div>
         ))}
       </nav>
@@ -122,10 +120,9 @@ export function Books({ initialView = "diario" }: { initialView?: BooksView }) {
             actions={<>
               {view === "diario" && <button className="btn btn-sm btn-primary" onClick={() => setNoteOpen(true)}><Icon name="plus" size={14} /> Nota de contabilidad</button>}
               {!YEARLY.includes(view) && (
-                <select value={month} onChange={(e) => setMonth(Number(e.target.value))} aria-label="Periodo" style={{ width: "auto" }}>
-                  <option value={0}>{AT_CUT.includes(view) ? `Corte: fin de ${year}` : `Todo el año ${year}`}</option>
-                  {MONTHS.map((m, i) => <option key={m} value={i + 1}>{AT_CUT.includes(view) ? `Corte: fin de ${m.toLowerCase()}` : m} {year}</option>)}
-                </select>
+                <Select compact label="Periodo" value={String(month)} onChange={(v) => setMonth(Number(v))} searchable={false}
+                  options={[{ value: "0", label: AT_CUT.includes(view) ? `Corte: fin de ${year}` : `Todo el año ${year}` },
+                    ...MONTHS.map((m, i) => ({ value: String(i + 1), label: `${AT_CUT.includes(view) ? `Corte: fin de ${m.toLowerCase()}` : m} ${year}` }))]} />
               )}
               {view !== "notas" && <a className="btn btn-sm" href={csvHref(view, year, month)} download><Icon name="download" size={14} /> CSV</a>}
               <button className="btn btn-sm" onClick={() => window.print()}><Icon name="print" size={14} /> Imprimir</button>

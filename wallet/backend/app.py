@@ -458,6 +458,46 @@ def panel_binance(panel_uid):
     return (d["key"], d["secret"]) if d.get("connected") and d.get("key") else None
 
 
+def panel_account(uid):
+    """Los saldos de Binance tal como los muestra el panel (Mi Binance): mismo precio, misma hora. None si no hay."""
+    u = db.one("SELECT panel_uid FROM users WHERE id=?", (uid,))
+    if not u or not u["panel_uid"]:
+        return None
+    key, ts = sso.secret(_env, PANEL_ENV), int(time.time())
+    try:
+        r = requests.get(f"{PANEL_INTERNAL}/internal/cuenta", params={"uid": u["panel_uid"], "ts": ts},
+                         headers={"X-Wallet-Sig": sso.sign(key, f"{u['panel_uid']}|{ts}")}, timeout=5)
+        return r.json() if r.status_code == 200 else None
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def live_rows(acc, own):
+    """Une Spot y Fondos del panel por moneda (LDBTC = BTC en Earn) y les pone el cuadre con tus libros."""
+    rows = {}
+    for where, items in (("spot", acc.get("spot") or []), ("funding", acc.get("funding") or [])):
+        for it in items:
+            a = it["asset"]
+            if a.startswith("LD") and len(a) > 4:
+                a, where_ = a[2:], "earn"
+            else:
+                where_ = where
+            r = rows.setdefault(a, {"asset": a, "qty": 0.0, "usdt": 0.0, "fiat": 0.0, "wallets": {}, "priced": True})
+            r["qty"] += it["qty"]
+            r["wallets"][where_] = r["wallets"].get(where_, 0.0) + it["qty"]
+            if it.get("usdt") is None:
+                r["priced"] = False
+            r["usdt"] += it.get("usdt") or 0
+            r["fiat"] += it.get("fiat") or 0
+    out = []
+    for a, r in rows.items():
+        mine = own.get(a)
+        out.append({**r, "usdt": r["usdt"] if r["priced"] else None, "fiat": r["fiat"] if r["priced"] else None,
+                    "cost": mine["cost"] if mine else 0.0, "app_qty": mine["app_qty"] if mine else 0.0,
+                    "ok": mine["ok"] if mine else True})
+    return sorted(out, key=lambda r: -(r["usdt"] or 0))
+
+
 def forget_binance(uid):
     """Sin Binance no queda nada de Binance: la conexión y lo que se trajo con ella (lo de periodos cerrados se queda)."""
     db.delete_binance(uid)
@@ -704,12 +744,21 @@ def saldos():
             "ok": bal is None or abs(diff) <= max(1e-6, 0.01 * max(abs(mine), abs(real))) or (a in STABLE and abs(diff) < 1),
         })
     rows.sort(key=lambda r: -(r["cop"] or 0))
+    # lo que se ve de Binance es lo mismo que en el panel (Mi Binance); los libros se cuadran con la última sincronización
+    live = panel_account(uid) if b else None
+    acc = (live or {}).get("account")
+    panel = None
+    if acc:
+        own = {r["asset"]: r for r in rows}
+        panel = {"t": acc["t"], "fiat": live.get("fiat") or "COP", "usdt_fiat": acc.get("usdt_fiat"),
+                 "total_usdt": acc["total_usdt"], "total_fiat": acc.get("total_fiat"), "rows": live_rows(acc, own),
+                 "error": live.get("error")}
     entries = user_journal(uid)
     caja = [c for c in db.closings(uid) if not c["auto"]]  # solo los cierres con el saldo real que escribiste
     return jsonify(
         binance={"connected": bool(b), "synced": cur.get("balances_t"), "rows": rows, "trm": trm,
                  "total_cop": sum(r["cop"] or 0 for r in rows), "total_usd": sum(r["usd"] or 0 for r in rows),
-                 "total_cost": sum(r["cost"] for r in rows), "ok": all(r["ok"] for r in rows)},
+                 "total_cost": sum(r["cost"] for r in rows), "ok": all(r["ok"] for r in rows), "panel": panel},
         banks={"books": ledger.cash_at(entries, now), "by_method": cash_by_method(uid, now),
                "last_closing": caja[-1] if caja else None,
                "statements": [{"id": acc["id"], "name": acc["name"], "balance": acc["last_balance"], "day": acc["last_day"]}

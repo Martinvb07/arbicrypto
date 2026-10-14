@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { money, signedMoney, tone } from "@/lib/format";
 
@@ -33,6 +33,7 @@ const ICONS: Record<string, ReactNode> = {
   link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>,
   copy: <><rect x="8" y="8" width="13" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></>,
   chevron: <path d="m9 6 6 6-6 6" />,
+  chevronDown: <path d="m6 9 6 6 6-6" />,
   bank: <><path d="M3 10 12 4l9 6" /><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8" /><path d="M3 21h18" /></>,
   book: <><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H20v15H5.5A1.5 1.5 0 0 0 4 19.5Z" /><path d="M4 19.5A1.5 1.5 0 0 0 5.5 21H20v-3" /><path d="M8 7h8M8 11h6" /></>,
   lock: <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
@@ -181,6 +182,173 @@ export function Note({ children, kind = "" }: { children: ReactNode; kind?: "" |
     <div className={`note-box ${kind}`}>
       <Icon name={kind === "good" ? "check" : kind ? "alert" : "info"} size={16} />
       <div>{children}</div>
+    </div>
+  );
+}
+
+/** Mide el botón elegido dentro de `ref` para que un fondo lo siga deslizándose (igual que en el panel). */
+export function useThumb(ref: React.RefObject<HTMLElement | null>, index: number) {
+  const [thumb, setThumb] = useState<{ x: number; w: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const b = el.querySelectorAll<HTMLElement>(":scope > button")[index];
+      setThumb(b ? { x: b.offsetLeft, w: b.offsetWidth } : null);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    el.querySelectorAll(":scope > button").forEach((b) => ro.observe(b));
+    return () => ro.disconnect();
+  }, [ref, index]);
+  return thumb ? { transform: `translateX(${thumb.x}px)`, width: thumb.w } : undefined;
+}
+
+/** Grupo de opciones: el fondo de la elegida se desliza como un switch (el mismo del panel). */
+export function Segmented<T extends string | number>({ value, options, onChange, label, className = "" }: {
+  value: T;
+  options: readonly (readonly [T, ReactNode])[];
+  onChange: (v: T) => void;
+  label?: string;
+  className?: string;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const thumb = useThumb(box, options.findIndex(([v]) => v === value));
+  return (
+    <div className={`seg ${className}`} ref={box} role="radiogroup" aria-label={label}>
+      {thumb && <span className="seg-thumb" style={thumb} aria-hidden="true" />}
+      {options.map(([v, l]) => (
+        <button key={String(v)} type="button" role="radio" aria-checked={v === value} className={v === value ? "on" : ""} onClick={() => onChange(v)}>
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export interface SelectOption {
+  value: string;
+  label: ReactNode;
+  /** Texto para buscar (por defecto, la etiqueta si es texto, o el valor). */
+  search?: string;
+  icon?: ReactNode;
+  hint?: ReactNode;
+}
+
+/** Selector propio (el mismo del panel, reemplaza al <select> del navegador): con íconos, buscador y teclado. */
+export function Select({ value, options, onChange, label, searchable, compact }: {
+  value: string;
+  options: SelectOption[];
+  onChange: (v: string) => void;
+  label: string;
+  searchable?: boolean;
+  compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const search = searchable ?? options.length > 8;
+  const q = query.trim().toLowerCase();
+  const text = (o: SelectOption) => (o.search ?? (typeof o.label === "string" ? o.label : o.value)).toLowerCase();
+  const shown = q ? options.filter((o) => text(o).includes(q)) : options;
+  const current = options.find((o) => o.value === value);
+  const id = `sel-${label.replace(/\W+/g, "-").toLowerCase()}`;
+
+  const close = (focus = true) => {
+    setOpen(false);
+    setQuery("");
+    if (focus) trigger.current?.focus();
+  };
+  const choose = (o: SelectOption | undefined) => {
+    if (!o) return;
+    onChange(o.value);
+    close();
+  };
+  const show = () => {
+    setActive(Math.max(0, options.findIndex((o) => o.value === value)));
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const outside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) list.current?.querySelector<HTMLElement>(`[data-i="${active}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [open, active]);
+
+  const keys = (e: React.KeyboardEvent) => {
+    if (!open) {
+      if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) {
+        e.preventDefault();
+        show();
+      }
+      return;
+    }
+    const last = shown.length - 1;
+    const moves: Record<string, () => void> = {
+      ArrowDown: () => setActive((i) => Math.min(last, i + 1)),
+      ArrowUp: () => setActive((i) => Math.max(0, i - 1)),
+      Home: () => setActive(0),
+      End: () => setActive(last),
+      Enter: () => choose(shown[active]),
+      Escape: () => close(),
+      Tab: () => close(false),
+    };
+    const fn = moves[e.key];
+    if (fn) {
+      if (e.key !== "Tab") e.preventDefault();
+      e.stopPropagation(); // Escape cierra el selector, no el modal donde está
+      fn();
+    }
+  };
+
+  return (
+    // preventDefault: dentro de un <label> (Field) un clic en la lista no debe "re-clicar" el botón y reabrirla
+    <div className={`select ${open ? "open" : ""} ${compact ? "compact" : ""}`} ref={ref} onKeyDown={keys} onClick={(e) => e.preventDefault()}>
+      <button type="button" ref={trigger} className="select-btn" aria-haspopup="listbox" aria-expanded={open} aria-label={label}
+        onClick={() => (open ? close() : show())}>
+        {current?.icon}
+        <span className="select-label">{current?.label ?? "Elige…"}</span>
+        {current?.hint && <span className="select-hint">{current.hint}</span>}
+        <span className="select-caret"><Icon name="chevronDown" size={16} /></span>
+      </button>
+      {open && (
+        <div className="select-pop">
+          {search && (
+            <div className="select-search">
+              <Icon name="search" size={15} />
+              <input type="search" autoFocus placeholder="Buscar…" value={query} aria-controls={id}
+                onChange={(e) => { setQuery(e.target.value); setActive(0); }} />
+            </div>
+          )}
+          <ul id={id} role="listbox" ref={list} aria-label={label} tabIndex={search ? -1 : 0} autoFocus={!search}>
+            {shown.map((o, i) => (
+              <li key={o.value} data-i={i} role="option" aria-selected={o.value === value}
+                className={`${i === active ? "active" : ""} ${o.value === value ? "selected" : ""}`}
+                onMouseEnter={() => setActive(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(o)}>
+                {o.icon}
+                <span className="select-label">{o.label}</span>
+                {o.hint && <span className="select-hint">{o.hint}</span>}
+                {o.value === value && <span className="select-check"><Icon name="check" size={16} /></span>}
+              </li>
+            ))}
+            {!shown.length && <li className="select-empty">Sin resultados</li>}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

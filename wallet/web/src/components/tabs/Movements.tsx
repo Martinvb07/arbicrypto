@@ -6,7 +6,7 @@ import { cashValue, dateTime, GASTO_LABEL, KIND_LABEL, money, qty } from "@/lib/
 import { methodName } from "../GmfChoice";
 import { ImportModal } from "../ImportModal";
 import { MoveModal } from "../MoveModal";
-import { Asset, Badge, Empty, Icon, Modal, Note, Pager, Skeleton } from "../ui";
+import { Asset, Badge, Empty, Icon, Modal, Note, Pager, Segmented, Select, Skeleton } from "../ui";
 import { useWallet } from "../wallet";
 
 export const KIND_BADGE: Record<Kind, string> = {
@@ -77,14 +77,9 @@ export function Movements() {
       <div className="card">
         <div className="card-head">
           <div className="actions">
-            <div className="seg">
-              <button className={scope === "year" ? "on" : ""} onClick={() => setScope("year")}>Año {year}</button>
-              <button className={scope === "all" ? "on" : ""} onClick={() => setScope("all")}>Todos</button>
-            </div>
-            <select value={kind} onChange={(e) => setKind(e.target.value as Kind | "todos")} style={{ width: "auto", height: 34 }} aria-label="Tipo">
-              <option value="todos">Todos los tipos</option>
-              {(Object.keys(KIND_LABEL) as Kind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
-            </select>
+            <Segmented value={scope} onChange={setScope} label="Periodo" options={[["year", `Año ${year}`], ["all", "Todos"]] as const} />
+            <Select compact label="Tipo" value={kind} onChange={(v) => setKind(v as Kind | "todos")}
+              options={[{ value: "todos", label: "Todos los tipos" }, ...(Object.keys(KIND_LABEL) as Kind[]).map((k) => ({ value: k, label: KIND_LABEL[k] }))]} />
             <input type="search" placeholder="Buscar cripto, plataforma…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 210, height: 34 }} aria-label="Buscar" />
           </div>
           <div className="actions">

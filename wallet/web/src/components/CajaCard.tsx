@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, type Caja, type GastoCategory, type Kind } from "@/lib/api";
 import { date, dateTime, fromLocalInput, GASTO_LABEL, money, parseNum, signedMoney, toLocalInput, tone } from "@/lib/format";
 import type { TabId } from "./App";
-import { Field, Icon, Modal, Note, Skeleton } from "./ui";
+import { Field, Icon, Modal, Note, Segmented, Select, Skeleton } from "./ui";
 import { useWallet } from "./wallet";
 
 const GMF = 0.004;
@@ -153,9 +153,8 @@ function CashMoveModal({ dir, account, onClose }: { dir: "in" | "out"; account: 
     <Modal title={dir === "in" ? `Entrada a ${account}` : `Salida de ${account}`} onClose={onClose}>
       <form onSubmit={submit}>
         {dir === "out" ? (
-          <div className="seg" style={{ marginBottom: 14 }}>
-            <button type="button" className={kind === "retiro" ? "on" : ""} onClick={() => setKind("retiro")}>Para ti</button>
-            <button type="button" className={kind === "gasto" ? "on" : ""} onClick={() => setKind("gasto")}>Gasto del negocio</button>
+          <div style={{ marginBottom: 14 }}>
+            <Segmented value={kind} onChange={setKind} label="Tipo de salida" options={[["retiro", "Para ti"], ["gasto", "Gasto del negocio"]] as const} />
           </div>
         ) : null}
         <p className="kind-hint">
@@ -172,9 +171,8 @@ function CashMoveModal({ dir, account, onClose }: { dir: "in" | "out"; account: 
           </Field>
           {kind === "gasto" && (
             <Field label="Tipo de gasto">
-              <select value={category} onChange={(e) => setCategory(e.target.value as GastoCategory)}>
-                {(Object.keys(GASTO_LABEL) as GastoCategory[]).map((c) => <option key={c} value={c}>{GASTO_LABEL[c]}</option>)}
-              </select>
+              <Select label="Tipo de gasto" value={category} onChange={(v) => setCategory(v as GastoCategory)}
+                options={(Object.keys(GASTO_LABEL) as GastoCategory[]).map((c) => ({ value: c, label: GASTO_LABEL[c] }))} />
             </Field>
           )}
           <Field label={kind === "gasto" ? "En qué fue" : "Concepto"} wide hint={kind === "gasto" ? "Guarda la factura o el recibo: es tu soporte." : undefined}>

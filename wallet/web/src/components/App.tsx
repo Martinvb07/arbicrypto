@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { api } from "@/lib/api";
 import { yearLabel } from "@/lib/format";
-import { BrandMark, Icon } from "./ui";
+import { BrandMark, Icon, Select } from "./ui";
 import { useWallet } from "./wallet";
 import { Home } from "./tabs/Home";
 import { Movements } from "./tabs/Movements";
@@ -164,10 +164,10 @@ export function App() {
           </div>
           <LivePill onClick={() => setTab("inicio")} />
           <div className="top-actions">
-            <label className="sr-only" htmlFor="year">Año gravable</label>
-            <select id="year" className="year" value={year} onChange={(e) => setYear(Number(e.target.value))} title="Año gravable">
-              {me.years.map((y) => <option key={y} value={y}>{yearLabel(y)}</option>)}
-            </select>
+            <div className="year">
+              <Select compact label="Año gravable" value={String(year)} onChange={(v) => setYear(Number(v))}
+                options={me.years.map((y) => ({ value: String(y), label: yearLabel(y) }))} />
+            </div>
             <button className="icon-btn hide-sm" onClick={toggleTheme} title={light ? "Tema oscuro" : "Tema claro"} aria-label="Cambiar tema">
               <Icon name={light ? "moon" : "sun"} />
             </button>
