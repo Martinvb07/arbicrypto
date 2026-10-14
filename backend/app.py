@@ -2038,6 +2038,20 @@ def internal_avatar():
     return resp
 
 
+def sell_now(name, asset, qty):
+    """Lo que de verdad recibe en pesos si vende ya `qty` de `asset` en P2P, igual que Mis monedas: el mejor comprador
+    que acepta esa cantidad (de los anuncios que ya tiene el escaner) menos la comision al tomar su anuncio."""
+    p2p = state["p2p"]
+    ads = (p2p["market"].get(asset) or {}).get("SELL") if p2p else None
+    if not ads or not graph or qty <= 0:
+        return None
+    ad = next((a for a in ads if engine._fits(a, qty * a["price"], qty)), None)
+    if not ad:
+        return None
+    cut = engine.p2p_taker_fee(graph, asset, qty, *taker_fee_of(profile(name)))
+    return {"received": (qty - cut) * ad["price"], "price": ad["price"], "nick": ad["nick"], "fee": cut}
+
+
 @app.get("/internal/cuenta")
 def internal_account():
     """Los saldos de Binance de una persona tal como los muestra Mi Binance, para que la wallet muestre los mismos
@@ -2053,7 +2067,15 @@ def internal_account():
         view = account_view(name) if name else None
         error = acc_errors.get(name) if name else None
     keep = ("t", "spot", "funding", "total_usdt", "usdt_fiat", "total_fiat")
-    resp = jsonify(connected=bool(name and name in accounts), account={k: view[k] for k in keep} if view else None,
+    account = {k: view[k] for k in keep} if view else None
+    if account:  # "si vendes ya" por moneda: el mismo calculo de Mis monedas, para que la wallet no diga otra cosa
+        held = {}
+        for r in view["spot"] + view["funding"]:
+            a = r["asset"][2:] if r["asset"].startswith("LD") and len(r["asset"]) > 4 else r["asset"]
+            held[a] = held.get(a, 0.0) + r["qty"]
+        account["sell"] = {a: v for a, q in held.items() if a in P2P_ASSETS and (v := sell_now(name, a, q))}
+        account["gmf"] = profile(name)["gmf"]
+    resp = jsonify(connected=bool(name and name in accounts), account=account,
                    error=error["msg"] if error else None, fiat=FIAT)
     resp.headers["Cache-Control"] = "no-store"
     return resp

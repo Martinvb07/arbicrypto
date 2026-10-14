@@ -521,6 +521,7 @@ def live_rows(acc, own):
         mine = own.get(a)
         out.append({**r, "usdt": r["usdt"] if r["priced"] else None, "fiat": r["fiat"] if r["priced"] else None,
                     "cost": mine["cost"] if mine else 0.0, "app_qty": mine["app_qty"] if mine else 0.0,
+                    "sell": (acc.get("sell") or {}).get(a),  # lo que de verdad recibes si la vendes ya (calculado en el panel)
                     "ok": mine["ok"] if mine else True})
     return sorted(out, key=lambda r: -(r["usdt"] or 0))
 
@@ -779,6 +780,7 @@ def saldos():
         own = {r["asset"]: r for r in rows}
         panel = {"t": acc["t"], "fiat": live.get("fiat") or "COP", "usdt_fiat": acc.get("usdt_fiat"),
                  "total_usdt": acc["total_usdt"], "total_fiat": acc.get("total_fiat"), "rows": live_rows(acc, own),
+                 "gmf": acc.get("gmf"),  # el 4x1000 que el panel le suma a lo que te costó
                  "error": live.get("error")}
     entries = user_journal(uid)
     caja = [c for c in db.closings(uid) if not c["auto"]]  # solo los cierres con el saldo real que escribiste

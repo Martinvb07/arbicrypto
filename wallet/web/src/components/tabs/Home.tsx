@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type Movement, type Report, type Saldos } from "@/lib/api";
+import { api, type LiveRow, type Movement, type Report, type Saldos } from "@/lib/api";
 import { cashValue, currentYear, date, dateTime, KIND_LABEL, money, num, qty, signedMoney, tone } from "@/lib/format";
 import type { TabId } from "../App";
 import { BinanceCard } from "../BinanceCard";
@@ -20,7 +20,16 @@ const EMPTY_REPORT = { warnings_total: 0, unvalued: 0, cuadre: null, profile: { 
 const WALLET: Record<string, string> = { spot: "Spot", funding: "Fondos", earn: "Earn" };
 
 /** Una moneda en Binance, venga del panel (en vivo) o de la última sincronización de la wallet. */
-interface Holding { asset: string; qty: number; value: number | null; usdt: number | null; cost: number; wallets: Record<string, number>; ok: boolean; app_qty: number }
+interface Holding {
+  asset: string; qty: number; value: number | null; usdt: number | null; cost: number; wallets: Record<string, number>; ok: boolean; app_qty: number;
+  /** Ganancia o pérdida si la vendes ya, igual que Mis monedas en el panel: lo que recibes − (lo que te costó + 4x1000). */
+  pnl: number | null;
+  /** A quién y a cuánto le venderías (si el panel lo calculó). */
+  sell: LiveRow["sell"];
+}
+
+/** Ganancia si vendes ya: con lo que de verdad recibes (panel) o, si no hay, con el valor a precio de mercado. */
+const pnlOf = (received: number | null | undefined, cost: number, gmf: number) => (received != null && cost > 0 ? received - cost * (1 + gmf) : null);
 
 /** Lo de Binance: los mismos saldos del panel (Mi Binance). Si el panel no responde, los de la última sincronización. */
 function binanceCoins(s: Saldos | null): { coins: Holding[]; total: number | null; usdt: number | null; live: boolean; t: number | null } {
@@ -31,12 +40,14 @@ function binanceCoins(s: Saldos | null): { coins: Holding[]; total: number | nul
     return {
       coins: p.rows.filter((r) => (r.usdt ?? 1) >= 0.01).map((r) => ({
         asset: r.asset, qty: r.qty, value: r.fiat, usdt: r.usdt, cost: r.cost, wallets: r.wallets as Record<string, number>, ok: r.ok, app_qty: r.app_qty,
+        pnl: pnlOf(r.sell ? r.sell.received : r.fiat, r.cost, p.gmf ?? 0), sell: r.sell,
       })),
       total: p.total_fiat, usdt: p.total_usdt, live: true, t: p.t,
     };
   }
   return {
-    coins: b.rows.map((r) => ({ asset: r.asset, qty: r.qty, value: r.cop, usdt: r.usd, cost: r.cost, wallets: r.wallets, ok: r.ok, app_qty: r.app_qty })),
+    coins: b.rows.map((r) => ({ asset: r.asset, qty: r.qty, value: r.cop, usdt: r.usd, cost: r.cost, wallets: r.wallets, ok: r.ok, app_qty: r.app_qty,
+      pnl: pnlOf(r.cop, r.cost, 0), sell: null })),
     total: b.total_cop, usdt: b.total_usd, live: false, t: b.synced,
   };
 }
@@ -87,7 +98,7 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
   const cryptoShare = total > 0 ? Math.max(0, Math.min(100, (crypto / total) * 100)) : 0;
   const nowMonth = Number(new Intl.DateTimeFormat("en", { timeZone: "America/Bogota", month: "numeric" }).format(new Date())) - 1;
   const month = live ? report?.books.months[nowMonth] : undefined;
-  const unreal = bn.coins.reduce((a, c) => a + (c.value != null && c.cost > 0 ? c.value - c.cost : 0), 0);
+  const unreal = bn.coins.reduce((a, c) => a + (c.pnl ?? 0), 0);
   const todos = report ? todoList : [];
   const pending = todos.filter((t) => !t.optional).length;
   const hour = Number(new Intl.DateTimeFormat("en", { timeZone: "America/Bogota", hour: "numeric", hour12: false }).format(new Date()));
@@ -136,7 +147,7 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
             <div className="home-stat">
               <small>Si vendieras hoy tus cripto</small>
               <b className={tone(unreal)}>{signedMoney(unreal)}</b>
-              <span>Contra lo que te costaron</span>
+              <span>{bn.live ? "Igual que Mis monedas: con comisión y 4x1000" : "Contra lo que te costaron"}</span>
             </div>
           )}
         </div>
@@ -185,7 +196,7 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
             <div className="hold-list">
               {bn.coins.map((c) => {
                 const share = crypto > 0 && c.value != null ? (c.value / crypto) * 100 : 0;
-                const diff = c.value != null && c.cost > 0 ? c.value - c.cost : null;
+                const diff = c.pnl;
                 const where = Object.entries(c.wallets).filter(([, v]) => v > 0).map(([w]) => WALLET[w] ?? w).join(" · ");
                 const unit = c.value != null && c.qty > 0 ? c.value / c.qty : null;
                 return (
@@ -202,7 +213,7 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
                     </div>
                     <div className="hold-val">
                       <b>{c.value != null ? money(c.value) : "—"}</b>
-                      {diff != null ? <small className={tone(diff)}>{signedMoney(diff)}</small> : <small className="muted">{c.usdt != null ? `≈ ${num(c.usdt, 2)} USDT` : ""}</small>}
+                      {diff != null ? <small className={tone(diff)} title={c.sell ? `Si vendes ya a ${c.sell.nick} a ${money(c.sell.price)}: recibes ${money(c.sell.received)}` : undefined}>{signedMoney(diff)}</small> : <small className="muted">{c.usdt != null ? `≈ ${num(c.usdt, 2)} USDT` : ""}</small>}
                     </div>
                   </div>
                 );

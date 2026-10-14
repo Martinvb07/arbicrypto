@@ -219,7 +219,7 @@ export function Header({ onTab }: { onTab: (t: TabId) => void }) {
           </button>
           {state?.user && (
             <Menu label="Menú de usuario" buttonClass="btn btn-sm user-btn"
-              button={<><UserAvatar name={state.user.name} src={myPhoto} /><span className="lbl">{state.user.name}</span></>}>
+              button={<><UserAvatar name={state.user.name} src={myPhoto} /><span className="lbl">{state.user.name}</span><Icon name="chevronDown" size={14} className="user-caret" /></>}>
               {(close) => (
                 <>
                   <div className="menu-who menu-who-photo">

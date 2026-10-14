@@ -29,7 +29,7 @@ export function Menu({ button, buttonClass = "btn btn-sm", label, width, childre
   }, [open]);
   return (
     <div className="menu" ref={ref}>
-      <button className={buttonClass} onClick={() => setOpen(!open)} aria-expanded={open} aria-label={label} title={label}>
+      <button className={`${buttonClass}${open ? " open" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-label={label} title={label}>
         {button}
       </button>
       {open && <div className="menu-pop" style={width ? { width } : undefined}>{children(() => setOpen(false))}</div>}

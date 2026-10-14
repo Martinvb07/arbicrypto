@@ -340,6 +340,8 @@ export interface LiveRow {
   cost: number;
   app_qty: number;
   ok: boolean;
+  /** Si la vendes ya en P2P: el mejor comprador que acepta tu cantidad, menos la comisión de Binance (igual que Mis monedas). */
+  sell?: { received: number; price: number; nick: string; fee: number } | null;
 }
 
 /** Los saldos de Binance del panel: los mismos números que se ven en Mi Binance. */
@@ -350,6 +352,8 @@ export interface PanelBinance {
   total_usdt: number;
   total_fiat: number | null;
   rows: LiveRow[];
+  /** 4x1000 que pagas al comprar (el panel se lo suma a lo que te costó) */
+  gmf?: number | null;
   error: string | null;
 }
 
