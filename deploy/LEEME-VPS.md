@@ -18,6 +18,14 @@ persona elige *Panel* o *Wallet*; después de entrar sigue a **panel.arbicrypto.
 Es una sola sesión para los tres dominios (cookie de `.arbicrypto.org`).
 
 > **Importante:** Binance bloquea las IPs de **Estados Unidos**. Usa un VPS en otra región (por ejemplo Brasil, Europa o Colombia).
+>
+> Lo que cuenta es el país que Binance le asigna a la IP, no dónde dice el proveedor que está el servidor: hay VPS "en Brasil"
+> con IP registrada en Estados Unidos. Antes de instalar nada, pruébalo en el VPS (debe dar `200`, no `451`):
+>
+> ```bash
+> curl -4 -s ipinfo.io | grep -E '"(ip|city|country)"'
+> curl -4 -s -o /dev/null -w "%{http_code}\n" https://api.binance.com/api/v3/ping
+> ```
 
 ---
 
