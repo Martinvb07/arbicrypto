@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { advertiserUrl, bestDeal, COIN_NAMES, copyQty, effBuy, gmfOf, isDollar, isMine, netOf, roundTrip, spotUrl, usdtPrices, type Deal } from "@/lib/calc";
+import { advertiserUrl, bestDeal, COIN_NAMES, copyQty, dealReceived, effBuy, gmfOf, isDollar, isMine, netOf, roundTrip, spotUrl, takerFeeAt, usdtPrices, type Deal } from "@/lib/calc";
 import { money, num, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, Conversion, Route, State, Triangle } from "@/lib/types";
@@ -113,7 +113,6 @@ function CostBar({ s }: { s: State }) {
     ["Colchón", pctTxt(s.settings.spot_slippage), true, "Por si el precio se mueve mientras haces el cambio en Spot"],
     ["Comisión P2P", pctTxt(s.p2p_fee ?? 0), (s.p2p_fee ?? 0) > 0, "Lo que Binance se queda en cada orden P2P que tomas: mínimo 0,07 USDT por orden (automática) o la que pusiste"],
     ["4x1000", gmf ? "0,4 % de lo que pagas" : "apagado", gmf, "Lo cobra tu banco cada vez que le pagas a un vendedor P2P, ganes o pierdas"],
-    ["Renta", pctTxt(s.settings.tax ?? 0), (s.settings.tax ?? 0) > 0, "Impuesto de renta sobre la ganancia (cámbialo en Precios P2P → Mis costos)"],
   ];
   return (
     <div className="cost-bar" aria-label="Costos incluidos">
@@ -249,9 +248,8 @@ export function Steps({ row, s }: { row: Row; s: State }) {
 
 /** Comprar y vender con anunciantes recomendables que no aceptan tu capital: los pasos con el monto que sí aceptan. */
 export function DealSteps({ d, s }: { d: Deal; s: State }) {
-  const k = 1 - (s.p2p_fee ?? 0);
-  const got = (d.amount / d.buy.price) * k;
-  const received = got * d.sell.price * k;
+  const got = (d.amount / d.buy.price) * (1 - takerFeeAt(s, d.amount, d.asset, d.buy.price));
+  const received = dealReceived(s, d.asset, d.buy, d.sell, d.amount);
   const n = netOf(d.amount, received, s);
   const gmf = n.gmf;
   const unit = isDollar(d.asset) ? "cada dólar" : `por cada ${d.asset}`;

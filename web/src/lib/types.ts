@@ -265,6 +265,9 @@ export interface State {
   p2p_fee: number;
   /** La comisión P2P que sale de las órdenes de las cuentas conectadas (la que se usa en modo automático). */
   p2p_fee_auto?: number;
+  /** La comisión al tomar un anuncio por partes: porcentaje y mínimo fijo por orden en dólares (p2p_fee ya los junta para tu capital). */
+  p2p_fee_rate?: number;
+  p2p_fee_min_usd?: number;
   price_alerts?: PriceAlert[];
   /** Lo que Binance te cobra por tus propios anuncios, sacado de tus órdenes como anunciante (null si no tienes). */
   maker_fee: number | null;

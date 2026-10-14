@@ -104,16 +104,14 @@ function Kpi({ icon, kind, label, value, hint, i }: { icon: IconName; kind: stri
 
 // ---------------------------------------------------------------- mis costos y mis medios
 
-const TAX_STEPS = [0, 0.19, 0.28, 0.33, 0.35, 0.37, 0.39];
 const parsePct = (v: string) => Number(v.trim().replace(/[\s%]/g, "").replace(",", ".")) / 100;
 
-/** Comisión P2P, 4x1000 y renta: lo que no sale en el anuncio pero sí de tu bolsillo (las transferencias no cobran). */
+/** Comisión P2P y 4x1000: lo que no sale en el anuncio pero sí de tu bolsillo (las transferencias no cobran). */
 function CostsSheet({ s, onClose }: { s: State; onClose: () => void }) {
   const { saveSettings, toast } = useLive();
   const st = s.settings;
   const [auto, setAuto] = useState(st.taker_fee < 0);
   const [fee, setFee] = useState(st.taker_fee >= 0 ? num(st.taker_fee * 100, 2) : "");
-  const [tax, setTax] = useState(st.tax);
   const [gmf, setGmf] = useState(st.gmf > 0);
   const [busy, setBusy] = useState(false);
   const feeNow = auto ? s.p2p_fee_auto ?? 0 : parsePct(fee || "0");
@@ -122,15 +120,13 @@ function CostsSheet({ s, onClose }: { s: State; onClose: () => void }) {
   const sample = (() => {
     const gross = cap * 1.008 * (1 - feeNow) ** 2;
     const g = gmf ? cap * 0.004 : 0;
-    const before = gross - cap - g;
-    const t = Math.max(before, 0) * tax;
-    return { feeCost: cap * 1.008 - gross, g, t, net: before - t };
+    return { feeCost: cap * 1.008 - gross, g, net: gross - cap - g };
   })();
 
   const save = async () => {
     if (!auto && !(feeNow >= 0 && feeNow <= 0.02)) return toast("Revisa la comisión", "Entre 0 % y 2 %.", "bad");
     setBusy(true);
-    const ok = await saveSettings({ taker_fee: auto ? -1 : feeNow, bank_fee: 0, tax, gmf: gmf ? 0.004 : 0 });
+    const ok = await saveSettings({ taker_fee: auto ? -1 : feeNow, bank_fee: 0, tax: 0, gmf: gmf ? 0.004 : 0 });
     setBusy(false);
     if (ok) {
       toast("Costos guardados", "Rutas, avisos y precios ya se calculan con tus costos reales.", "good", 3000);
@@ -156,15 +152,6 @@ function CostsSheet({ s, onClose }: { s: State; onClose: () => void }) {
           )}
         </section>
 
-        <section className="mc-block">
-          <header><span className="mc-ico"><Icon name="receipt" size={16} /></span><div><b>Impuesto de renta</b><small>Sobre lo que ganas (si pierdes, no se cobra)</small></div></header>
-          <div className="mc-chips">
-            {TAX_STEPS.map((t) => (
-              <button key={t} type="button" className={`chip-toggle ${Math.abs(tax - t) < 1e-6 ? "on" : ""}`} onClick={() => setTax(t)}>{pctPlain(t, 0)}</button>
-            ))}
-          </div>
-        </section>
-
         <section className="mc-block row">
           <header><span className="mc-ico"><Icon name="card" size={16} /></span><div><b>4x1000</b><small>0,4 % de cada pago al vendedor</small></div></header>
           <Toggle on={gmf} onChange={setGmf} label={gmf ? "Lo pago" : "Exento"} />
@@ -176,7 +163,6 @@ function CostsSheet({ s, onClose }: { s: State; onClose: () => void }) {
             <div><small>Antes de costos</small><b>{signedMoney(cap * 0.008)}</b></div>
             {sample.feeCost >= 0.5 && <div className="cost"><small>Comisión P2P</small><b>−{money(sample.feeCost, 0)}</b></div>}
             {sample.g >= 0.5 && <div className="cost"><small>4x1000</small><b>−{money(sample.g, 0)}</b></div>}
-            {sample.t >= 0.5 && <div className="cost"><small>Renta</small><b>−{money(sample.t, 0)}</b></div>}
             <div className="net"><small>Te queda</small><b className={`val ${tone(sample.net)}`}>{signedMoney(sample.net)}</b></div>
           </div>
         </div>
@@ -630,7 +616,6 @@ export function Market() {
   const costTxt = [
     `comisión P2P ${pctPlain(state.p2p_fee ?? 0, 2)}${st.taker_fee < 0 ? " (auto)" : ""}`,
     st.gmf > 0 ? "4x1000" : "sin 4x1000",
-    `renta ${pctPlain(st.tax ?? 0, 0)}`,
   ].join(" · ");
   const winsWith = (a: string) => {
     const r = directRoute(state, a);
@@ -650,7 +635,7 @@ export function Market() {
           </div>
           <div className="toolbar mkt-tools">
             <CapitalField />
-            <button className="btn mkt-tool-btn" onClick={() => setSheet("costs")} title="Comisión P2P, transferencia, renta y 4x1000">
+            <button className="btn mkt-tool-btn" onClick={() => setSheet("costs")} title="Comisión P2P y 4x1000">
               <Icon name="receipt" size={16} /> Mis costos
             </button>
             <button className={`btn mkt-tool-btn ${nMethods ? "set" : ""}`} onClick={() => setSheet("methods")} title="Con qué pagas y dónde recibes">

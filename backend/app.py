@@ -97,7 +97,7 @@ FIXED = {"fiat": FIAT, "p2p_assets": P2P_ASSETS, "max_profit": MAX_PROFIT, "p2p_
 # Lo que se configura (cada usuario el suyo): capital, desde cuanto avisar, 4x1000 y sus costos reales.
 # taker_fee: comision P2P que le cobra Binance al tomar un anuncio (-1 = automatica, sacada de sus ordenes).
 # bank_fee: lo que le cobra su banco por cada transferencia al vendedor. tax: impuesto de renta sobre la ganancia.
-DEFAULTS = {"capital": 500000, "min_per_usd": 3, "gmf": 0.004, "taker_fee": -1, "bank_fee": 0, "tax": 0.19}
+DEFAULTS = {"capital": 500000, "min_per_usd": 3, "gmf": 0.004, "taker_fee": -1, "bank_fee": 0, "tax": 0}
 PERSONAL = tuple(DEFAULTS)
 LIMITS = {"capital": (10000, 1e10), "min_per_usd": (0, 1e5), "gmf": (0, 0.01), "taker_fee": (-1, 0.02),
           "bank_fee": (0, 100000), "tax": (0, 0.39)}
@@ -168,6 +168,7 @@ def profile(name):
     mine = prefs.get(name) or {} if name else {}
     out = {k: mine[k] if mine.get(k) is not None else settings[k] for k in PERSONAL}
     out["bank_fee"] = 0  # las transferencias no cobran: el unico costo del banco es el 4x1000 (aunque se haya guardado otro)
+    out["tax"] = 0  # la renta se cuadra por aparte: el panel no la descuenta (aunque se haya guardado otra)
     for k in METHOD_LISTS:
         out[k] = [str(m) for m in mine.get(k) or []]
     return out
@@ -1514,6 +1515,8 @@ def api_state():
         return jsonify({
             "boot": BOOT, "now": time.time(), "settings": public_settings(g.user), "fee": current_fee(), "p2p_fee": effective_fee(me),
             "p2p_fee_auto": effective_fee({**me, "taker_fee": -1}), "price_alerts": price_alert_view(name),
+            # porcentaje y minimo fijo por separado: con otro monto (simulador, otros montos) el minimo pesa distinto
+            "p2p_fee_rate": taker_fee_of(me)[0], "p2p_fee_min_usd": taker_fee_of(me)[1],
             "maker_fee": maker_fee(name), "spot": state["spot"], "p2p": p2p, "account": account_view(name),
             "opps": sorted([o for o in (mine or {}).get("found", []) + opps["spot"] if o["per_usd"] >= me["min_per_usd"]],
                            key=lambda o: -o["per_usd"]),

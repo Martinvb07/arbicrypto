@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { adRank, fitsAd, isDollar, MAKER_FEE_REF, perDollar, simulateAds } from "@/lib/calc";
+import { adRank, fitsAd, isDollar, MAKER_FEE_REF, perDollar, simulateAds, takerFeeAt } from "@/lib/calc";
 import { money, num, pct, pctPlain, plural, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, MarketEntry, Side, State } from "@/lib/types";
@@ -109,23 +109,23 @@ function Simulator({ s, asset, m, amount, rounds, makerFee }: {
   // null = sin tocar: sigue en vivo al 1.º de los anuncios con los que compite
   const [buyTyped, setBuyTyped] = useState<string | null>(null);
   const [sellTyped, setSellTyped] = useState<string | null>(null);
-  const takerFee = s.p2p_fee ?? 0;
   const gmf = s.settings.gmf;
 
   // compra: tu anuncio compite con los que compran (m.SELL); si tomas uno, le compras a los que venden (m.BUY)
   const buyStr = buyTyped ?? String(m.SELL[0]?.price ?? "");
   const buyTaken = amount ? m.BUY.find((a) => fitsAd(a, amount, amount / a.price)) : undefined;
   const buy = buyMode === "mine" ? parse(buyStr) : buyTaken?.price ?? null;
-  const buyFee = buyMode === "mine" ? makerFee : takerFee;
+  // al tomar un anuncio: el porcentaje, o el mínimo fijo por orden si con este monto pesa más
+  const buyFee = buyMode === "mine" ? makerFee : amount && buy ? takerFeeAt(s, amount, asset, buy) : s.p2p_fee ?? 0;
   const got = amount && buy ? (amount / buy) * (1 - buyFee) : null;
 
   // venta: tu anuncio compite con los que venden (m.BUY); si tomas uno, le vendes a los que compran (m.SELL)
   const sellStr = sellTyped ?? String(m.BUY[0]?.price ?? "");
   const sellTaken = got ? m.SELL.find((a) => fitsAd(a, got * a.price, got)) : undefined;
   const sell = sellMode === "mine" ? parse(sellStr) : sellTaken?.price ?? null;
-  const sellFee = sellMode === "mine" ? makerFee : takerFee;
+  const sellFee = sellMode === "mine" ? makerFee : got && sell ? takerFeeAt(s, got * sell, asset, sell) : s.p2p_fee ?? 0;
 
-  const sim = amount && buy && sell ? simulateAds(amount, buy, sell, buyFee, sellFee, gmf) : null;
+  const sim = amount && buy && sell ? simulateAds(amount, buy, sell, buyFee, sellFee, gmf, sellMode === "mine") : null;
   const day = sim ? sim.net * rounds : null;
   const seller = m.BUY[0];
   const buyer = m.SELL[0];
@@ -258,7 +258,8 @@ export function AdSim() {
             <small className="sim-hint">
               {state.maker_fee != null ? "La tuya, sacada de tus órdenes como anunciante"
                 : "Sin ser comerciante verificado: Binance cobra hasta 0,35 % según la moneda. Si sabes la tuya, cámbiala"}
-              {" · "}al tomar un anuncio: {pctPlain(state.p2p_fee ?? 0, 2)}
+              {" · "}al tomar un anuncio: {pctPlain(state.p2p_fee_rate ?? state.p2p_fee ?? 0, 2)}
+              {state.p2p_fee_min_usd ? ` (mínimo ${num(state.p2p_fee_min_usd, 2)} USDT por orden)` : ""}
             </small>
           </label>
         </div>

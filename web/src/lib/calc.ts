@@ -46,6 +46,15 @@ export function usdtPrices(s: State) {
   return { buy: effBuy(bestAd(s, "USDT", "BUY")?.price, s), sell: bestAd(s, "USDT", "SELL")?.price };
 }
 
+/** Comisión al TOMAR un anuncio por `fiat` pesos de `asset` a `price`: el porcentaje, pero nunca menos que el mínimo fijo por
+ *  orden (0,07 USDT en automático). Con tu capital es igual a s.p2p_fee; con otro monto el mínimo pesa distinto. */
+export function takerFeeAt(s: State, fiat: number, asset: string, price: number) {
+  const rate = s.p2p_fee_rate ?? s.p2p_fee ?? 0;
+  const minUsd = s.p2p_fee_min_usd ?? 0;
+  const pesosPerUsd = isDollar(asset) ? price : s.usd_ref ?? 0;
+  return fiat > 0 && minUsd && pesosPerUsd ? Math.min(Math.max(rate, (minUsd * pesosPerUsd) / fiat), 1) : rate;
+}
+
 /** Convierte una ganancia relativa en pesos por cada dólar (USDT). */
 export const perDollar = (ratio: number, s: State) => ratio * (s.usd_ref ?? 0);
 
@@ -110,6 +119,12 @@ export interface Deal {
   fitsCapital: boolean;
 }
 
+/** Pesos que recibes comprando por `amount` al anuncio `b` y vendiendo todo al anuncio `v`, con la comisión al tomar de cada orden. */
+export function dealReceived(s: State, asset: string, b: Ad, v: Ad, amount: number) {
+  const got = (amount / b.price) * (1 - takerFeeAt(s, amount, asset, b.price));
+  return got * v.price * (1 - takerFeeAt(s, got * v.price, asset, v.price));
+}
+
 /** El mejor par de anuncios recomendables que gana comprando y vendiendo `asset`, y entre qué montos se puede hacer. */
 export function bestDeal(s: State, asset: string): Deal | null {
   const m = s.p2p?.market[asset];
@@ -125,7 +140,7 @@ export function bestDeal(s: State, asset: string): Deal | null {
       const hi = Math.floor(Math.min(b.max, v.max / c, b.available ? b.available * b.price : Infinity, v.available ? (v.available * b.price) / k : Infinity));
       if (!(lo <= hi)) continue;
       const amount = Math.min(Math.max(cap, lo), hi);
-      const { ratio } = netOf(amount, (amount / b.price) * k * v.price * k, s);
+      const { ratio } = netOf(amount, dealReceived(s, asset, b, v, amount), s); // comisión con ESTE monto (pesa el mínimo fijo)
       if (ratio <= 0 || (best && ratio <= best.ratio)) continue;
       best = { asset, buy: b, sell: v, lo, hi, ratio, per_usd: perDollar(ratio, s), amount, fitsCapital: amount === cap };
     }
@@ -157,11 +172,7 @@ export interface AdSimResult {
   gmf: number;
   /** Comisiones de compra y venta, en pesos. */
   fees: number;
-  /** Ganancia antes del impuesto de renta. */
-  profit: number;
-  /** Impuesto de renta sobre la ganancia (0 si pierdes). */
-  tax: number;
-  /** Lo que te queda: ganancia menos el impuesto de renta. */
+  /** Lo que te queda: recibes − pagas − 4x1000. */
   net: number;
   /** net / amount */
   ratio: number;
@@ -172,16 +183,19 @@ export interface AdSimResult {
 }
 
 /** Comprar cripto por `amount` pesos a `buy` y venderla a `sell`. Cada lado con su comisión: la de anunciante si es tu anuncio,
- *  la P2P normal si tomas el de otro. El 4x1000 se paga sobre lo que le pagas al vendedor y la renta sobre la ganancia. */
-export function simulateAds(amount: number, buy: number, sell: number, buyFee: number, sellFee: number, gmf: number, incomeTax = 0): AdSimResult {
+ *  la P2P normal si tomas el de otro. Al comprar, Binance te entrega la cripto menos la comisión. Al vender tomando un anuncio,
+ *  la comisión sale de lo que vendes; con TU anuncio de venta se cobra aparte de tu saldo (vender Q congela Q + comisión), así
+ *  que con lo que tienes vendes qty / (1 + comisión). El 4x1000 se paga sobre lo que le pagas al vendedor. */
+export function simulateAds(amount: number, buy: number, sell: number, buyFee: number, sellFee: number, gmf: number,
+  sellIsMine = false): AdSimResult {
   const qty = (amount / buy) * (1 - buyFee);
-  const received = qty * sell * (1 - sellFee);
+  const sellKeep = sellIsMine ? 1 / (1 + sellFee) : 1 - sellFee; // parte de tu cripto que de verdad cobras
+  const received = qty * sell * sellKeep;
   const g = amount * gmf;
-  const profit = received - amount - g;
-  const tax = Math.max(profit, 0) * incomeTax;
+  const net = received - amount - g;
   return {
-    qty, received, gmf: g, fees: (amount / buy) * sell - received, profit, tax, net: profit - tax, ratio: (profit - tax) / amount,
-    breakevenSell: (amount + g) / (qty * (1 - sellFee)),
-    breakevenBuy: (sell * (1 - buyFee) * (1 - sellFee)) / (1 + gmf),
+    qty, received, gmf: g, fees: (amount / buy) * sell - received, net, ratio: net / amount,
+    breakevenSell: (amount + g) / (qty * sellKeep),
+    breakevenBuy: (sell * (1 - buyFee) * sellKeep) / (1 + gmf),
   };
 }
