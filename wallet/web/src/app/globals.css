@@ -754,7 +754,7 @@ table.ledger td:last-child, table.ledger th:last-child { padding-right: 18px; }
 .inst-picked small { color: var(--muted); font-size: 12.5px; }
 .inst-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .pm-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
-.pm-toggle { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 12px 0 8px; border-radius: 11px; border: 1px solid var(--border-2);
+.pm-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 5px 12px 5px 8px; text-align: left; border-radius: 11px; border: 1px solid var(--border-2);
   background: var(--surface); color: var(--text-2); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s; }
 .pm-toggle:hover { color: var(--text); }
 .pm-toggle.on { border-color: var(--brand); background: var(--brand-soft); color: var(--text); }
@@ -763,3 +763,5 @@ table.ledger td:last-child, table.ledger th:last-child { padding-right: 18px; }
   .filter-inline { width: calc(50% - 4px); }
   .inst-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+.pm-txt { display: grid; line-height: 1.2; }
+.pm-txt small { font-size: 11px; font-weight: 500; color: var(--muted); }

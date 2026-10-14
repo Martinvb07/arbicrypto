@@ -55,6 +55,8 @@ export interface Me {
   profile: Profile;
   movements: number;
   pay_methods?: { method: string; n: number; total: number }[];
+  /** medios de pago usados en P2P (compras y ventas), sacados del historial de órdenes de Binance */
+  p2p_methods?: { method: string; buys: number; sells: number; total: number }[];
   years: number[];
   uvt: Record<string, number>;
   /** dirección del panel (panel.arbicrypto.org): usuarios, contraseñas y equipo se manejan allá */

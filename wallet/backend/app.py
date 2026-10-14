@@ -322,7 +322,11 @@ def me():
     first = datetime.fromtimestamp(span["a"], tax.CO_TZ).year if span["a"] else now_y - 1
     methods = [] if not db.linked(uid) else db.q("SELECT pay_method AS method, COUNT(*) AS n, SUM(cop_value) AS total FROM movements "
                    "WHERE user_id=? AND kind='compra' AND pay_method<>'' GROUP BY pay_method ORDER BY total DESC", (uid,))
-    return jsonify(user=g.user, profile=db.profile(uid), movements=span["n"], pay_methods=methods,
+    # medios de pago de P2P en compras y ventas: para asociarlos a las cuentas de banco
+    p2p = [] if not db.linked(uid) else db.q(
+        "SELECT pay_method AS method, SUM(kind='compra') AS buys, SUM(kind='venta') AS sells, SUM(cop_value) AS total FROM movements "
+        "WHERE user_id=? AND kind IN ('compra','venta') AND pay_method<>'' GROUP BY pay_method ORDER BY total DESC", (uid,))
+    return jsonify(user=g.user, profile=db.profile(uid), movements=span["n"], pay_methods=methods, p2p_methods=p2p,
                    years=list(range(now_y, min(first, now_y - 1) - 1, -1)), uvt=tax.UVT, panel=panel_url())
 
 

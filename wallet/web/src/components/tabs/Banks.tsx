@@ -19,6 +19,9 @@ const instSuffix = (name: string) => {
   const i = institutionOf(name);
   return i && !name.toLowerCase().includes(i.name.toLowerCase().split(" ")[0]) ? ` · ${i.name}` : "";
 };
+/** "12 compras · 3 ventas" */
+const orders = (p: { buys: number; sells: number }) =>
+  [p.buys && `${p.buys} compra${p.buys > 1 ? "s" : ""}`, p.sells && `${p.sells} venta${p.sells > 1 ? "s" : ""}`].filter(Boolean).join(" · ");
 const fmtDay = (d: string | null) => (d ? date(Date.parse(d + "T12:00:00-05:00") / 1000) : "—");
 
 /** Cuentas y extractos: tu plata fuera de Binance, organizada para el año. */
@@ -305,7 +308,11 @@ function AccountModal({ account, onClose, onDone }: { account: BankAccount | nul
   const [pms, setPms] = useState<string[]>(account?.pay_methods ?? []);
   const [find, setFind] = useState("");
   const [error, setError] = useState("");
-  const known = Array.from(new Set([...(me.pay_methods ?? []).map((p) => p.method), ...pms]));
+  const used = me.p2p_methods ?? (me.pay_methods ?? []).map((p) => ({ method: p.method, buys: p.n, sells: 0, total: p.total }));
+  const stats = new Map(used.map((p) => [p.method, p]));
+  const known = Array.from(new Set([...used.map((p) => p.method), ...pms]));
+  /** Medios de pago de Binance que son de esa entidad: Nequi → "Nequi", Bancolombia → "BancolombiaSA"… */
+  const methodsOf = (i: Institution) => known.filter((m) => institutionOf(methodName(m))?.id === i.id);
   const picking = !account && inst === null;
 
   const needle = find.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -316,6 +323,7 @@ function AccountModal({ account, onClose, onDone }: { account: BankAccount | nul
     if (i !== "otra") {
       setName(i.name);
       setKind(i.kind);
+      setPms(methodsOf(i));
     }
   }
 
@@ -374,6 +382,7 @@ function AccountModal({ account, onClose, onDone }: { account: BankAccount | nul
   }
 
   const instName = inst && inst !== "otra" ? inst.name : "";
+  const autoPicked = !account && inst && inst !== "otra" && methodsOf(inst).length > 0;
   return (
     <Modal title={account ? "Editar cuenta" : "Nueva cuenta"} onClose={onClose}>
       <div className="inst-picked">
@@ -382,7 +391,7 @@ function AccountModal({ account, onClose, onDone }: { account: BankAccount | nul
           <b>{name.trim() || instName || "Cuenta nueva"}</b>
           <small>{instName || "Entidad sin logo"} · {KIND_LABEL[kind]}</small>
         </div>
-        {!account && <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setInst(null); setName(""); }}>Cambiar</button>}
+        {!account && <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setInst(null); setName(""); setPms([]); }}>Cambiar</button>}
       </div>
       <div className="form">
         <Field label="Nombre" wide hint={instName ? `Si tienes varias en ${instName}, diferéncialas: “${instName} ahorros”, “${instName} nómina”…` : "Como la reconozcas: Banco Popular, Cooperativa…"}>
@@ -393,13 +402,16 @@ function AccountModal({ account, onClose, onDone }: { account: BankAccount | nul
             options={(Object.keys(KIND_LABEL) as AccountKind[]).map((k) => ({ value: k, label: KIND_LABEL[k], icon: <Icon name={KIND_ICON[k]} size={16} />, hint: KIND_HINT[k] }))} />
         </Field>
         {known.length > 0 && (
-          <Field label="Medios de pago de Binance que salen de esta cuenta" wide hint="Sirve para cruzar tus órdenes P2P con el extracto correcto.">
+          <Field label="Medios de pago de Binance P2P de esta cuenta" wide
+            hint={autoPicked ? `Marcamos los que son de ${instName} según tus órdenes de Binance. Revisa: Bre-B márcalo en la cuenta de donde salen tus llaves.` : "Sacados de tus órdenes P2P de Binance. Sirven para cruzar cada orden con el extracto correcto."}>
             <div className="pm-toggles">
               {known.map((m) => {
                 const on = pms.includes(m);
                 return (
                   <button key={m} type="button" className={`pm-toggle ${on ? "on" : ""}`} aria-pressed={on} onClick={() => setPms(on ? pms.filter((x) => x !== m) : [...pms, m])}>
-                    <BankLogo name={methodName(m)} size={20} /> {methodName(m)} {on && <Icon name="check" size={14} />}
+                    <BankLogo name={methodName(m)} size={20} />
+                    <span className="pm-txt">{methodName(m)}{stats.has(m) && <small>{orders(stats.get(m)!)}</small>}</span>
+                    {on && <Icon name="check" size={14} />}
                   </button>
                 );
               })}
