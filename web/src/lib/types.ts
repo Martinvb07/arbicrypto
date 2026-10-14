@@ -365,8 +365,20 @@ export interface ChatUser {
 }
 
 /** channels[""] es el canal general; las demás llaves son el otro usuario del privado. */
+/** Subgrupo del chat: su llave en channels es "#<id>". */
+export interface ChatGroup {
+  id: number;
+  key: string;
+  name: string;
+  members: string[];
+  created_by: string;
+  created: number;
+  can_edit: boolean;
+}
+
 export interface ChatSummary {
   me: string;
   users: ChatUser[];
   channels: Record<string, { last: ChatMessage; unread: number }>;
+  groups: ChatGroup[];
 }

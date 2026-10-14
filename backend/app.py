@@ -1666,10 +1666,44 @@ CHAT_BURST = (12, 20)     # maximo 12 mensajes cada 20 s por usuario
 
 
 def chat_peer(raw, must_exist=True):
+    """"" = general, "#<id>" = un subgrupo en el que está quien pregunta, o el nombre del otro en un privado."""
     peer = str(raw or "")
+    if peer.startswith("#"):
+        grp = db.chat_group(int(peer[1:])) if re.fullmatch(r"#\d{1,9}", peer) else None
+        if not grp or g.user["name"] not in grp["members"]:
+            abort(404 if must_exist else 403)
+        return peer
     if peer and (peer == g.user["name"] or (must_exist and peer not in auth.users)):
         abort(400)
     return peer
+
+
+GROUP_NAME_MAX = 40
+
+
+def group_input(b):
+    """(nombre, miembros) de un subgrupo, validados: los miembros tienen que existir y quien lo arma queda dentro."""
+    name = re.sub(r"\s+", " ", str(b.get("name") or "")).strip()
+    if not name or len(name) > GROUP_NAME_MAX:
+        raise ValueError(f"Ponle un nombre al grupo (máximo {GROUP_NAME_MAX} letras).")
+    raw = b.get("members") if isinstance(b.get("members"), list) else []
+    members = {str(m) for m in raw if str(m) in auth.users}
+    if not members - {g.user["name"]}:
+        raise ValueError("Elige al menos una persona más para el grupo.")
+    return name, members
+
+
+def group_for_edit(b):
+    """El subgrupo que quien pregunta puede cambiar: lo creó él, o es administrador."""
+    try:
+        grp = db.chat_group(int(b.get("id") or 0))
+    except (TypeError, ValueError):
+        abort(400)
+    if not grp:
+        abort(404)
+    if grp["created_by"] != g.user["name"] and g.user["role"] != "admin":
+        abort(403)
+    return grp
 
 
 @app.get("/api/chat")
@@ -1679,7 +1713,63 @@ def api_chat():
         now_online = set(online)
     users = [{"name": u["username"], "role": u["role"], "online": u["username"] in now_online}
              for u in auth.list_users() if u["username"] != me]
-    return jsonify(me=me, users=users, channels=db.chat_summary(me))
+    groups = [{**x, "can_edit": x["created_by"] == me or g.user["role"] == "admin"} for x in db.chat_groups(me)]
+    return jsonify(me=me, users=users, channels=db.chat_summary(me), groups=groups)
+
+
+@app.post("/api/chat/groups")
+def api_chat_group_create():
+    """Cualquiera del equipo puede armar un subgrupo; queda dentro y lo puede editar."""
+    try:
+        name, members = group_input(body())
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    gid = db.add_group(name, members | {g.user["name"]}, g.user["name"])
+    publish("chat")
+    return jsonify(ok=True, key=f"#{gid}")
+
+
+@app.post("/api/chat/groups/update")
+def api_chat_group_update():
+    b = body()
+    grp = group_for_edit(b)
+    try:
+        name, members = group_input(b)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    if grp["created_by"] in auth.users:
+        members.add(grp["created_by"])  # quien lo creó sigue dentro
+    db.update_group(grp["id"], name, members)
+    publish("chat")
+    return jsonify(ok=True)
+
+
+@app.post("/api/chat/groups/leave")
+def api_chat_group_leave():
+    try:
+        grp = db.chat_group(int(body().get("id") or 0))
+    except (TypeError, ValueError):
+        abort(400)
+    me = g.user["name"]
+    if not grp or me not in grp["members"]:
+        abort(404)
+    if grp["created_by"] == me:
+        return jsonify(error="Creaste este grupo: bórralo o pídele a un administrador que lo maneje."), 400
+    db.update_group(grp["id"], grp["name"], [m for m in grp["members"] if m != me])
+    publish("chat")
+    return jsonify(ok=True)
+
+
+@app.post("/api/chat/groups/delete")
+def api_chat_group_delete():
+    grp = group_for_edit(body())
+    for name in db.delete_group(grp["id"]):
+        try:
+            os.remove(os.path.join(CHAT_IMG_DIR, name))
+        except OSError:
+            pass
+    publish("chat")
+    return jsonify(ok=True)
 
 
 @app.get("/api/chat/messages")
@@ -1690,8 +1780,14 @@ def api_chat_messages():
 
 
 def can_see(msg, user):
-    """El canal general lo ven todos; un privado, solo sus dos personas."""
-    return bool(msg) and (msg["to"] is None or user in (msg["from"], msg["to"]))
+    """El canal general lo ven todos; un subgrupo, sus miembros; un privado, solo sus dos personas."""
+    if not msg:
+        return False
+    to = msg["to"]
+    if to and to.startswith("#"):
+        grp = db.chat_group(int(to[1:])) if to[1:].isdigit() else None
+        return bool(grp) and user in grp["members"]
+    return to is None or user in (msg["from"], to)
 
 
 def save_chat_image(data_url):
@@ -1758,7 +1854,8 @@ def api_chat_send():
         except (TypeError, ValueError):
             abort(400)
         # solo se responde a un mensaje de la misma conversacion
-        same = quoted and (quoted["to"] is None if not peer else {quoted["from"], quoted["to"]} == {me, peer})
+        same = quoted and (quoted["to"] is None if not peer else quoted["to"] == peer if peer.startswith("#")
+                           else {quoted["from"], quoted["to"]} == {me, peer})
         if not same:
             return jsonify(error="Ese mensaje ya no existe."), 400
         reply_to = quoted["id"]
@@ -1804,8 +1901,9 @@ def api_chat_delete():
     except (TypeError, ValueError):
         abort(400)
     me = g.user
-    # cada quien borra lo suyo; el administrador tambien puede borrar del canal general
-    if not msg or not (msg["from"] == me["name"] or (msg["to"] is None and me["role"] == "admin")):
+    # cada quien borra lo suyo; el administrador tambien puede borrar del canal general y de los subgrupos donde esta
+    shared = msg and (msg["to"] is None or (msg["to"].startswith("#") and can_see(msg, me["name"])))
+    if not msg or not (msg["from"] == me["name"] or (shared and me["role"] == "admin")):
         return jsonify(error="Solo puedes borrar tus propios mensajes."), 403
     db.delete_message(msg["id"])
     if msg.get("image"):

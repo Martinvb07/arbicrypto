@@ -68,4 +68,8 @@ export const api = {
   deletePriceAlert: (id: string) => post("/api/price-alerts/delete", { id }),
   chatRead: (peer: string, id: number) => post("/api/chat/read", { peer, id }),
   chatDelete: (id: number) => post("/api/chat/delete", { id }),
+  chatGroupCreate: (name: string, members: string[]) => post<{ ok: boolean; key: string }>("/api/chat/groups", { name, members }),
+  chatGroupUpdate: (id: number, name: string, members: string[]) => post("/api/chat/groups/update", { id, name, members }),
+  chatGroupLeave: (id: number) => post("/api/chat/groups/leave", { id }),
+  chatGroupDelete: (id: number) => post("/api/chat/groups/delete", { id }),
 };

@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
-import { chatUnread, imageUrl, msgText, REACTIONS, refreshChat, shrinkImage, useChat } from "@/lib/chat";
+import { chatUnread, groupOf, imageUrl, msgText, REACTIONS, refreshChat, shrinkImage, useChat } from "@/lib/chat";
 import { hhmm } from "@/lib/format";
 import { useLive } from "@/lib/live";
-import type { ChatMessage, ChatSummary } from "@/lib/types";
-import { ask } from "../overlay";
+import type { ChatGroup, ChatMessage, ChatSummary } from "@/lib/types";
+import { ask, Modal } from "../overlay";
 import { EmptyBox, Icon, Skeleton, UserAvatar } from "../ui";
 
 const PAGE = 60; // el servidor entrega de a 60 mensajes
@@ -25,11 +25,17 @@ function dayLabel(t: number) {
 const preview = (m: ChatMessage, me: string, general: boolean) =>
   `${m.from === me ? "Tú: " : general ? `${m.from}: ` : ""}${msgText(m).replace(/\s+/g, " ")}`;
 
-function Avatar({ name, online, general }: { name: string; online?: boolean; general?: boolean }) {
+/** Color fijo por grupo (sale del nombre), para reconocerlos de un vistazo. */
+const groupHue = (name: string) => [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "#";
+
+function Avatar({ name, online, general, group }: { name: string; online?: boolean; general?: boolean; group?: boolean }) {
   const { state } = useLive();
   return (
     <span className="chat-av">
-      {general ? <span className="avatar general"><Icon name="users" size={15} /></span> : <UserAvatar name={name} src={state?.avatars?.[name]} />}
+      {general ? <span className="avatar general"><Icon name="users" size={15} /></span>
+        : group ? <span className="avatar group" style={{ ["--h" as string]: groupHue(name) } as React.CSSProperties}>{initials(name)}</span>
+        : <UserAvatar name={name} src={state?.avatars?.[name]} />}
       {online !== undefined && <span className={`chat-dot ${online ? "on" : ""}`} aria-label={online ? "conectado" : "desconectado"} />}
     </span>
   );
@@ -37,13 +43,17 @@ function Avatar({ name, online, general }: { name: string; online?: boolean; gen
 
 // ---------------------------------------------------------------- lista de conversaciones
 
-function Channels({ s, peer, onPick }: { s: ChatSummary; peer: string; onPick: (p: string) => void }) {
+function Channels({ s, peer, onPick, onNewGroup }: { s: ChatSummary; peer: string; onPick: (p: string) => void; onNewGroup?: () => void }) {
   const general = s.channels[""];
   const online = s.users.filter((u) => u.online).length;
   // primero lo que tiene mensajes sin leer, luego lo más reciente, luego quien está conectado
   const users = [...s.users].sort((a, b) => {
     const ca = s.channels[a.name], cb = s.channels[b.name];
     return (cb?.unread ?? 0) - (ca?.unread ?? 0) || (cb?.last.id ?? 0) - (ca?.last.id ?? 0) || Number(b.online) - Number(a.online) || a.name.localeCompare(b.name);
+  });
+  const groups = [...(s.groups ?? [])].sort((a, b) => {
+    const ca = s.channels[a.key], cb = s.channels[b.key];
+    return (cb?.unread ?? 0) - (ca?.unread ?? 0) || (cb?.last.id ?? b.created) - (ca?.last.id ?? a.created) || a.name.localeCompare(b.name);
   });
   const row = (key: string, name: string, sub: string, unread: number, av: React.ReactNode) => (
     <button key={key} className={`chat-ch ${peer === key ? "on" : ""}`} onClick={() => onPick(key)} aria-current={peer === key ? "true" : undefined}>
@@ -59,6 +69,14 @@ function Channels({ s, peer, onPick }: { s: ChatSummary; peer: string; onPick: (
     <aside className="chat-list" aria-label="Conversaciones">
       <div className="chat-list-head"><h2>Chat del equipo</h2><span className="sub">{online} {online === 1 ? "conectado" : "conectados"}</span></div>
       {row("", "General", general ? preview(general.last, s.me, true) : "Todo el equipo", general?.unread ?? 0, <Avatar name="General" general />)}
+      <div className="chat-sep chat-sep-row">
+        <span>Grupos</span>
+        {onNewGroup && s.users.length > 0 && <button type="button" className="chat-new" onClick={onNewGroup}><Icon name="plus" size={13} /> Nuevo</button>}
+      </div>
+      {groups.length ? groups.map((g) => {
+        const c = s.channels[g.key];
+        return row(g.key, g.name, c ? preview(c.last, s.me, true) : `${g.members.length} miembros`, c?.unread ?? 0, <Avatar name={g.name} group />);
+      }) : <p className="sub chat-none">{s.users.length ? "Arma grupos de trabajo: solo sus miembros ven lo que se escribe." : "Cuando haya más personas, podrás armar grupos."}</p>}
       <div className="chat-sep">Mensajes privados</div>
       {users.length ? users.map((u) => {
         const c = s.channels[u.name];
@@ -119,7 +137,7 @@ function Reactions({ m, me, onReact }: { m: ChatMessage; me: string; onReact: (e
 
 // ---------------------------------------------------------------- conversación abierta
 
-function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; rev: number; onBack: () => void }) {
+function Conversation({ s, peer, rev, onBack, onEditGroup }: { s: ChatSummary; peer: string; rev: number; onBack: () => void; onEditGroup?: (g: ChatGroup) => void }) {
   const { state, toast } = useLive();
   const [msgs, setMsgs] = useState<ChatMessage[] | null>(null);
   const [more, setMore] = useState(false);
@@ -140,6 +158,8 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
   const firstLoad = useRef(true);
   const me = s.me;
   const user = s.users.find((u) => u.name === peer);
+  const grp = groupOf(s, peer);
+  const shared = !peer || !!grp; // general o subgrupo: se ve quién escribe cada mensaje
   const admin = state?.user.role === "admin";
   const lastId = s.channels[peer]?.last.id ?? 0;
   const unread = s.channels[peer]?.unread ?? 0;
@@ -281,17 +301,23 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
     }
   };
 
-  const title = peer ? peer : "General";
+  const title = grp ? grp.name : peer ? peer : "General";
   const online = s.users.filter((u) => u.online).length;
-  const status = peer ? (user ? (user.online ? "Conectado" : "Desconectado") + " · privado, solo lo ven ustedes dos" : "Ya no está en el equipo")
+  const status = grp ? `${grp.members.length} miembros · ${grp.members.filter((n) => n !== me).slice(0, 4).join(", ")}${grp.members.length > 5 ? "…" : ""}`
+    : peer ? (user ? (user.online ? "Conectado" : "Desconectado") + " · privado, solo lo ven ustedes dos" : "Ya no está en el equipo")
     : `Todo el equipo · ${online + 1} ${online ? "conectados" : "conectado"}`;
 
   return (
     <section className="chat-conv" aria-label={`Conversación: ${title}`}>
       <header className="chat-conv-head">
         <button className="icon-btn chat-back" onClick={onBack} aria-label="Volver a las conversaciones"><Icon name="back" size={18} /></button>
-        <Avatar name={title} general={!peer} online={user?.online} />
+        <Avatar name={title} general={!peer} group={!!grp} online={grp ? undefined : user?.online} />
         <div className="chat-ch-txt"><b>{title}</b><span className="sub">{status}</span></div>
+        {grp && onEditGroup && (
+          <button className="btn btn-sm btn-ghost chat-group-btn" onClick={() => onEditGroup(grp)} title={grp.can_edit ? "Editar el grupo" : "Ver miembros o salir"}>
+            <Icon name={grp.can_edit ? "pencil" : "users"} size={15} /> {grp.can_edit ? "Editar" : "Miembros"}
+          </button>
+        )}
       </header>
 
       <div className={`chat-msgs ${drag ? "drag" : ""}`} ref={box} onScroll={(e) => {
@@ -303,7 +329,7 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
         onDragLeave={() => setDrag(false)}
         onDrop={(e) => { e.preventDefault(); setDrag(false); void attach(e.dataTransfer.files[0]); }}>
         {!msgs ? <Skeleton rows={5} /> : !msgs.length ? (
-          <div className="empty">{peer ? `Escríbele a ${peer}. Solo ustedes dos verán esta conversación.` : "Aún no hay mensajes. Escribe el primero para todo el equipo."}</div>
+          <div className="empty">{grp ? `Aún no hay mensajes en ${grp.name}. Solo lo ven sus ${grp.members.length} miembros.` : peer ? `Escríbele a ${peer}. Solo ustedes dos verán esta conversación.` : "Aún no hay mensajes. Escribe el primero para todo el equipo."}</div>
         ) : (
           <>
             {more && <button className="btn btn-sm chat-older" onClick={() => void older()}>Ver mensajes anteriores</button>}
@@ -320,7 +346,7 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
                       if ((e.target as HTMLElement).closest("button, a, img, .chat-quote")) return;
                       setActive(active === m.id ? null : m.id);
                     }} onDoubleClick={() => void react(m, "❤️")}>
-                      {!mine && !peer && !grouped && <b className="chat-from">{m.from}</b>}
+                      {!mine && shared && !grouped && <b className="chat-from">{m.from}</b>}
                       {m.reply && <Quote q={m.reply} me={me} onClick={() => jump(m.reply!.id)} />}
                       {m.image && (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -334,7 +360,7 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
                     <div className="chat-tools">
                       <button className="icon-btn" onClick={() => { setPicker(picker === m.id ? null : m.id); }} title="Reaccionar" aria-label="Reaccionar"><Icon name="smile" size={15} /></button>
                       <button className="icon-btn" onClick={() => { setReplyTo(m); setActive(null); input.current?.focus(); }} title="Responder" aria-label="Responder"><Icon name="reply" size={15} /></button>
-                      {(mine || (!peer && admin)) && (
+                      {(mine || (shared && admin)) && (
                         <button className="icon-btn danger" onClick={() => void remove(m)} title="Borrar mensaje" aria-label="Borrar mensaje"><Icon name="trash" size={14} /></button>
                       )}
                       {picker === m.id && (
@@ -354,7 +380,7 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
         )}
       </div>
 
-      {peer && !user ? (
+      {peer && !grp && !user ? (
         <p className="sub chat-closed">{peer} ya no está en el equipo: no puedes responderle.</p>
       ) : (
         <form className="chat-compose" onSubmit={(e) => { e.preventDefault(); void send(); }}>
@@ -375,7 +401,7 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
           <button type="button" className="icon-btn chat-clip" onClick={() => file.current?.click()} title="Enviar imagen (también puedes pegarla con Ctrl+V)" aria-label="Enviar imagen">
             <Icon name="image" size={19} />
           </button>
-          <textarea ref={input} rows={1} value={text} maxLength={MAX} placeholder={image ? "Agrega un texto (opcional)" : peer ? `Mensaje privado para ${peer}` : "Mensaje para todo el equipo"}
+          <textarea ref={input} rows={1} value={text} maxLength={MAX} placeholder={image ? "Agrega un texto (opcional)" : grp ? `Mensaje para ${grp.name}` : peer ? `Mensaje privado para ${peer}` : "Mensaje para todo el equipo"}
             aria-label="Escribe un mensaje" onChange={(e) => setText(e.target.value)}
             onPaste={(e) => {
               const item = [...e.clipboardData.items].find((i) => i.type.startsWith("image/"));
@@ -399,12 +425,92 @@ function Conversation({ s, peer, rev, onBack }: { s: ChatSummary; peer: string; 
   );
 }
 
+// ---------------------------------------------------------------- subgrupos
+
+/** Crear o editar un subgrupo: nombre y quiénes están. Quien no lo puede editar solo ve los miembros y puede salirse. */
+function GroupModal({ s, group, onClose, onDone }: { s: ChatSummary; group: ChatGroup | null; onClose: () => void; onDone: (key: string) => void }) {
+  const { toast } = useLive();
+  const [name, setName] = useState(group?.name ?? "");
+  const [members, setMembers] = useState<Set<string>>(new Set((group?.members ?? []).filter((m) => m !== s.me)));
+  const [busy, setBusy] = useState(false);
+  const editable = !group || group.can_edit;
+  const people = [...s.users].sort((a, b) => a.name.localeCompare(b.name));
+  const toggle = (n: string) => setMembers((x) => { const y = new Set(x); if (y.has(n)) y.delete(n); else y.add(n); return y; });
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      if (group) {
+        await api.chatGroupUpdate(group.id, name.trim(), [...members]);
+        toast("Grupo actualizado", name.trim(), "good");
+        onDone(group.key);
+      } else {
+        const r = await api.chatGroupCreate(name.trim(), [...members]);
+        toast("Grupo creado", `${name.trim()} · ${members.size + 1} miembros`, "good");
+        onDone(r.key);
+      }
+      refreshChat(true);
+    } catch (err) {
+      toast("No se pudo guardar el grupo", (err as Error).message, "bad");
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!group || !(await ask({ title: `¿Borrar el grupo ${group.name}?`, body: "Se borran también todos sus mensajes, para todos. No se puede deshacer.",
+      confirm: "Borrar grupo", tone: "danger", icon: "trash" }))) return;
+    await api.chatGroupDelete(group.id).then(() => { toast("Grupo borrado", group.name, "info"); refreshChat(true); onDone(""); })
+      .catch((err: Error) => toast("No se pudo borrar", err.message, "bad"));
+  };
+  const leave = async () => {
+    if (!group || !(await ask({ title: `¿Salir de ${group.name}?`, body: "Dejarás de ver sus mensajes. Alguien que lo maneje te puede volver a agregar.",
+      confirm: "Salir del grupo", tone: "danger", icon: "logout" }))) return;
+    await api.chatGroupLeave(group.id).then(() => { toast("Saliste del grupo", group.name, "info"); refreshChat(true); onDone(""); })
+      .catch((err: Error) => toast("No se pudo salir", err.message, "bad"));
+  };
+
+  return (
+    <Modal title={group ? (editable ? "Editar grupo" : group.name) : "Nuevo grupo"} onClose={onClose}>
+      <form className="form group-form" onSubmit={(e) => void save(e)} style={{ background: "none", padding: 0 }}>
+        {editable && (
+          <label>Nombre del grupo
+            <input type="text" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder="Ej.: Turno noche, Socios, P2P Nequi" autoFocus required />
+          </label>
+        )}
+        <div className="group-people">
+          <span className="group-people-head">{editable ? `Quiénes están (${members.size + 1} con${group && group.created_by !== s.me ? "" : "tigo"})` : `${group!.members.length} miembros`}</span>
+          <div className="group-person me"><Avatar name={s.me} /><b>{s.me}</b><span className="sub">{group && group.created_by !== s.me ? "tú" : "tú · lo creas"}</span></div>
+          {people.map((u) => {
+            const on = members.has(u.name);
+            const owner = group?.created_by === u.name;
+            if (!editable && !group!.members.includes(u.name)) return null;
+            return (
+              <label key={u.name} className={`group-person ${on ? "on" : ""} ${editable ? "" : "ro"}`}>
+                {editable && <input type="checkbox" checked={on || owner} disabled={owner} onChange={() => toggle(u.name)} />}
+                <Avatar name={u.name} online={u.online} />
+                <b>{u.name}</b>
+                {owner && <span className="sub">creó el grupo</span>}
+              </label>
+            );
+          })}
+        </div>
+        <div className="group-actions">
+          {group && editable && <button type="button" className="btn btn-ghost btn-danger" onClick={() => void remove()}><Icon name="trash" size={15} /> Borrar grupo</button>}
+          {group && group.created_by !== s.me && <button type="button" className="btn btn-ghost btn-danger" onClick={() => void leave()}><Icon name="logout" size={15} /> Salir</button>}
+          {editable && <button className="btn btn-brand" type="submit" disabled={busy || !name.trim() || members.size === 0}>{busy ? "Guardando…" : group ? "Guardar" : "Crear grupo"}</button>}
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // ---------------------------------------------------------------- pestaña
 
 export function Chat() {
   const { summary, rev } = useChat();
   const [peer, setPeer] = useState("");
   const [open, setOpen] = useState(false); // celular: lista o conversación
+  const [groupEdit, setGroupEdit] = useState<ChatGroup | "new" | null>(null);
 
   useEffect(() => {
     try {
@@ -425,8 +531,8 @@ export function Chat() {
   }, []);
 
   if (!summary) return <div className="card"><Skeleton rows={6} /></div>;
-  // si borraron a la persona y no hay nada que leer, vuelve al general
-  const valid = peer === "" || summary.users.some((u) => u.name === peer) || summary.channels[peer];
+  // si borraron a la persona (o el grupo) y no hay nada que leer, vuelve al general
+  const valid = peer === "" || summary.users.some((u) => u.name === peer) || !!groupOf(summary, peer) || (!peer.startsWith("#") && summary.channels[peer]);
   const cur = valid ? peer : "";
 
   return (
@@ -435,9 +541,11 @@ export function Chat() {
         <EmptyBox icon="chat" title="El chat está listo">Cuando invites a alguien al equipo, podrán escribirse aquí: en el canal General lo ve todo el equipo y los privados solo las dos personas.</EmptyBox>
       )}
       <div className={`card chat ${open ? "open" : ""}`}>
-        <Channels s={summary} peer={cur} onPick={pick} />
-        <Conversation s={summary} peer={cur} rev={rev} onBack={() => setOpen(false)} />
+        <Channels s={summary} peer={cur} onPick={pick} onNewGroup={() => setGroupEdit("new")} />
+        <Conversation s={summary} peer={cur} rev={rev} onBack={() => setOpen(false)} onEditGroup={setGroupEdit} />
       </div>
+      {groupEdit && <GroupModal s={summary} group={groupEdit === "new" ? null : groupEdit} onClose={() => setGroupEdit(null)}
+        onDone={(k) => { setGroupEdit(null); pick(k); }} />}
     </div>
   );
 }
@@ -446,6 +554,8 @@ export function Chat() {
 
 interface Incoming {
   peer: string;
+  /** nombre del subgrupo, si llegó a uno */
+  group?: string;
   from: string;
   body: string;
   id: number;
@@ -478,7 +588,7 @@ function ChatPop({ m, onOpen, onClose }: { m: Incoming; onOpen: () => void; onCl
       await api.chatSend(m.peer, body);
       void api.chatRead(m.peer, m.id).catch(() => undefined);
       refreshChat(true);
-      toast("Respuesta enviada", m.peer ? `A ${m.peer}` : "En General", "good", 2500);
+      toast("Respuesta enviada", m.group ? `En ${m.group}` : m.peer ? `A ${m.peer}` : "En General", "good", 2500);
       close();
     } catch (e) {
       toast("No se envió", (e as Error).message, "bad");
@@ -487,11 +597,11 @@ function ChatPop({ m, onOpen, onClose }: { m: Incoming; onOpen: () => void; onCl
     }
   };
 
-  const title = m.peer ? `${m.from} · privado` : `${m.from} en General`;
+  const title = m.group ? `${m.from} en ${m.group}` : m.peer ? `${m.from} · privado` : `${m.from} en General`;
   return (
     <div className={`chat-pop ${leaving ? "leaving" : ""}`} role="status" aria-live="polite">
       <button className="chat-pop-main" onClick={onOpen} title="Abrir la conversación">
-        <Avatar name={m.peer ? m.from : "General"} general={!m.peer} />
+        <Avatar name={m.group ?? (m.peer ? m.from : "General")} general={!m.peer} group={!!m.group} />
         <span className="chat-ch-txt">
           <b>{title}</b>
           <span className="chat-pop-body">{m.body.length > 160 ? `${m.body.slice(0, 160)}…` : m.body}</span>
@@ -499,7 +609,7 @@ function ChatPop({ m, onOpen, onClose }: { m: Incoming; onOpen: () => void; onCl
       </button>
       <button className="icon-btn chat-pop-x" onClick={close} aria-label="Cerrar"><Icon name="x" size={15} /></button>
       <form className="chat-pop-reply" onSubmit={(e) => { e.preventDefault(); void reply(); }}>
-        <input value={text} maxLength={MAX} onChange={(e) => setText(e.target.value)} placeholder={m.peer ? `Responder a ${m.from}…` : "Responder en General…"}
+        <input value={text} maxLength={MAX} onChange={(e) => setText(e.target.value)} placeholder={m.group ? `Responder en ${m.group}…` : m.peer ? `Responder a ${m.from}…` : "Responder en General…"}
           aria-label="Respuesta rápida" />
         <button className="btn btn-brand" type="submit" disabled={busy || !typing} aria-label="Enviar"><Icon name="send" size={16} /></button>
       </form>
@@ -516,6 +626,7 @@ export function ChatDock({ hidden, onFull }: { hidden: boolean; onFull: (peer: s
   const [peer, setPeer] = useState("");
   const [conv, setConv] = useState(false); // dentro del flotante: lista o conversación
   const [pop, setPop] = useState<Incoming | null>(null);
+  const [groupEdit, setGroupEdit] = useState<ChatGroup | "new" | null>(null);
   const [shown, setShown] = useState(false); // sigue montado mientras corre la animación de cierre
   const seen = useRef<number | null>(null);
 
@@ -546,10 +657,11 @@ export function ChatDock({ hidden, onFull }: { hidden: boolean; onFull: (peer: s
     const looking = !document.hidden && (hidden || (open && conv && peer === p));
     if (looking) return;
     beep("chat");
-    if (!hidden && !(open && conv && peer === p)) setPop({ peer: p, from: c.last.from, body: msgText(c.last), id: c.last.id });
+    if (!hidden && !(open && conv && peer === p)) setPop({ peer: p, from: c.last.from, body: msgText(c.last), id: c.last.id, group: groupOf(summary, p)?.name });
     if (document.hidden && prefs.desktop && "Notification" in window && Notification.permission === "granted") {
       try {
-        const title = p ? `Mensaje privado de ${c.last.from}` : `${c.last.from} en General`;
+        const g = groupOf(summary, p);
+        const title = g ? `${c.last.from} en ${g.name}` : p ? `Mensaje privado de ${c.last.from}` : `${c.last.from} en General`;
         const n = new Notification(title, { body: msgText(c.last).slice(0, 140), tag: `cj-chat-${p}`, icon: "/icons/web-app-manifest-192x192.png" });
         n.onclick = () => {
           window.focus();
@@ -573,7 +685,7 @@ export function ChatDock({ hidden, onFull }: { hidden: boolean; onFull: (peer: s
   if (hidden || !summary) return null;
   const unread = chatUnread(summary);
   const online = summary.users.filter((u) => u.online).length;
-  const valid = peer === "" || summary.users.some((u) => u.name === peer) || summary.channels[peer];
+  const valid = peer === "" || summary.users.some((u) => u.name === peer) || !!groupOf(summary, peer) || (!peer.startsWith("#") && summary.channels[peer]);
   const cur = valid ? peer : "";
 
   return (
@@ -591,12 +703,14 @@ export function ChatDock({ hidden, onFull }: { hidden: boolean; onFull: (peer: s
             <button className="icon-btn" onClick={() => setOpen(false)} title="Cerrar (Esc)" aria-label="Cerrar chat"><Icon name="x" size={17} /></button>
           </header>
           <div className={`chat-dock-body ${conv ? "open" : ""}`}>
-            <Channels s={summary} peer={cur} onPick={openConv} />
-            <Conversation s={summary} peer={cur} rev={rev} onBack={() => setConv(false)} />
+            <Channels s={summary} peer={cur} onPick={openConv} onNewGroup={() => setGroupEdit("new")} />
+            <Conversation s={summary} peer={cur} rev={rev} onBack={() => setConv(false)} onEditGroup={setGroupEdit} />
           </div>
         </div>
       )}
       {pop && !open && <ChatPop key={pop.id} m={pop} onOpen={() => openConv(pop.peer)} onClose={closePop} />}
+      {groupEdit && <GroupModal s={summary} group={groupEdit === "new" ? null : groupEdit} onClose={() => setGroupEdit(null)}
+        onDone={(k) => { setGroupEdit(null); openConv(k); }} />}
       <button className={`chat-fab ${open ? "on" : ""} ${!open && unread > 0 ? "has-unread" : ""}`} onClick={() => { setOpen((o) => !o); setPop(null); }}
         aria-label={open ? "Cerrar chat" : unread ? `Abrir chat, ${unread} sin leer` : "Abrir chat"} aria-expanded={open}>
         <span className="fab-ico fab-chat"><Icon name="chat" size={25} /></span>

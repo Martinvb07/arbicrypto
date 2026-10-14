@@ -52,10 +52,11 @@ function subscribe(cb: () => void) {
 const EMPTY: ChatSnap = { summary: null, rev: 0 };
 export const useChat = () => useSyncExternalStore(subscribe, () => snap, () => EMPTY);
 
-/** Mensajes sin leer del canal general y de los privados con usuarios que siguen en el equipo. */
+/** Mensajes sin leer del canal general, de tus subgrupos y de los privados con usuarios que siguen en el equipo. */
 export function chatUnread(s: ChatSummary | null): number {
   if (!s) return 0;
-  return Object.entries(s.channels).reduce((n, [peer, c]) => n + (peer === "" || s.users.some((u) => u.name === peer) ? c.unread : 0), 0);
+  return Object.entries(s.channels).reduce((n, [peer, c]) =>
+    n + (peer === "" || s.users.some((u) => u.name === peer) || (s.groups ?? []).some((g) => g.key === peer) ? c.unread : 0), 0);
 }
 
 /** Reacciones disponibles (las mismas que acepta el servidor). */
@@ -131,3 +132,6 @@ export async function avatarImage(file: Blob): Promise<string> {
 }
 
 export const imageUrl = (name: string) => `/api/chat/image?name=${encodeURIComponent(name)}`;
+
+/** El subgrupo de una llave "#<id>", si es de un grupo en el que estás. */
+export const groupOf = (s: ChatSummary | null, peer: string) => (peer.startsWith("#") ? (s?.groups ?? []).find((g) => g.key === peer) : undefined);

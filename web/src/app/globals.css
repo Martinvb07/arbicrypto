@@ -1327,3 +1327,28 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
 @keyframes splash-breathe { 50% { transform: scale(.92); } }
 @keyframes splash-slide { from { transform: translateX(-110%); } to { transform: translateX(260%); } }
 @media (prefers-reduced-motion: reduce) { .splash-ring, .splash-mark img, .splash-bar i { animation: none; } }
+
+/* ---------- chat: subgrupos ---------- */
+.chat-sep-row { display: flex; align-items: center; justify-content: space-between; }
+.chat-new { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--surface);
+  color: var(--text-2); font: inherit; font-size: 11.5px; font-weight: 650; text-transform: none; letter-spacing: 0; cursor: pointer; transition: all .15s; }
+.chat-new:hover { color: var(--text); border-color: var(--brand); }
+.chat-av .avatar.group { background: hsl(var(--h) 55% 45% / .22); color: hsl(var(--h) 70% 68%); font-size: 12px; font-weight: 800; letter-spacing: -.02em; }
+:root[data-theme="light"] .chat-av .avatar.group { color: hsl(var(--h) 60% 32%); }
+.chat-group-btn { margin-left: auto; flex: none; }
+.group-form { gap: 14px; }
+.group-people { display: grid; gap: 4px; max-height: min(360px, 50vh); overflow-y: auto; padding: 2px; }
+.group-people-head { font-size: 12.5px; font-weight: 650; color: var(--text-2); margin-bottom: 4px; }
+.group-person { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 11px; border: 1px solid var(--border); background: var(--surface-2);
+  cursor: pointer; transition: border-color .15s, background-color .15s; font-weight: 400; }
+.group-person:hover { border-color: var(--border-2); }
+.group-person.on { border-color: var(--brand); background: var(--brand-soft); }
+.group-person.me, .group-person.ro { cursor: default; }
+.group-person.me { opacity: .85; }
+.group-person b { font-size: 14px; }
+.group-person .sub { margin-left: auto; font-size: 12px; }
+.group-person input { width: 16px; height: 16px; accent-color: var(--brand); margin: 0; flex: none; }
+.group-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.group-actions .btn-brand { min-width: 140px; }
+.form label.group-person { display: flex; flex-direction: row; align-items: center; gap: 10px; font-size: 14px; color: var(--text); }
+.group-person .chat-av { flex: none; }

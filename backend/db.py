@@ -70,6 +70,13 @@ CREATE TABLE IF NOT EXISTS chat_reactions (
   emoji {keytext} NOT NULL,
   PRIMARY KEY (msg_id, "user")
 );
+CREATE TABLE IF NOT EXISTS chat_groups (
+  id {serial},
+  name TEXT NOT NULL,
+  members TEXT NOT NULL,
+  created_by {keytext} NOT NULL,
+  created {real} NOT NULL
+);
 CREATE TABLE IF NOT EXISTS chat_reads (
   "user" {keytext} NOT NULL,
   peer {keytext} NOT NULL,
@@ -182,7 +189,11 @@ class DB:
             'UPDATE chat_reads SET "user" = ? WHERE "user" = ?',
             "UPDATE chat_reads SET peer = ? WHERE peer = ?",
             'UPDATE chat_reactions SET "user" = ? WHERE "user" = ?',
+            "UPDATE chat_groups SET created_by = ? WHERE created_by = ?",
         )])
+        for grp in self.chat_groups():  # los miembros de cada grupo van en una lista
+            if old in grp["members"]:
+                self.update_group(grp["id"], grp["name"], [new if m == old else m for m in grp["members"]])
 
     # ------------------------------------------------------------ ordenes P2P de Binance
 
@@ -196,7 +207,41 @@ class DB:
         return self._all('SELECT * FROM p2p_orders WHERE "user" = ? ORDER BY time DESC', (user,))
 
     # ------------------------------------------------------------ chat del equipo
-    # recipient NULL = canal general; si no, mensaje privado. En chat_reads, peer "" = canal general.
+    # recipient NULL = canal general; "#<id>" = un subgrupo; si no, mensaje privado.
+    # En chat_reads, peer "" = canal general y "#<id>" = ese subgrupo.
+
+    def chat_groups(self, user=None):
+        """Los subgrupos (solo en los que está `user`, si se da), del más nuevo al más viejo."""
+        out = []
+        for r in self._all("SELECT * FROM chat_groups ORDER BY id DESC"):
+            try:
+                members = json.loads(r["members"])
+            except ValueError:
+                members = []
+            if user is None or user in members:
+                out.append({"id": r["id"], "key": f"#{r['id']}", "name": r["name"], "members": members,
+                            "created_by": r["created_by"], "created": r["created"]})
+        return out
+
+    def chat_group(self, gid):
+        return next((x for x in self.chat_groups() if x["id"] == gid), None)
+
+    def add_group(self, name, members, by):
+        return self._run("INSERT INTO chat_groups (name, members, created_by, created) VALUES (?, ?, ?, ?)",
+                         (name, json.dumps(sorted(set(members))), by, time.time()), returning=True)
+
+    def update_group(self, gid, name, members):
+        self._run("UPDATE chat_groups SET name = ?, members = ? WHERE id = ?", (name, json.dumps(sorted(set(members))), gid))
+
+    def delete_group(self, gid):
+        """El grupo y todos sus mensajes. Devuelve las imágenes que quedaron sueltas (para borrarlas del disco)."""
+        key = f"#{gid}"
+        images = [r["image"] for r in self._all("SELECT image FROM messages WHERE recipient = ? AND image IS NOT NULL", (key,))]
+        self._run("DELETE FROM chat_reactions WHERE msg_id IN (SELECT id FROM messages WHERE recipient = ?)", (key,))
+        self._run("DELETE FROM messages WHERE recipient = ?", (key,))
+        self._run("DELETE FROM chat_reads WHERE peer = ?", (key,))
+        self._run("DELETE FROM chat_groups WHERE id = ?", (gid,))
+        return images
 
     @staticmethod
     def _msg(r):
@@ -239,7 +284,9 @@ class DB:
 
     def messages(self, user, peer, before=None, limit=60):
         """Los ultimos mensajes de una conversacion (antes de `before` para cargar los viejos), del mas viejo al mas nuevo."""
-        if peer:
+        if peer.startswith("#"):
+            where, args = "recipient = ?", [peer]
+        elif peer:
             where, args = "((sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?))", [user, peer, peer, user]
         else:
             where, args = "recipient IS NULL", []
@@ -276,7 +323,7 @@ class DB:
             out[""] = {"last": self._msg(rows[0]), "unread": n}
         last = self._all(
             "SELECT * FROM messages WHERE id IN (SELECT MAX(id) FROM messages WHERE recipient IS NOT NULL "
-            "AND (sender = ? OR recipient = ?) GROUP BY CASE WHEN sender = ? THEN recipient ELSE sender END)",
+            "AND recipient NOT LIKE '#%' AND (sender = ? OR recipient = ?) GROUP BY CASE WHEN sender = ? THEN recipient ELSE sender END)",
             (user, user, user))
         for r in last:
             peer = r["recipient"] if r["sender"] == user else r["sender"]
@@ -286,4 +333,11 @@ class DB:
                            "WHERE m.recipient = ? AND m.id > COALESCE(r.last_id, 0) GROUP BY m.sender", (user,)):
             if r["sender"] in out:
                 out[r["sender"]]["unread"] = r["n"]
+        for grp in self.chat_groups(user):
+            key = grp["key"]
+            rows = self._all("SELECT * FROM messages WHERE recipient = ? ORDER BY id DESC LIMIT 1", (key,))
+            if rows:
+                n = self._all("SELECT COUNT(*) AS n FROM messages WHERE recipient = ? AND id > ? AND sender <> ?",
+                              (key, reads.get(key, 0), user))[0]["n"]
+                out[key] = {"last": self._msg(rows[0]), "unread": n}
         return out
