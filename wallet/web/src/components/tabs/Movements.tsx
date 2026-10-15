@@ -267,6 +267,7 @@ export function Movements() {
                             <td className="nowrap">{date(m.t)}<span className="cell-sub">{hourMin(m.t)}</span></td>
                             <td>
                               <Badge kind={KIND_BADGE[m.kind]}>{KIND_LABEL[m.kind]}</Badge>
+                              {!!m.tercero && <span className="third-tag" title="Oculta en Resultados: no suma ni resta"><Icon name="x" size={11} /> oculta</span>}
                               <span className="cell-sub">{explain(m)}</span>
                             </td>
                             <td>{side(m.out_asset, m.out_qty, "out")}</td>

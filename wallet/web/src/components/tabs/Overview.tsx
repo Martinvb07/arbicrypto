@@ -64,12 +64,21 @@ interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; r
   /** compra: cuánto queda sin vender, a cuánto vender para no perder y cuánto ganas si lo vendes ya en P2P */
   left?: number; even?: number | null; now?: { profit: number; price: number; nick: string } | null }
 
-type Show = "todas" | "compras" | "gana" | "pierde";
+type Show = "todas" | "compras" | "gana" | "pierde" | "ocultas";
 const PAGE = 50;
+
+/** "Ocultar": aparece al pasar por la fila (en celular siempre). */
+function HideBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button className="op-hide" onClick={onClick} title="Ocultar: no suma ni resta en tus resultados">
+      <Icon name="x" size={12} /><span>Ocultar</span>
+    </button>
+  );
+}
 
 /** Resultados fáciles: elige un periodo y mira cuánto compraste, cuánto ganaste en cada operación y cómo vas ahorita. */
 export function Overview({ onDetail }: { onDetail: () => void }) {
-  const { report, year, version } = useWallet();
+  const { report, year, version, refresh, toast } = useWallet();
   const live = year >= currentYear();
   const today = dayOf(Date.now() / 1000);
   const y0 = Math.floor(Date.UTC(year, 0, 1) / 1000 / DAY);
@@ -154,8 +163,10 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   }, [report]);
 
   const inPeriod = useMemo(() => ops.filter((o) => inRange(o.t)), [ops, a, b]);
-  const buys = useMemo(() => (moves ?? []).filter((m) => m.kind === "compra" && inRange(m.t)), [moves, a, b]);
-  const gmf = useMemo(() => (moves ?? []).reduce((s, m) => s + (inRange(m.t) ? m.gmf_cop || 0 : 0), 0), [moves, a, b]);
+  // las ocultas no suman ni restan en nada
+  const mine = useMemo(() => (moves ?? []).filter((m) => !m.tercero), [moves]);
+  const buys = useMemo(() => mine.filter((m) => m.kind === "compra" && inRange(m.t)), [mine, a, b]);
+  const gmf = useMemo(() => mine.reduce((s, m) => s + (inRange(m.t) ? m.gmf_cop || 0 : 0), 0), [mine, a, b]);
 
   const sum = useMemo(() => {
     const sales = inPeriod.filter((o) => o.kind === "venta" || o.kind === "permuta");
@@ -193,7 +204,35 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
     return u;
   }, [report]);
   const moveById = useMemo(() => new Map((moves ?? []).map((m) => [m.id, m])), [moves]);
-  const allBuys = useMemo(() => (moves ?? []).filter((m) => m.kind === "compra"), [moves]);
+  const allBuys = useMemo(() => mine.filter((m) => m.kind === "compra"), [mine]);
+  const thirdOps = useMemo<Op[]>(() => (moves ?? []).filter((m) => m.tercero && inRange(m.t) && (m.kind === "compra" || m.kind === "venta")).map((m) => {
+    const buy = m.kind === "compra";
+    return { key: `t${m.id}`, id: m.id, t: m.t, kind: m.kind, asset: (buy ? m.in_asset : m.out_asset) ?? "", qty: (buy ? m.in_qty : m.out_qty) ?? 0,
+      received: null, cost: buy ? m.cop_value + (m.fee_cop || 0) : 0, gross: buy ? 0 : m.cop_value, fee: buy ? 0 : m.fee_cop || 0, gain: 0,
+      missing: false, gmf: m.gmf_cop || 0, net: 0, sources: [], buy, method: m.pay_method, counterpart: m.counterpart };
+  }).sort((p, q) => q.t - p.t), [moves, a, b]);
+
+  /** Oculta (o vuelve a mostrar). Al ocultar una compra se van con ella las ventas que salieron de esa. */
+  async function markThird(o: Op, on: boolean) {
+    if (o.id == null) return;
+    const ids = [o.id];
+    if (o.buy && on) for (const d of report?.disposals ?? []) {
+      if (d.sources?.some((x) => x.id === o.id)) ids.push(d.id);  // si no, quedarían vendidas sin su compra
+    }
+    if (o.buy && !on) for (const m of moves ?? []) {
+      if (m.tercero && m.kind === "venta" && m.lot_from === o.id) ids.push(m.id);
+    }
+    try {
+      await api.movementsThird(ids, on);
+      const more = ids.length - 1;
+      toast(on ? "Oculta" : "Visible otra vez",
+        on ? `Ya no suma ni resta${more ? ` (con ${more === 1 ? "la venta que salió" : `${more} ventas que salieron`} de esa compra)` : ""}. La ves en "Ocultas".`
+          : `Vuelve a contar en tus resultados${more ? ` con ${more} venta${more === 1 ? "" : "s"}` : ""}.`, "good");
+      refresh();
+    } catch (e) {
+      toast("No se pudo cambiar", (e as Error).message, "bad");
+    }
+  }
   const buyOps = useMemo<Op[]>(() => buys.map((m) => {
     const asset = m.in_asset ?? "", q = m.in_qty ?? 0, cost = m.cop_value + (m.fee_cop || 0), g = m.gmf_cop || 0;
     const p2p = market?.p2p;
@@ -206,10 +245,10 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
       const ad = (p2p.buyers[asset] ?? []).find((b) => b.min <= left * b.price && left * b.price <= b.max && (!b.available || b.available >= left));
       if (ad) now = { profit: (left - feeQty(left)) * ad.price - (cost + g) * (left / q), price: ad.price, nick: ad.nick };
     }
-    return { key: `b${m.id}`, t: m.t, kind: m.kind, asset, qty: q, received: null, cost, gross: 0, fee: 0, gain: 0, missing: false,
+    return { key: `b${m.id}`, id: m.id, t: m.t, kind: m.kind, asset, qty: q, received: null, cost, gross: 0, fee: 0, gain: 0, missing: false,
       gmf: g, net: 0, sources: [], buy: true, method: m.pay_method, counterpart: m.counterpart, left, even, now };
   }), [buys, usedOf, market]);
-  const listed = show === "compras" ? buyOps
+  const listed = show === "ocultas" ? thirdOps : show === "compras" ? buyOps
     : show === "todas" ? [...inPeriod, ...buyOps].sort((p, q) => q.t - p.t)
     : inPeriod.filter((o) => (show === "gana" ? Math.round(o.gain) > 0 : Math.round(o.gain) < 0));
   const pages = Math.ceil(listed.length / PAGE);
@@ -384,6 +423,12 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
               {([["todas", "Todas"], ["compras", "Compras"], ["gana", "Con ganancia"], ["pierde", "Con pérdida"]] as const).map(([k, l]) => (
                 <button key={k} className={show === k ? "on" : ""} onClick={() => { setShow(k); setPage(0); }}>{l}</button>
               ))}
+              {(thirdOps.length > 0 || show === "ocultas") && (
+                <button className={show === "ocultas" ? "on" : ""} onClick={() => { setShow("ocultas"); setPage(0); }}
+                  title="Compras y ventas que ocultaste: no suman ni restan">
+                  Ocultas <span className="seg-count">{thirdOps.length}</span>
+                </button>
+              )}
             </div>
             <button className="btn btn-sm btn-ghost" onClick={onDetail}>Detalle fiscal <Icon name="chevron" size={14} /></button>
           </div>
@@ -422,13 +467,38 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                           <td className="hide-sm" />
                         </tr>
                       ),
-                      o.buy ? (
+                      show === "ocultas" ? (
+                        <tr key={o.key} className="third-row">
+                          <td className="nowrap">{hourMin(o.t)}{group !== "dia" && <span className="cell-sub">{clean(F_SHORT.format(dateOf(dayOf(o.t))))}</span>}</td>
+                          <td>
+                            <span className="op-what">
+                              <Badge kind={KIND_BADGE[o.kind]}>{KIND_LABEL[o.kind]}</Badge>
+                              <Asset asset={o.asset} qty={qty(o.qty)} />
+                              <span className="third-tag"><Icon name="x" size={11} /> oculta</span>
+                            </span>
+                            {o.qty > 0 && (
+                              <span className="cell-sub op-prices">
+                                {o.buy ? <>Compraste a <b>{unitPrice(o.cost / o.qty)}</b></> : <>Vendiste a <b>{unitPrice(o.gross / o.qty)}</b></>} por {o.asset}
+                                {o.method ? ` · ${o.method}` : ""}{o.counterpart ? ` · ${o.counterpart}` : ""}
+                              </span>
+                            )}
+                          </td>
+                          <td className="r">{o.buy ? money(o.cost + o.gmf) : <span className="muted">—</span>}</td>
+                          <td className="r hide-sm">{o.buy ? `${qty(o.qty)} ${o.asset}` : money(o.gross - o.fee)}</td>
+                          <td className="r" colSpan={2}>
+                            <button className="btn btn-sm op-mine" onClick={() => void markThird(o, false)} title="Que vuelva a sumar en tus resultados">
+                              <Icon name="back" size={14} /> Mostrar
+                            </button>
+                          </td>
+                        </tr>
+                      ) : o.buy ? (
                         <tr key={o.key} className="buy-row">
                           <td className="nowrap">{hourMin(o.t)}{group !== "dia" && <span className="cell-sub">{clean(F_SHORT.format(dateOf(dayOf(o.t))))}</span>}</td>
                           <td>
                             <span className="op-what">
                               <Badge kind={KIND_BADGE[o.kind]}>{KIND_LABEL[o.kind]}</Badge>
                               <Asset asset={o.asset} qty={qty(o.qty)} />
+                              <HideBtn onClick={() => void markThird(o, true)} />
                             </span>
                             {o.qty > 0 && <span className="cell-sub op-prices">Compraste a <b>{unitPrice(o.cost / o.qty)}</b> por {o.asset}</span>}
                             <span className="cell-sub">{o.method ?? ""}{o.counterpart ? ` · a ${o.counterpart}` : ""}</span>
@@ -459,6 +529,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                             <Badge kind={KIND_BADGE[o.kind]}>{KIND_LABEL[o.kind]}</Badge>
                             <Asset asset={o.asset} qty={qty(o.qty)} />
                             {o.kind === "permuta" && o.received && <span className="muted nowrap">→ {o.received}</span>}
+                            {o.kind === "venta" && o.id != null && <HideBtn onClick={() => void markThird(o, true)} />}
                           </span>
                           {o.missing && <span className="cell-sub warn">Falta la compra: la ganancia puede salir más alta</span>}
                           {o.qty > 0 && o.kind === "venta" && o.cost > 0 && (

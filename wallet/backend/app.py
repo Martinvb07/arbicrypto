@@ -269,16 +269,20 @@ def clean_move(d, gmf_default=False):
     return m
 
 
-def moves(uid, start=None, end=None):
-    """Movimientos con el 4x1000 que de verdad se pagó según el perfil."""
+def moves(uid, start=None, end=None, third=False):
+    """Movimientos con el 4x1000 que de verdad se pagó según el perfil. Los ocultos (por ejemplo, plata de otro que
+    pasó por tu cuenta) no suman ni restan en ganancias, libros ni declaración, salvo que se pidan (third)."""
     p = db.profile(uid)
-    return tax.apply_gmf(db.movements(uid, start, end), p["gmf_mode"], p["gmf_methods"])
+    ms = db.movements(uid, start, end)
+    if not third:
+        ms = [m for m in ms if not m.get("tercero")]
+    return tax.apply_gmf(ms, p["gmf_mode"], p["gmf_methods"])
 
 
 def public_move(m):
     return {**{k: m.get(k) for k in ("id", "t", "kind", "out_asset", "out_qty", "in_asset", "in_qty", "cop_value", "fee_cop",
                                      "gmf_cop", "platform", "counterpart", "source", "note", "category", "pay_method",
-                                     "fee_qty", "fee_asset", "gmf_choice", "lot_from")},
+                                     "fee_qty", "fee_asset", "gmf_choice", "lot_from", "tercero")},
             "ref": tax.ref_label(m.get("ext_id"))}
 
 
@@ -377,9 +381,9 @@ def movements():
     y = request.args.get("year")
     if y:
         start, end = tax.year_bounds(year_arg())
-        rows = moves(g.user["id"], start, end)
+        rows = moves(g.user["id"], start, end, third=True)
     else:
-        rows = moves(g.user["id"])
+        rows = moves(g.user["id"], third=True)
     return jsonify(movements=[public_move(m) for m in rows], lock_until=db.lock_until(g.user["id"]))
 
 
@@ -425,6 +429,24 @@ def movements_gmf():
     if ids and not open_ids:
         check_open(uid, *[mine[i]["t"] for i in ids])
     return jsonify(changed=db.set_gmf_choice(uid, open_ids, bool(d.get("on"))), skipped=len(ids) - len(open_ids))
+
+
+@app.post("/api/movements/tercero")
+@with_session
+@needs_binance
+def movements_third():
+    """Oculta compras o ventas (o las vuelve a mostrar): las ocultas no suman ni restan en resultados, libros ni declaración."""
+    uid = g.user["id"]
+    d = body()
+    ids = d.get("ids")
+    if not isinstance(ids, list) or not ids:
+        raise Bad("Elige al menos una operación.")
+    mine = {m["id"]: m for m in db.movements(uid)}
+    ids = [int(i) for i in ids if str(i).isdigit() and int(i) in mine][:5000]
+    if not ids:
+        raise Bad("Esas operaciones no existen.")
+    check_open(uid, *[mine[i]["t"] for i in ids])
+    return jsonify(changed=db.set_tercero(uid, ids, bool(d.get("on"))))
 
 
 @app.post("/api/movements/<int:mid>/lote")
@@ -791,7 +813,7 @@ def cuadre(uid, profile):
     if bal is None:
         return None
     now_y = datetime.now(tax.CO_TZ).year
-    res = tax.compute(db.movements(uid), now_y, profile["habitual"], profile["method"])
+    res = tax.compute([m for m in db.movements(uid) if not m.get("tercero")], now_y, profile["habitual"], profile["method"])
     hold = {a: h["qty"] for a, h in res["holdings"].items()}
     rows = []
     for a in sorted((set(bal) | set(hold)) - {"COP"}):

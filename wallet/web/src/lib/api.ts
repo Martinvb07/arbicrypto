@@ -27,6 +27,8 @@ export interface Movement {
   gmf_choice?: 0 | 1 | null;
   /** venta: id de la compra de la que salió (null = la más vieja primero) */
   lot_from?: number | null;
+  /** 1 = oculta: no suma ni resta en tus resultados */
+  tercero?: 0 | 1;
 }
 
 export type MovementInput = Partial<Omit<Movement, "id" | "source">> & { kind: Kind; t: number };
@@ -574,6 +576,7 @@ export const api = {
   addMovement: (m: MovementInput) => post("/api/movements", m),
   editMovement: (id: number, m: MovementInput) => post(`/api/movements/${id}`, m),
   movementsGmf: (ids: number[], on: boolean) => post<{ changed: number }>("/api/movements/gmf", { ids, on }),
+  movementsThird: (ids: number[], on: boolean) => post<{ changed: number }>("/api/movements/tercero", { ids, on }),
   movementLot: (id: number, from: number | null) => post<{ ok: boolean }>(`/api/movements/${id}/lote`, { from }),
   deleteMovements: (ids: number[]) => post<{ deleted: number }>("/api/movements/delete", { ids }),
   deleteSource: (source: "binance" | "csv" | "manual") => post<{ deleted: number }>("/api/movements/delete", { source }),

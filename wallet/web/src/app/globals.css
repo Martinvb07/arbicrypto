@@ -1298,3 +1298,17 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
 .sync-btn:hover:not(:disabled) .icon { transform: rotate(90deg); }
 .sync-btn.busy .icon { animation: spin .9s linear infinite; color: var(--brand); }
 @media (max-width: 640px) { .sync-btn { width: 32px; padding: 0; justify-content: center; } }
+
+/* Operaciones ocultas: no suman ni restan */
+.op-hide { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border-2);
+  background: transparent; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  opacity: 0; transform: translateX(-4px); transition: opacity .18s, transform .18s, color .15s, border-color .15s, background-color .15s; }
+tr:hover .op-hide, .op-hide:focus-visible { opacity: 1; transform: none; }
+.op-hide:hover { color: var(--text); border-color: var(--brand); background: var(--brand-soft, color-mix(in srgb, var(--brand) 12%, transparent)); }
+@media (hover: none) { .op-hide { opacity: 1; transform: none; } .op-hide span { display: none; } }
+.third-tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  color: var(--accent, var(--brand)); background: color-mix(in srgb, var(--accent, var(--brand)) 12%, transparent); }
+.third-row td { animation: fade .25s ease-out; }
+.third-row .op-mine { white-space: nowrap; }
+.seg-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px;
+  font-size: 11px; background: var(--surface-3, var(--border)); color: var(--text); }
