@@ -243,5 +243,19 @@ class Tarifas(unittest.TestCase):
         self.assertIsNone(tax.deadline(2026, "1234567899"))
 
 
+class VentasSinCompra(unittest.TestCase):
+    def test_resultado_no_cuenta_lo_vendido_sin_compra(self):
+        t = 1.76e9
+        ms = [dict(id=1, t=t, kind="compra", out_asset="COP", out_qty=100000, in_asset="USDT", in_qty=30, cop_value=100000,
+                   fee_cop=0, gmf_cop=400),
+              dict(id=2, t=t + 60, kind="venta", out_asset="USDT", out_qty=40, in_asset="COP", in_qty=136000, cop_value=136000,
+                   fee_cop=0, gmf_cop=0)]
+        r = tax.compute(ms, 2025, True)
+        pnl = tax.books(r, ms, 2025)["pnl"]
+        self.assertAlmostEqual(pnl["gross_profit"], 36000)  # para la DIAN: los 10 sin compra van con costo $0
+        self.assertAlmostEqual(pnl["unmatched"], 34000)
+        self.assertAlmostEqual(pnl["net"], 30 * 3400 - 100000 - 400)  # tu resultado real
+
+
 if __name__ == "__main__":
     unittest.main()

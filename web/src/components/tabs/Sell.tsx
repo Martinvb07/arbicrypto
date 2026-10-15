@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { advertiserUrl, COIN_NAMES, copyQty, isDollar, spotUrl } from "@/lib/calc";
-import { money, num, qty, signedMoney, tone } from "@/lib/format";
+import { hhmm, money, num, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { ExitOption, Watch } from "@/lib/types";
 import { ask, Select, Sheet } from "../overlay";
@@ -254,6 +254,11 @@ function CoinRow({ w, i, onEdit }: { w: Watch; i: number; onEdit: () => void }) 
           <div>
             <b>{amount(w.asset, w.qty)}</b>
             <small>{COIN_NAMES[w.asset] ?? w.asset}</small>
+            {w.synced && (
+              <small className="crow-synced" title="Se ajusta sola con tus órdenes P2P de Binance">
+                <Icon name="refresh" size={11} /> {w.synced.kind === "vendiste" ? "Vendiste" : "Compraste"} {num(w.synced.qty, 2)} a {money(w.synced.price)} · {hhmm(w.synced.t)}
+              </small>
+            )}
           </div>
         </div>
         <div className="crow-cell"><small>Te costó</small><b>{money(w.cost * (1 + gmf), 0)}</b>
@@ -271,7 +276,8 @@ function CoinRow({ w, i, onEdit }: { w: Watch; i: number; onEdit: () => void }) 
         <div className="crow-cell crow-goal">
           <small>{ready ? (w.target > 0 ? `Ya ganas +${money(w.target, 0)}` : "Ya puedes vender ganando") : b ? `Falta ${num(Math.max(missing, 0), missing < 1 ? 2 : 1)} %` : "Meta"}</small>
           <div className="wprogress-bar"><span style={{ width: `${pct}%` }} /></div>
-          {b && <span className="dim">meta {money(b.need_price)}/{unit}</span>}
+          {b && b.even_price != null && <span className="crow-even">Para no perder: vende a <b>{money(b.even_price)}</b>/{unit} o más</span>}
+          {b && (w.target > 0 || b.even_price == null) && <span className="dim">meta {money(b.need_price)}/{unit}</span>}
         </div>
         <div className="crow-alert">
           <Toggle on={alert} onChange={(v) => void toggle(v)} disabled={saving} label={alert ? "Aviso" : "Sin aviso"} />

@@ -665,6 +665,7 @@ def watch_eval(w, targets):
         need = watch_need(w, o)
         o["profit"] = o["received"] - paid_with_gmf(w["user"], w["cost"])
         o["need_price"] = need / (o["qty"] - o.get("p2p_fee", 0))  # precio por unidad: el comprador paga lo que queda tras la comision
+        o["even_price"] = (need - max(w["target"], 0)) / (o["qty"] - o.get("p2p_fee", 0))  # sin meta: solo para no perder
         o["ok"] = o["received"] >= need
         if best is None or o["received"] - need > best_gap:
             best, best_gap = o, o["received"] - need
@@ -706,6 +707,49 @@ def watch_alert(w, o):
                 links=links)
 
 
+def sync_watches(user, orders):
+    """Mis monedas se ajustan solas con las órdenes P2P de Binance hechas DESPUÉS de anotar la moneda: si vendes una
+    parte, queda lo que te quedó con su costo proporcional (costo promedio); si compras más, se suma con lo que pagaste.
+    Cada orden se cuenta una sola vez. Si vendiste todo, la moneda pasa a Terminadas."""
+    changed = False
+    with watch_lock:
+        live = [w for w in watches if w["user"] == user and w["status"] in ("vigilando", "lista")]
+        for asset in {w["asset"] for w in live}:
+            w = max((x for x in live if x["asset"] == asset), key=lambda x: x["created"])  # la más reciente de esa cripto
+            seen = set(w.get("orders") or [])
+            new = sorted((o for o in orders if o.get("status") == "COMPLETED" and o.get("asset") == asset
+                          and (o.get("fiat") or FIAT) == FIAT and o.get("id") and o["id"] not in seen
+                          and (o.get("time") or 0) / 1000 > w["created"]), key=lambda o: o["time"])
+            if not new:
+                continue
+            for o in new:
+                fee = float(o.get("commission") or 0)
+                if o["side"] == "BUY":  # te llega la cripto menos la comisión; el costo es lo que pagaste
+                    w["qty"] += max(o["amount"] - fee, 0)
+                    w["cost"] += o["total"]
+                    kind = "compraste"
+                else:  # sale lo vendido más la comisión; se va la parte proporcional de lo que te costó
+                    out = min(o["amount"] + fee, w["qty"])
+                    w["cost"] -= w["cost"] * (out / w["qty"]) if w["qty"] > 0 else w["cost"]
+                    w["qty"] -= out
+                    kind = "vendiste"
+                seen.add(o["id"])
+                w["synced"] = {"t": time.time(), "kind": kind, "qty": o["amount"], "price": o["price"], "total": o["total"]}
+            w["orders"] = sorted(seen)[-300:]
+            dust = 0.01 if asset in ("USDT", "USDC", "FDUSD") else 1e-8
+            if w["qty"] <= dust:
+                w.update(status="vendida", qty=max(w["qty"], 0.0), cost=max(w["cost"], 0.0))
+            else:
+                w["target"] = min(w.get("target") or 0, w["cost"] * 0.9)
+                w.update(status="vigilando", last=None, full_t=0)  # con lo que te queda se calcula de nuevo
+            changed = True
+        if changed:
+            save_json(WATCH_FILE, watches)
+    if changed:
+        wake["watch"].set()
+        publish("watch")
+
+
 def watch_step():
     with watch_lock:
         active = [w for w in watches if w["status"] in ("vigilando", "lista")]
@@ -729,7 +773,8 @@ def watch_step():
             p2p_hold.clear()
         w["last"] = {"t": time.time(), "failed": failed, "best": best and {
             "to": best["to"], "path": best["path"], "qty": best["qty"], "received": best["received"], "hops": best["hops"],
-            "profit": best["profit"], "need_price": best["need_price"], "ok": best["ok"], "ad": best["ad"]}}
+            "profit": best["profit"], "need_price": best["need_price"], "even_price": best["even_price"], "ok": best["ok"],
+            "ad": best["ad"]}}
         if confirmed:
             w["status"] = "lista"
             watch_alert(w, best)
@@ -838,6 +883,7 @@ def account_step():
             if accounts.get(user) is acc:
                 acc_state[user] = dict(snap, t=time.time())
                 acc_errors.pop(user, None)
+        sync_watches(user, snap["orders"])
     publish("account")
 
 

@@ -231,10 +231,12 @@ export interface Watch {
   /** Switch "Avisarme cuando gane": si está apagado solo se muestra en la lista, sin sonido ni Telegram. */
   alert?: boolean;
   alerts: number;
+  /** Último ajuste automático con una orden P2P de Binance (vendiste una parte o compraste más). */
+  synced?: { t: number; kind: "compraste" | "vendiste"; qty: number; price: number; total: number };
   last: {
     t: number;
     failed: string[];
-    best: { to: string; path: string[]; hops?: SpotHop[]; qty: number; received: number; profit: number; need_price: number; ok: boolean; ad: Ad } | null;
+    best: { to: string; path: string[]; hops?: SpotHop[]; qty: number; received: number; profit: number; need_price: number; even_price?: number; ok: boolean; ad: Ad } | null;
   } | null;
 }
 

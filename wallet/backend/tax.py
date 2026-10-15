@@ -348,11 +348,17 @@ def kardex(movements, year, method="fifo"):
     return out
 
 
+def unmatched_gain(d):
+    """La parte de la ganancia de una venta que sale de cripto sin compra registrada (costo $0): es lo que recibiste
+    por esa parte. En la declaración se deja así (lo conservador); en tus resultados no se cuenta hasta que la agregues."""
+    return d["proceeds"] * d["missing"] / d["qty"] if d.get("missing") and d["qty"] else 0.0
+
+
 def books(result, movements, year):
     """Contabilidad del año: estado de resultados, mes por mes y por moneda (cifras contables, en pesos)."""
     start, end = year_bounds(year)
     months = [{"month": i + 1, "bought": 0.0, "sold": 0.0, "ops": 0, "gain": 0.0, "income": 0.0, "gmf": 0.0, "fees": 0.0,
-               "expenses": 0.0} for i in range(12)]
+               "expenses": 0.0, "unmatched": 0.0} for i in range(12)]
     assets = {}
 
     def month(t):
@@ -384,6 +390,7 @@ def books(result, movements, year):
         mo = month(d["t"])
         mo["gain"] += d["gain"]
         mo["fees"] += d["fee"]
+        mo["unmatched"] += unmatched_gain(d)
         x = asset(d["asset"])
         x["sold_qty"] += d["qty"]
         x["sold"] += d["gross"]
@@ -403,11 +410,13 @@ def books(result, movements, year):
     income = sum(x["value"] for x in result["incomes"])
     gmf = sum(mo["gmf"] for mo in months)
     expenses = sum(mo["expenses"] for mo in months)
-    for mo in months:
-        mo["net"] = mo["gain"] + mo["income"] - mo["gmf"] - mo["expenses"]
+    unmatched = sum(mo["unmatched"] for mo in months)
+    for mo in months:  # tu resultado real: lo vendido sin su compra no cuenta hasta que la agregues
+        mo["net"] = mo["gain"] - mo["unmatched"] + mo["income"] - mo["gmf"] - mo["expenses"]
     return {
         "pnl": {"sales": sales, "cost": cost, "fees": fees, "buy_fees": buy_fees, "gross_profit": sales - cost - fees, "income": income,
-                "gmf": gmf, "expenses": expenses, "net": sales - cost - fees + income - gmf - expenses},
+                "gmf": gmf, "expenses": expenses, "unmatched": unmatched,
+                "net": sales - cost - fees - unmatched + income - gmf - expenses},
         "rounds": rounds(movements, year),
         "months": months,
         "assets": sorted(assets.values(), key=lambda x: -(x["bought"] + x["sold"] + x["hold_cost"])),

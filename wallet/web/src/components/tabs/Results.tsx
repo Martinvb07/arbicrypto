@@ -129,7 +129,8 @@ export function Results({ onTab, initialView = "resumen" }: { onTab: (t: TabId) 
 
           {report.warnings_total > 0 && (
             <Note kind="warn">
-              <b>{report.warnings_total} {report.warnings_total === 1 ? "venta no tiene" : "ventas no tienen"} su compra.</b> Sin ella el resultado sale más alto de lo real.{" "}
+              <b>{report.warnings_total} {report.warnings_total === 1 ? "venta no tiene" : "ventas no tienen"} su compra.</b>{" "}
+              {pnl.unmatched && pnl.unmatched >= 1 ? `Tu resultado no cuenta ${money(pnl.unmatched)} de esas ventas hasta que agregues la compra (en la declaración sí van, con costo $0).` : "Agrégala para que el costo quede bien."}{" "}
               <button className="link" onClick={() => setView("operaciones")}>Ver cuáles</button>
             </Note>
           )}
@@ -157,6 +158,11 @@ export function Results({ onTab, initialView = "resumen" }: { onTab: (t: TabId) 
                   <span className="num">{money(pnl.gmf)}</span>
                 </div>
                 {pnl.expenses > 0 && <div className="line"><span>− Gastos del negocio</span><span className="num">{money(pnl.expenses)}</span></div>}
+                {!!pnl.unmatched && pnl.unmatched >= 1 && (
+                  <div className="line"><span>− Ventas sin su compra
+                    <span className="cell-sub">Sin la compra no se sabe cuánto ganaste: no se cuenta hasta que la agregues · <button className="link" onClick={() => setView("operaciones")}>ver cuáles</button></span></span>
+                    <span className="num">{money(pnl.unmatched)}</span></div>
+                )}
                 <div className="line total"><span>Resultado neto</span><span className={`num ${tone(pnl.net)}`}>{signedMoney(pnl.net)}</span></div>
               </div>
             </div>

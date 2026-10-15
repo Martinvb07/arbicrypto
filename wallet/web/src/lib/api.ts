@@ -193,7 +193,9 @@ export interface Round {
 }
 
 export interface Books {
-  pnl: { sales: number; cost: number; fees: number; buy_fees?: number; gross_profit: number; income: number; gmf: number; expenses: number; net: number };
+  pnl: { sales: number; cost: number; fees: number; buy_fees?: number; gross_profit: number; income: number; gmf: number; expenses: number;
+    /** ganancia de ventas sin su compra (costo $0): no se cuenta en net hasta que agregues la compra */
+    unmatched?: number; net: number };
   months: BookMonth[];
   assets: BookAsset[];
   rounds: Round[];
