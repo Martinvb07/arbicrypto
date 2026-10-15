@@ -76,7 +76,10 @@ def money(v):
     s = str(v).strip().replace(" ", " ")
     if not s or not re.search(r"\d", s):
         return None
-    neg = s.startswith("-") or s.endswith("-") or (s.startswith("(") and s.endswith(")")) or "-$" in s
+    s = s.replace("\u2212", "-").replace("\u2013", "-")  # signo menos tipográfico (−, –)
+    # negativo en cualquiera de sus formas: -$50.000 · $-50.000 (Nequi) · $ -50.000 · 50.000- · (50.000)
+    neg = bool(re.match(r"^\s*-", s) or re.search(r"-\s*$", s) or (s.startswith("(") and s.endswith(")"))
+               or re.search(r"\$\s*-|-\s*\$", s))
     s = re.sub(r"[^\d.,]", "", s)
     if not s:
         return None
@@ -222,7 +225,27 @@ def _from_tables(tables, year_hint):
             rows.append({"day": day, "description": desc[:200], "amount": amount, "balance": money(get("balance"))})
     if not rows and tables:
         warnings.append("No encontré columnas de fecha y valor. Revisa que el archivo sea el extracto de movimientos.")
-    return rows, warnings
+    return fix_signs(rows), warnings
+
+
+def fix_signs(rows):
+    """Con el saldo de cada fila se sabe si el movimiento entró o salió (algunos extractos no ponen el signo, o lo
+    ponen donde el lector no lo ve). Sirve en orden cronológico o del más nuevo al más viejo: se usa el que más cuadra."""
+    def fits(i, j):
+        a, b = rows[i]["balance"], rows[j]["balance"]
+        return a is not None and b is not None and abs(abs(a - b) - abs(rows[i]["amount"])) < 1
+    n = len(rows)
+    forward = sum(fits(i, i - 1) for i in range(1, n))   # saldo_i = saldo_(i-1) + valor_i
+    backward = sum(fits(i, i + 1) for i in range(n - 1))  # saldo_i = saldo_(i+1) + valor_i (del más nuevo al más viejo)
+    if max(forward, backward) < max(2, n // 3):
+        return rows  # el saldo no sirve para decidir
+    step = -1 if forward >= backward else 1
+    for i in range(n):
+        j = i + step
+        if 0 <= j < n and fits(i, j):
+            diff = rows[i]["balance"] - rows[j]["balance"]
+            rows[i]["amount"] = abs(rows[i]["amount"]) if diff > 0 else -abs(rows[i]["amount"])  # solo el signo: el valor queda exacto
+    return rows
 
 
 def _from_pdf(data, password, year_hint):

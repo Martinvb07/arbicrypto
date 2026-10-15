@@ -156,5 +156,18 @@ class Servicio(unittest.TestCase):
         self.assertEqual(db.one("SELECT COUNT(*) AS n FROM bank_tx WHERE account_id=?", (aid,))["n"], 0)
 
 
+class SignosNequi(unittest.TestCase):
+    def test_menos_despues_del_peso(self):
+        for v, out in [("$-50.000,00", -50000), ("$ -50.000,00", -50000), ("-$50.000,00", -50000), ("\u2212$50.000", -50000),
+                       ("1.234-", -1234), ("(1.234)", -1234), ("$ 250.000,00", 250000)]:
+            self.assertEqual(st.money(v), out, v)
+
+    def test_el_saldo_corrige_el_signo(self):
+        mk = lambda d, a, b: {"day": d, "description": d, "amount": a, "balance": b}
+        rows = [mk("1", 100000.0, 600000.0), mk("2", 50000.0, 550000.0), mk("3", 20000.0, 530000.0), mk("4", 30000.0, 560000.0)]
+        self.assertEqual([r["amount"] for r in st.fix_signs(rows)], [100000, -50000, -20000, 30000])
+        rows = [mk("4", 30000.0, 560000.0), mk("3", 20000.0, 530000.0), mk("2", 50000.0, 550000.0), mk("1", 100000.0, 600000.0)]
+        self.assertEqual([r["amount"] for r in st.fix_signs(rows)], [30000, -20000, -50000, 100000])
+
 if __name__ == "__main__":
     unittest.main()
