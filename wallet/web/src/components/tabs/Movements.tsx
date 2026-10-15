@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { api, type Kind, type Movement } from "@/lib/api";
-import { cashValue, date, dateTime, GASTO_LABEL, hourMin, KIND_LABEL, money, qty } from "@/lib/format";
+import { cashValue, date, dateTime, GASTO_LABEL, hourMin, KIND_LABEL, money, qty, signedMoney } from "@/lib/format";
 import { methodName } from "../GmfChoice";
 import { ImportModal } from "../ImportModal";
 import { MoveModal } from "../MoveModal";
@@ -245,7 +245,7 @@ export function Movements() {
                       <th>Tipo</th>
                       <th>Sale</th>
                       <th>Entra</th>
-                      <th className="r">Valor en pesos</th>
+                      <th className="r" title="Lo que salió (−) o entró (+) a tu cuenta de banco por este movimiento">Plata en tu banco</th>
                       <th className="r hide-sm">4x1000</th>
                       <th className="hide-sm">Plataforma</th>
                       <th className="r"><span className="sr-only">Acciones</span></th>
@@ -267,12 +267,13 @@ export function Movements() {
                             <td className="nowrap">{date(m.t)}<span className="cell-sub">{hourMin(m.t)}</span></td>
                             <td>
                               <Badge kind={KIND_BADGE[m.kind]}>{KIND_LABEL[m.kind]}</Badge>
-                              <span className="cell-sub nowrap">{KIND_FLOW[m.kind]}</span>
+                              <span className="cell-sub">{explain(m)}</span>
                             </td>
                             <td>{side(m.out_asset, m.out_qty, "out")}</td>
                             <td>{side(m.in_asset, m.in_qty, "in")}</td>
-                            <td className="r"><b className="num">{m.cop_value ? money(cashValue(m)) : <span className="warn" title="Edítalo y usa Calcular">Sin valor</span>}</b>
-                              {m.fee_cop > 0 && <span className="cell-sub">{m.kind === "compra" ? "incluye " : ""}comisión Binance {money(m.fee_cop)}</span>}
+                            <td className="r"><b className={`num ${bank(m) > 0 ? "up" : ""}`}>{!m.cop_value ? <span className="warn" title="Edítalo y usa Calcular">Sin valor</span> : TOUCHES_BANK.has(m.kind) ? signedMoney(bank(m)) : <span className="muted" title="No movió plata de tu banco">{money(m.cop_value)}</span>}</b>
+                              {m.kind === "compra" && m.gmf_cop > 0 && <span className="cell-sub">{money(cashValue(m))} + 4x1000</span>}
+                              {m.fee_cop > 0 && <span className="cell-sub">Binance cobró {m.fee_qty ? `${qty(m.fee_qty)} ${m.fee_asset} ` : ""}({money(m.fee_cop)}){m.kind === "compra" ? ", ya va en el precio" : ""}</span>}
                             </td>
                             <td className="r hide-sm">{m.gmf_cop ? money(m.gmf_cop) : <span className="muted">—</span>}</td>
                             <td className="hide-sm">
@@ -314,6 +315,31 @@ export function Movements() {
       {editing && <MoveModal move={editing} onClose={() => setEditing(null)} />}
     </div>
   );
+}
+
+const TOUCHES_BANK = new Set<Kind>(["compra", "venta", "gasto", "aporte", "retiro"]);
+
+/** Plata que de verdad salió (−) o entró (+) a tu banco: la compra con su 4x1000; la venta, lo que te llegó. */
+function bank(m: Movement): number {
+  const v = cashValue(m);
+  if (m.kind === "compra") return -(v + (m.gmf_cop || 0));
+  if (m.kind === "venta" || m.kind === "aporte") return v;
+  if (m.kind === "gasto" || m.kind === "retiro") return -(v + (m.gmf_cop || 0));
+  return 0;
+}
+
+/** Qué pasó, en una frase. */
+function explain(m: Movement): string {
+  const c = (a: string | null, q: number | null) => `${qty(q)} ${a}`;
+  switch (m.kind) {
+    case "compra": return `Pagaste ${money(cashValue(m))} y te llegaron ${c(m.in_asset, m.in_qty)}`;
+    case "venta": return `Entregaste ${c(m.out_asset, m.out_qty)} y te llegaron ${money(cashValue(m))}`;
+    case "permuta": return `Cambiaste ${c(m.out_asset, m.out_qty)} por ${c(m.in_asset, m.in_qty)} (valían ${money(m.cop_value)})`;
+    case "ingreso": return `Te pagaron ${c(m.in_asset, m.in_qty)} (valían ${money(m.cop_value)})`;
+    case "airdrop": return `Te regalaron ${c(m.in_asset, m.in_qty)} (valían ${money(m.cop_value)})`;
+    case "comision": return `Binance cobró ${c(m.out_asset, m.out_qty)}`;
+    default: return KIND_FLOW[m.kind];
+  }
 }
 
 /** Lo que sale (−) o entra (+): cripto con su ícono, pesos con la bandera. */
