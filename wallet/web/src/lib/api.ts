@@ -81,6 +81,15 @@ export interface Disposal {
   days_min: number;
   days_max: number;
   missing: number;
+  /** 4x1000 que pagaste al comprar lo que vendiste (proporcional) y la ganancia ya sin él */
+  gmf?: number;
+  net?: number;
+  /** de qué compras salió: cuánto se usó de cada una y cuánto quedó */
+  sources?: SaleSource[];
+}
+
+export interface SaleSource {
+  id: number | null; t: number; kind: Kind; bought_qty: number; bought_cost: number; qty: number; cost: number; gmf: number; left: number;
 }
 
 export interface Income {

@@ -70,6 +70,22 @@ def apply_gmf(movements, mode, methods=None):
     return out
 
 
+def sale_sources(parts):
+    """De qué compras salió una venta: por cada compra, cuánto se usó, cuánto quedaba de ella y su 4x1000 proporcional."""
+    out = {}
+    for q, cost, _t, src, rest in parts:
+        if not src:
+            continue
+        x = out.setdefault(src["id"] if src["id"] is not None else id(src),
+                           {"id": src["id"], "t": src["t"], "kind": src["kind"], "bought_qty": src["qty"], "bought_cost": src["cost"],
+                            "qty": 0.0, "cost": 0.0, "gmf": 0.0, "left": rest})
+        x["qty"] += q
+        x["cost"] += cost
+        x["gmf"] += src["gmf"] * q / src["qty"] if src["qty"] else 0.0
+        x["left"] = rest
+    return list(out.values())
+
+
 def year_bounds(year):
     start = datetime(year, 1, 1, tzinfo=CO_TZ).timestamp()
     end = datetime(year + 1, 1, 1, tzinfo=CO_TZ).timestamp()
@@ -112,13 +128,15 @@ class Ledger:
 
     def __init__(self, method):
         self.method = method
-        self.lots = defaultdict(deque)  # cripto -> deque de [cantidad, costo COP, fecha]
+        self.lots = defaultdict(deque)  # cripto -> deque de [cantidad, costo COP, fecha, compra de origen]
 
-    def add(self, asset, qty, cost, t):
+    def add(self, asset, qty, cost, t, src=None):
+        """src: de dónde salió el lote (la compra: id, fecha, cantidad, costo y su 4x1000), para decir en cada venta de
+        qué compra salió y qué parte de su 4x1000 le toca."""
         if qty <= 0:
             return
         lots = self.lots[asset]
-        lots.append([qty, cost, t])
+        lots.append([qty, cost, t, src])
         if self.method == "promedio":
             total_q = sum(l[0] for l in lots)
             avg = sum(l[1] for l in lots) / total_q
@@ -126,16 +144,17 @@ class Ledger:
                 l[1] = l[0] * avg
 
     def take(self, asset, qty):
-        """Saca `qty` y devuelve [(cantidad, costo, fecha)] más la cantidad sin historial de compra."""
+        """Saca `qty` y devuelve [(cantidad, costo, fecha, compra de origen, lo que queda de ese lote)] más la cantidad
+        sin historial de compra."""
         lots, parts, left = self.lots[asset], [], qty
         while left > 1e-12 and lots:
             lot = lots[0]
             q = min(left, lot[0])
             cost = lot[1] * q / lot[0]
-            parts.append((q, cost, lot[2]))
             lot[0] -= q
             lot[1] -= cost
             left -= q
+            parts.append((q, cost, lot[2], lot[3], max(lot[0], 0.0)))
             if lot[0] <= 1e-12:
                 lots.popleft()
         return parts, max(0.0, left)
@@ -198,12 +217,16 @@ def compute(movements, year, habitual=False, method="fifo"):
                 go_share = 0.0 if habitual or qty <= 0 else sum(p[0] for p in parts if held_two_years(p[2], m["t"])) / qty
                 days = [(m["t"] - p[2]) / 86400 for p in parts]
                 gain = proceeds - cost
+                sources = sale_sources(parts)
+                gmf_share = sum(x["gmf"] for x in sources)
                 disposals.append({
                     "id": m.get("id"), "t": m["t"], "kind": kind, "asset": asset, "qty": qty,
                     "received": m.get("in_asset"), "gross": gross, "fee": fee, "proceeds": proceeds, "cost": cost, "gain": gain,
                     "go_share": go_share,
                     "go_gain": gain * go_share, "ro_gain": gain * (1 - go_share),
                     "days_min": min(days) if days else 0, "days_max": max(days) if days else 0, "missing": missing,
+                    # el 4x1000 que pagaste al comprar lo que vendiste, y la ganancia ya sin él
+                    "gmf": gmf_share, "net": gain - gmf_share, "sources": sources,
                 })
                 if kind == "venta":
                     totals["sold_cop"] += value
@@ -212,7 +235,8 @@ def compute(movements, year, habitual=False, method="fifo"):
         if kind in INFLOW and m.get("in_asset") and m["in_asset"] != COP:
             asset, qty = m["in_asset"], float(m["in_qty"])
             cost = value + fee if kind == "compra" else value  # en permuta la comision ya resto en la venta
-            ledger.add(asset, qty, cost, m["t"])
+            ledger.add(asset, qty, cost, m["t"], {"id": m.get("id"), "t": m["t"], "kind": kind, "qty": qty, "cost": cost,
+                                                  "gmf": float(m.get("gmf_cop") or 0) if kind == "compra" else 0.0})
             if in_year:
                 if kind == "compra":
                     totals["bought_cop"] += value + fee

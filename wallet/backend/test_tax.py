@@ -257,5 +257,23 @@ class VentasSinCompra(unittest.TestCase):
         self.assertAlmostEqual(pnl["net"], 30 * 3400 - 100000 - 400)  # tu resultado real
 
 
+
+class VentaEnPartes(unittest.TestCase):
+    def test_cada_parte_dice_su_compra_y_su_4x1000(self):
+        t = 1.76e9  # compra de $500.000 → 157,9 USDT (4x1000 $2.000), vendida en dos partes
+        ms = [dict(id=1, t=t, kind="compra", out_asset="COP", out_qty=500000, in_asset="USDT", in_qty=157.9, cop_value=500000,
+                   fee_cop=0, gmf_cop=2000),
+              dict(id=2, t=t + 60, kind="venta", out_asset="USDT", out_qty=141.13, in_asset="COP", in_qty=450000, cop_value=450000,
+                   fee_cop=0, gmf_cop=0),
+              dict(id=3, t=t + 120, kind="venta", out_asset="USDT", out_qty=16.77, in_asset="COP", in_qty=53400, cop_value=53400,
+                   fee_cop=0, gmf_cop=0)]
+        a, b = tax.compute(ms, 2025, True)["disposals"]
+        self.assertAlmostEqual(a["gmf"] + b["gmf"], 2000)                  # el 4x1000 de la compra se reparte entero
+        self.assertAlmostEqual(a["gmf"], 2000 * 141.13 / 157.9)
+        self.assertAlmostEqual(a["net"], a["gain"] - a["gmf"])
+        self.assertAlmostEqual(a["sources"][0]["left"], 16.77)             # quedan 16,77 de esa compra
+        self.assertAlmostEqual(b["sources"][0]["left"], 0)
+        self.assertEqual(a["sources"][0]["id"], 1)
+
 if __name__ == "__main__":
     unittest.main()

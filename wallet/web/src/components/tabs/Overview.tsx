@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { api, type Kind, type Market, type Movement } from "@/lib/api";
+import { api, type Kind, type Market, type Movement, type SaleSource } from "@/lib/api";
 import { cashValue, currentYear, hourMin, KIND_LABEL, money, num, qty, signedMoney, tone } from "@/lib/format";
 import { Select, type SelectOption } from "../Select";
 import { Asset, Badge, Coin, Empty, Icon, Pager, Pnl, Skeleton } from "../ui";
@@ -23,6 +23,17 @@ const isoOf = (d: number) => dateOf(d).toISOString().slice(0, 10);
 
 const F_DAY = new Intl.DateTimeFormat("es-CO", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
 const F_SHORT = new Intl.DateTimeFormat("es-CO", { timeZone: "UTC", day: "numeric", month: "short" });
+const F_BUY = new Intl.DateTimeFormat("es-CO", { timeZone: "America/Bogota", day: "numeric", month: "short" });
+
+/** "De tu compra del 14 oct (157,83 USDT por $500.000) · quedan 16,70" o "Del resto de tu compra…" */
+function sourceText(o: Op): string {
+  const s = o.sources[0];
+  const when = F_BUY.format(new Date(s.t * 1000)).replace(/\./g, "");
+  const whole = `${s.kind === "compra" ? "tu compra" : "lo que recibiste"} del ${when} (${qty(s.bought_qty)} ${o.asset} por ${money(s.bought_cost)})`;
+  const all = s.qty >= s.bought_qty - 1e-9;
+  const head = all ? `Toda ${whole}` : s.left <= 1e-9 ? `Lo que quedaba de ${whole}` : `${qty(s.qty)} de ${whole} · quedan ${qty(s.left)}`;
+  return o.sources.length > 1 ? `${head} y ${o.sources.length - 1} ${o.sources.length === 2 ? "compra más" : "compras más"}` : head;
+}
 const F_MONTH = new Intl.DateTimeFormat("es-CO", { timeZone: "UTC", month: "long", year: "numeric" });
 const clean = (s: string) => s.replace(/\./g, "");
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -40,7 +51,9 @@ function bucketLabel(b: number, g: Group, long = false) {
 }
 
 /** Una venta, cambio o ingreso con lo que te costó y lo que ganaste */
-interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; received: string | null; cost: number; gross: number; fee: number; gain: number; missing: boolean }
+interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; received: string | null; cost: number; gross: number; fee: number; gain: number; missing: boolean;
+  /** 4x1000 de lo vendido, ganancia ya sin él y de qué compras salió */
+  gmf: number; net: number; sources: SaleSource[] }
 
 type Show = "todas" | "gana" | "pierde";
 const PAGE = 50;
@@ -119,9 +132,10 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   const ops = useMemo<Op[]>(() => {
     if (!report) return [];
     const sales = report.disposals.map((d) => ({ key: `d${d.id}-${d.t}`, t: d.t, kind: d.kind, asset: d.asset, qty: d.qty, received: d.received,
-      cost: d.cost, gross: d.gross, fee: d.fee, gain: d.gain, missing: d.missing > 1e-9 }));
+      cost: d.cost, gross: d.gross, fee: d.fee, gain: d.gain, missing: d.missing > 1e-9,
+      gmf: d.gmf ?? 0, net: d.net ?? d.gain, sources: d.sources ?? [] }));
     const incomes = report.incomes.map((x) => ({ key: `i${x.id}`, t: x.t, kind: x.kind, asset: x.asset, qty: x.qty, received: null,
-      cost: 0, gross: x.value, fee: 0, gain: x.value, missing: false }));
+      cost: 0, gross: x.value, fee: 0, gain: x.value, missing: false, gmf: 0, net: x.value, sources: [] }));
     return [...sales, ...incomes].sort((p, q) => q.t - p.t);
   }, [report]);
 
@@ -158,12 +172,12 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   const hasPos = bars.some((x) => x.gain > 0.5);
 
   /* ---------- lista de operaciones ---------- */
-  const listed = inPeriod.filter((o) => show === "todas" || (show === "gana" ? Math.round(o.gain) > 0 : Math.round(o.gain) < 0));
+  const listed = inPeriod.filter((o) => show === "todas" || (show === "gana" ? Math.round(o.net) > 0 : Math.round(o.net) < 0));
   const pages = Math.ceil(listed.length / PAGE);
   const slice = listed.slice(page * PAGE, page * PAGE + PAGE);
   const bucketSum = useMemo(() => {
     const m = new Map<number, { gain: number; n: number }>();
-    for (const o of listed) { const k = bucketOf(dayOf(o.t), group); const x = m.get(k) ?? { gain: 0, n: 0 }; x.gain += o.gain; x.n++; m.set(k, x); }
+    for (const o of listed) { const k = bucketOf(dayOf(o.t), group); const x = m.get(k) ?? { gain: 0, n: 0 }; x.gain += o.net; x.n++; m.set(k, x); }
     return m;
   }, [listed, group]);
 
@@ -349,7 +363,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                     <th>Qué hiciste</th>
                     <th className="r">Te costó</th>
                     <th className="r hide-sm">Recibiste</th>
-                    <th className="r">Ganaste</th>
+                    <th className="r" title="Ya con el 4x1000 que pagaste al comprar lo que vendiste">Te quedó</th>
                     <th className="r hide-sm">%</th>
                   </tr>
                 </thead>
@@ -358,7 +372,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                     const k = bucketOf(dayOf(o.t), group);
                     const head = i === 0 || bucketOf(dayOf(slice[i - 1].t), group) !== k;
                     const g = bucketSum.get(k);
-                    const pct = o.cost > 0 ? (o.gain / (o.cost + o.fee)) * 100 : null;
+                    const pct = o.cost > 0 ? (o.net / (o.cost + o.fee)) * 100 : null;
                     return [
                       head && g && (
                         <tr key={`h${k}`} className="group-row">
@@ -378,10 +392,13 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                             {o.kind === "permuta" && o.received && <span className="muted nowrap">→ {o.received}</span>}
                           </span>
                           {o.missing && <span className="cell-sub warn">Falta la compra: la ganancia puede salir más alta</span>}
+                          {o.sources.length > 0 && <span className="cell-sub">{sourceText(o)}</span>}
                         </td>
                         <td className="r">{o.cost || o.fee ? money(o.cost + o.fee) : <span className="muted">—</span>}</td>
                         <td className="r hide-sm">{money(o.gross)}</td>
-                        <td className="r"><b><Pnl v={o.gain} /></b>{pct != null && <span className={`cell-sub show-sm ${tone(pct)}`}>{pct >= 0 ? "+" : "−"}{num(Math.abs(pct), 2)} %</span>}</td>
+                        <td className="r"><b><Pnl v={o.net} /></b>
+                          {o.gmf >= 1 && <span className="cell-sub">{signedMoney(o.gain)} − 4x1000 {money(o.gmf)}</span>}
+                          {pct != null && <span className={`cell-sub show-sm ${tone(pct)}`}>{pct >= 0 ? "+" : "−"}{num(Math.abs(pct), 2)} %</span>}</td>
                         <td className={`r hide-sm ${pct == null ? "muted" : tone(pct)}`}>{pct == null ? "—" : `${pct >= 0 ? "+" : "−"}${num(Math.abs(pct), 2)} %`}</td>
                       </tr>,
                     ];
