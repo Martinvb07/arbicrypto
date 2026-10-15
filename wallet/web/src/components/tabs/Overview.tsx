@@ -203,12 +203,12 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   }), [buys, usedOf, market]);
   const listed = show === "compras" ? buyOps
     : show === "todas" ? [...inPeriod, ...buyOps].sort((p, q) => q.t - p.t)
-    : inPeriod.filter((o) => (show === "gana" ? Math.round(o.net) > 0 : Math.round(o.net) < 0));
+    : inPeriod.filter((o) => (show === "gana" ? Math.round(o.gain) > 0 : Math.round(o.gain) < 0));
   const pages = Math.ceil(listed.length / PAGE);
   const slice = listed.slice(page * PAGE, page * PAGE + PAGE);
   const bucketSum = useMemo(() => {
     const m = new Map<number, { gain: number; n: number }>();
-    for (const o of listed) { const k = bucketOf(dayOf(o.t), group); const x = m.get(k) ?? { gain: 0, n: 0 }; x.gain += o.buy ? 0 : o.net; x.n++; m.set(k, x); }
+    for (const o of listed) { const k = bucketOf(dayOf(o.t), group); const x = m.get(k) ?? { gain: 0, n: 0 }; x.gain += o.buy ? -o.gmf : o.gain; x.n++; m.set(k, x); }
     return m;
   }, [listed, group]);
 
@@ -394,7 +394,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                     <th>Qué hiciste</th>
                     <th className="r">Te costó</th>
                     <th className="r hide-sm">Recibiste</th>
-                    <th className="r" title="Ya con el 4x1000 que pagaste al comprar lo que vendiste">Te quedó</th>
+                    <th className="r" title="Venta: lo que recibiste menos lo que te costó. Compra: su 4x1000, que se paga una sola vez al transferir">Te quedó</th>
                     <th className="r hide-sm">%</th>
                   </tr>
                 </thead>
@@ -403,7 +403,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                     const k = bucketOf(dayOf(o.t), group);
                     const head = i === 0 || bucketOf(dayOf(slice[i - 1].t), group) !== k;
                     const g = bucketSum.get(k);
-                    const pct = o.cost > 0 ? (o.net / (o.cost + o.fee)) * 100 : null;
+                    const pct = o.cost > 0 ? (o.gain / (o.cost + o.fee)) * 100 : null;
                     return [
                       head && g && (
                         <tr key={`h${k}`} className="group-row">
@@ -433,10 +433,12 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                           <td className="r">{money(o.cost + o.gmf)}{o.gmf >= 1 && <span className="cell-sub">{money(o.cost)} + 4x1000</span>}</td>
                           <td className="r hide-sm">{qty(o.qty)} {o.asset}</td>
                           <td className="r">
-                            {o.now ? <>
-                              <b><Pnl v={o.now.profit} /></b>
-                              <span className="cell-sub" title={`Al mejor comprador de P2P que acepta lo que te queda: ${o.now.nick}`}>si vendes ya · {money(o.now.price)}</span>
-                            </> : <span className="muted">—</span>}
+                            {o.gmf >= 1 ? <><b><Pnl v={-o.gmf} /></b><span className="cell-sub">4x1000 de esta compra</span></> : <span className="muted">—</span>}
+                            {o.now && (
+                              <span className="cell-sub" title={`Al mejor comprador de P2P que acepta lo que te queda: ${o.now.nick}. Ya con este 4x1000.`}>
+                                si vendes ya a {money(o.now.price)}: <span className={tone(o.now.profit)}>{signedMoney(o.now.profit)}</span>
+                              </span>
+                            )}
                           </td>
                           <td className="r hide-sm muted">—</td>
                         </tr>
@@ -454,8 +456,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                         </td>
                         <td className="r">{o.cost || o.fee ? money(o.cost + o.fee) : <span className="muted">—</span>}</td>
                         <td className="r hide-sm">{money(o.gross)}</td>
-                        <td className="r"><b><Pnl v={o.net} /></b>
-                          {o.gmf >= 1 && <span className="cell-sub"><span className="hide-sm">{signedMoney(o.gain)} </span>−4x1000 {money(o.gmf)}</span>}
+                        <td className="r"><b><Pnl v={o.gain} /></b>
                           {pct != null && <span className={`cell-sub show-sm ${tone(pct)}`}>{pct >= 0 ? "+" : "−"}{num(Math.abs(pct), 2)} %</span>}</td>
                         <td className={`r hide-sm ${pct == null ? "muted" : tone(pct)}`}>{pct == null ? "—" : `${pct >= 0 ? "+" : "−"}${num(Math.abs(pct), 2)} %`}</td>
                       </tr>
