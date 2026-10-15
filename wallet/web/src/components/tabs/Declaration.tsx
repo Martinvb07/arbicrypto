@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, type Report, type Tope, type YearExtra } from "@/lib/api";
 import { currentYear, date, dateTime, money, num, parseNum, qty, signedMoney, tone } from "@/lib/format";
 import type { TabId } from "../App";
+import { DeclarationAccounts } from "../DeclarationAccounts";
 import { CopyBoxes, HowToFile, TodoList, useTodos } from "../DeclarationParts";
 import { ImportModal } from "../ImportModal";
 import { TopesList, willFile } from "../Topes";
@@ -134,6 +135,7 @@ function DeclarationBody({ report, onTab }: { report: Report; onTab: (t: TabId) 
             </div>
             <TopesList report={report} />
           </div>
+          <DeclarationAccounts report={report} onTab={onTab} />
           <div className="card">
             <button className="fold" onClick={() => setExtraOpen(!extraOpen)} aria-expanded={extraOpen}>
               <span><b>¿Tienes salario, arriendos u otros bienes?</b><span className="cell-sub">Escríbelos para saber si debes declarar y cuánto pagarías en total. Opcional.</span></span>

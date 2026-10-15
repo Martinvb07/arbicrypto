@@ -266,9 +266,10 @@ export function Banks() {
                             </td>
                             <td className={`r ${tone(t.amount)}`}><b>{signedMoney(t.amount)}</b></td>
                             <td>
-                              <select className={`cat-select ${t.category === "otro" ? "pending" : ""}`} value={t.category} onChange={(e) => setCategory(t.id, e.target.value as BankCategory)} aria-label="Categoría">
-                                {(Object.keys(names) as BankCategory[]).map((c) => <option key={c} value={c}>{names[c]}</option>)}
-                              </select>
+                              <Select label="Categoría" value={t.category} floating searchable={false}
+                                className={`cat-select ${t.category === "otro" ? "pending" : ""}`}
+                                onChange={(v) => setCategory(t.id, v as BankCategory)}
+                                options={(Object.keys(names) as BankCategory[]).map((c) => ({ value: c, label: names[c], icon: <span className={`cat-dot cat-${c}`} /> }))} />
                               {!t.auto && <span className="cell-sub">Clasificado por ti</span>}
                             </td>
                           </tr>

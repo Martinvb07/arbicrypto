@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, type PucAccount } from "@/lib/api";
 import { fromLocalInput, money, parseNum, toLocalInput } from "@/lib/format";
 import { Field, Icon, Modal, Note } from "./ui";
+import { Select } from "./Select";
 import { useWallet } from "./wallet";
 
 const CLASSES: [string, string][] = [["activo", "Activo"], ["pasivo", "Pasivo"], ["patrimonio", "Patrimonio"], ["ingreso", "Ingresos"], ["gasto", "Gastos"], ["costo", "Costos"]];
@@ -65,14 +66,9 @@ export function NoteModal({ onClose }: { onClose: () => void }) {
               {lines.map((l, i) => (
                 <tr key={i}>
                   <td>
-                    <select value={l.account} onChange={(e) => set(i, { account: e.target.value })} aria-label="Cuenta">
-                      <option value="">Elige la cuenta…</option>
-                      {CLASSES.map(([cls, label]) => (
-                        <optgroup key={cls} label={label}>
-                          {puc.filter((a) => a.class === cls).map((a) => <option key={a.account} value={a.account}>{a.account} · {a.name}</option>)}
-                        </optgroup>
-                      ))}
-                    </select>
+                    <Select label="Cuenta" value={l.account} floating searchable onChange={(v) => set(i, { account: v })}
+                      options={CLASSES.flatMap(([cls, label]) => puc.filter((a) => a.class === cls).map((a) => ({
+                        value: a.account, label: `${a.account} · ${a.name}`, search: `${a.account} ${a.name} ${label}`, hint: label })))} />
                   </td>
                   <td><input type="text" inputMode="decimal" className="num" value={l.debit} onChange={(e) => set(i, { debit: e.target.value, credit: e.target.value ? "" : l.credit })} placeholder="$ 0" aria-label="Débito" /></td>
                   <td><input type="text" inputMode="decimal" className="num" value={l.credit} onChange={(e) => set(i, { credit: e.target.value, debit: e.target.value ? "" : l.debit })} placeholder="$ 0" aria-label="Crédito" /></td>

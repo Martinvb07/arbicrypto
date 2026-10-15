@@ -476,8 +476,15 @@ table.journal tbody tr td { border-bottom: 0; }
 .acc-stats b { font-variant-numeric: tabular-nums; }
 .acc-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
 tr.clickable { cursor: pointer; }
-.cat-select { height: 32px; font-size: 13px; padding: 0 8px; width: auto; min-width: 170px; }
-.cat-select.pending { border-color: var(--warn); }
+.cat-select { width: auto; min-width: 190px; }
+.cat-select .select-btn { height: 34px; font-size: 13px; padding: 0 10px; }
+.cat-select.pending .select-btn { border-color: var(--warn); }
+.select-pop.floating { z-index: 120; animation: menu-in .18s cubic-bezier(.2, .9, .3, 1.2); }
+.cat-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+.cat-binance_p2p { background: var(--brand); } .cat-gmf { background: var(--down); } .cat-traslado { background: #6aa9ff; }
+.cat-salario, .cat-ingreso, .cat-rendimientos { background: var(--up); } .cat-negocio { background: #b58cff; }
+.cat-bancarios, .cat-credito { background: #ff9f5a; } .cat-consumo { background: #5ad1c8; } .cat-efectivo { background: #c9b458; }
+.cat-otro { background: var(--warn); }
 
 details.files[open] > summary { border-bottom: 1px solid var(--border); }
 .preview-table { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 12px; }
@@ -1236,3 +1243,30 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
 .files .files-del:hover { color: var(--down); }
 .files .files-name { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .files-actions { animation: pop-in .2s ease-out; }
+
+/* Declaración → tus cuentas */
+.dacc-name { display: inline-flex; align-items: center; gap: 10px; }
+.dacc-bn { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: #f0b90b; color: #1e2026; font-weight: 800; font-size: 13px; }
+.dacc-table tr.dacc-p2p td { background: color-mix(in srgb, var(--brand) 5%, transparent); }
+.dacc-sum { padding: 14px 22px 18px; display: grid; gap: 10px; border-top: 1px solid var(--border); }
+.dacc-sum .lines { margin: 0; }
+.dacc-bar { height: 6px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
+.dacc-bar i { display: block; height: 100%; border-radius: 4px; background: var(--up); transition: width .5s cubic-bezier(.2, .8, .2, 1); }
+.dacc-bar i.over { background: var(--down); }
+.dacc-sum .btn { justify-self: start; }
+.dacc-ok { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--up); font-size: 13px; font-weight: 600; }
+.dacc-pending { border-top: 1px solid var(--border); padding: 14px 22px 18px; display: grid; gap: 4px; }
+.dacc-pending-head { display: grid; gap: 2px; margin-bottom: 6px; font-size: 13.5px; }
+.dacc-pending-head .muted { font-size: 12.5px; }
+.dacc-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border);
+  animation: gmf-row-in .25s ease-out both; }
+.dacc-row-txt { display: grid; min-width: 0; }
+.dacc-row-txt b { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dacc-row-txt small { color: var(--muted); font-size: 12px; }
+.dacc-pending .link { justify-self: start; margin-top: 6px; }
+@media (max-width: 640px) {
+  .dacc-sum, .dacc-pending { padding-left: 16px; padding-right: 16px; }
+  .dacc-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .dacc-row .select { grid-column: 1 / -1; }
+}
+.link.warn { color: var(--warn); }
