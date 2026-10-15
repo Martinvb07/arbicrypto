@@ -30,6 +30,8 @@ export function Banks() {
   const [data, setData] = useState<BanksSummary | null>(null);
   const [error, setError] = useState("");
   const [modal, setModal] = useState<"" | "upload" | "account">("");
+  const [delSel, setDelSel] = useState<Set<number>>(new Set());
+  const [confirmDel, setConfirmDel] = useState<number[] | null>(null);
   const [editing, setEditing] = useState<BankAccount | null>(null);
   const [uploadFor, setUploadFor] = useState<number | null>(null);
   const [acc, setAcc] = useState<number | "all">("all");
@@ -76,10 +78,20 @@ export function Banks() {
     }
   }
 
-  async function deleteFile(id: number, name: string) {
-    if (!confirm(`¿Quitar el extracto "${name}" y sus movimientos?`)) return;
-    await api.archivoBorrar(id).catch(() => undefined);
+  async function deleteFiles(ids: number[]) {
+    let ok = 0;
+    for (const id of ids) {
+      try {
+        await api.archivoBorrar(id);
+        ok++;
+      } catch { /* sigue con los demás */ }
+    }
+    toast(ok === 1 ? "Extracto borrado" : `${ok} extractos borrados`, ok < ids.length ? `${ids.length - ok} no se pudieron borrar` : "Con sus movimientos del banco",
+      ok < ids.length ? "bad" : "good");
+    setDelSel(new Set());
+    setConfirmDel(null);
     load();
+    refresh();
   }
 
   if (error) return <Note kind="bad">{error}</Note>;
@@ -273,23 +285,45 @@ export function Banks() {
           )}
 
           {hasFiles && (
-            <details className="card files">
-              <summary>Extractos subidos ({data.files.length})</summary>
+            <div className="card files">
+              <div className="card-head">
+                <div>
+                  <h2>Extractos subidos <span className="muted">({data.files.length})</span></h2>
+                  <span className="sub">Si subiste uno mal o repetido, bórralo: se van también sus movimientos del banco</span>
+                </div>
+                {delSel.size > 0 && (
+                  <div className="actions files-actions">
+                    <button className="btn btn-sm btn-ghost" onClick={() => setDelSel(new Set())}>Cancelar</button>
+                    <button className="btn btn-sm btn-danger" onClick={() => setConfirmDel([...delSel])}><Icon name="trash" size={14} /> Borrar {delSel.size}</button>
+                  </div>
+                )}
+              </div>
               <div className="table-wrap">
                 <table className="t">
-                  <thead><tr><th>Archivo</th><th>Cuenta</th><th className="r">Movimientos</th><th>Periodo</th><th className="hide-sm">Subido</th><th /></tr></thead>
+                  <thead><tr>
+                    <th className="files-check"><input type="checkbox" aria-label="Elegir todos" checked={delSel.size === data.files.length}
+                      onChange={(e) => setDelSel(e.target.checked ? new Set(data.files.map((f) => f.id)) : new Set())} /></th>
+                    <th>Archivo</th><th className="hide-sm">Cuenta</th><th className="r">Movimientos</th><th>Periodo</th><th className="hide-sm">Subido</th><th />
+                  </tr></thead>
                   <tbody>
                     {data.files.map((f) => (
-                      <tr key={f.id}>
-                        <td>{f.name}</td><td>{accName(f.account_id)}</td><td className="r">{f.rows}</td>
+                      <tr key={f.id} className={delSel.has(f.id) ? "files-picked" : ""}>
+                        <td className="files-check"><input type="checkbox" aria-label={`Elegir ${f.name}`} checked={delSel.has(f.id)}
+                          onChange={(e) => setDelSel((x) => { const n = new Set(x); if (e.target.checked) n.add(f.id); else n.delete(f.id); return n; })} /></td>
+                        <td className="files-name">{f.name}<span className="cell-sub show-sm">{accName(f.account_id)}</span></td>
+                        <td className="hide-sm">{accName(f.account_id)}</td><td className="r">{f.rows}</td>
                         <td className="nowrap">{fmtDay(f.day_from)} a {fmtDay(f.day_to)}</td><td className="hide-sm muted">{dateTime(f.uploaded)}</td>
-                        <td className="r"><button className="btn btn-sm btn-ghost" onClick={() => deleteFile(f.id, f.name)}><Icon name="trash" size={14} /></button></td>
+                        <td className="r"><button className="btn btn-sm btn-ghost files-del" onClick={() => setConfirmDel([f.id])} aria-label={`Borrar ${f.name}`} title="Borrar este extracto"><Icon name="trash" size={14} /></button></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </details>
+            </div>
+          )}
+          {confirmDel && (
+            <DeleteFilesModal files={data.files.filter((f) => confirmDel.includes(f.id))} accName={accName}
+              onClose={() => setConfirmDel(null)} onConfirm={() => deleteFiles(confirmDel)} />
           )}
         </>
       )}
@@ -424,6 +458,35 @@ function AccountModal({ account, onClose, onDone }: { account: BankAccount | nul
         {account && <button className="btn btn-danger" style={{ marginRight: "auto" }} onClick={remove}><Icon name="trash" size={15} /> Borrar</button>}
         <button className="btn" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary" disabled={!name.trim()} onClick={save}>Guardar</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Confirmar antes de borrar extractos: cuáles y cuántos movimientos se van. */
+function DeleteFilesModal({ files, accName, onClose, onConfirm }: {
+  files: { id: number; name: string; account_id: number; rows: number; day_from: string | null; day_to: string | null }[];
+  accName: (id: number) => string; onClose: () => void; onConfirm: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const rows = files.reduce((a, f) => a + f.rows, 0);
+  return (
+    <Modal title={files.length === 1 ? "¿Borrar este extracto?" : `¿Borrar ${files.length} extractos?`} onClose={busy ? () => undefined : onClose}>
+      <p className="kind-hint">Se borran con sus {num(rows)} movimientos del banco. Tus compras y ventas de Binance no se tocan. Si te equivocas, lo vuelves a subir.</p>
+      <div className="up-files" style={{ marginTop: 4 }}>
+        {files.map((f, i) => (
+          <div key={f.id} className="up-file bad" style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}>
+            <Icon name="trash" size={15} />
+            <span className="up-file-name">{f.name}</span>
+            <small>{accName(f.account_id)} · {num(f.rows)} movimientos · {fmtDay(f.day_from)} a {fmtDay(f.day_to)}</small>
+          </div>
+        ))}
+      </div>
+      <div className="form-actions">
+        <button className="btn" onClick={onClose} disabled={busy}>Cancelar</button>
+        <button className="btn btn-danger" disabled={busy} onClick={async () => { setBusy(true); await onConfirm(); }}>
+          <Icon name="trash" size={14} /> {busy ? "Borrando…" : files.length === 1 ? "Borrar" : `Borrar ${files.length}`}
+        </button>
       </div>
     </Modal>
   );

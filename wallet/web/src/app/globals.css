@@ -478,8 +478,7 @@ table.journal tbody tr td { border-bottom: 0; }
 tr.clickable { cursor: pointer; }
 .cat-select { height: 32px; font-size: 13px; padding: 0 8px; width: auto; min-width: 170px; }
 .cat-select.pending { border-color: var(--warn); }
-details.files > summary { cursor: pointer; padding: 14px 22px; font-weight: 650; list-style: none; }
-details.files > summary::-webkit-details-marker { display: none; }
+
 details.files[open] > summary { border-bottom: 1px solid var(--border); }
 .preview-table { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 12px; }
 .bank-sub { padding: 10px 22px 4px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 650; }
@@ -1228,3 +1227,12 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
 .up-file small { color: var(--muted); font-size: 12px; }
 .up-file.bad small { color: var(--down); }
 .drop.has-files { border-style: solid; }
+
+/* Extractos subidos: elegir varios y borrar */
+.files .files-check { width: 34px; }
+.files .files-check input { width: 16px; height: 16px; accent-color: var(--down); cursor: pointer; }
+.files tr.files-picked td { background: color-mix(in srgb, var(--down) 7%, transparent); }
+.files .files-del { color: var(--muted); transition: color .15s, background-color .15s; }
+.files .files-del:hover { color: var(--down); }
+.files .files-name { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-actions { animation: pop-in .2s ease-out; }
