@@ -166,20 +166,23 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   // las ocultas no suman ni restan en nada
   const mine = useMemo(() => (moves ?? []).filter((m) => !m.tercero), [moves]);
   const buys = useMemo(() => mine.filter((m) => m.kind === "compra" && inRange(m.t)), [mine, a, b]);
-  const gmf = useMemo(() => mine.reduce((s, m) => s + (inRange(m.t) ? m.gmf_cop || 0 : 0), 0), [mine, a, b]);
+  // el 4x1000 de las compras se resta en la venta (su parte en cada una); aquí va solo el de lo demás (gastos, retiros…)
+  const gmfOther = useMemo(() => mine.reduce((s, m) => s + (m.kind !== "compra" && inRange(m.t) ? m.gmf_cop || 0 : 0), 0), [mine, a, b]);
 
   const sum = useMemo(() => {
     const sales = inPeriod.filter((o) => o.kind === "venta" || o.kind === "permuta");
     const gain = inPeriod.reduce((s, o) => s + o.gain, 0);
     const cost = sales.reduce((s, o) => s + o.cost, 0);
+    const gmf = inPeriod.reduce((s, o) => s + o.gmf, 0) + gmfOther;
     return {
-      gain, cost,
+      gain, cost, gmf,
       sold: sales.reduce((s, o) => s + o.gross - o.fee, 0), nSold: sales.length,
-      won: sales.filter((o) => Math.round(o.gain) > 0).length,
+      won: sales.filter((o) => Math.round(o.net) > 0).length,
       bought: buys.reduce((s, m) => s + cashValue(m), 0), nBought: buys.length,
       net: gain - gmf,
+      salesNet: sales.reduce((s, o) => s + o.net, 0),
     };
-  }, [inPeriod, buys, gmf]);
+  }, [inPeriod, buys, gmfOther]);
 
   /* ---------- gráfica por día / semana / mes ---------- */
   const bars = useMemo(() => {
@@ -188,7 +191,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
       const k = bucketOf(d, group);
       if (!map.has(k)) map.set(k, { gain: 0, n: 0, bought: 0 });
     }
-    for (const o of inPeriod) { const x = map.get(bucketOf(dayOf(o.t), group)); if (x) { x.gain += o.gain; x.n++; } }
+    for (const o of inPeriod) { const x = map.get(bucketOf(dayOf(o.t), group)); if (x) { x.gain += o.net; x.n++; } }
     for (const m of buys) { const x = map.get(bucketOf(dayOf(m.t), group)); if (x) x.bought += cashValue(m); }
     return [...map].sort((p, q) => p[0] - q[0]).map(([k, v]) => ({ k, ...v }));
   }, [inPeriod, buys, a, b, group]);
@@ -250,12 +253,12 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   }), [buys, usedOf, market]);
   const listed = show === "ocultas" ? thirdOps : show === "compras" ? buyOps
     : show === "todas" ? [...inPeriod, ...buyOps].sort((p, q) => q.t - p.t)
-    : inPeriod.filter((o) => (show === "gana" ? Math.round(o.gain) > 0 : Math.round(o.gain) < 0));
+    : inPeriod.filter((o) => (show === "gana" ? Math.round(o.net) > 0 : Math.round(o.net) < 0));
   const pages = Math.ceil(listed.length / PAGE);
   const slice = listed.slice(page * PAGE, page * PAGE + PAGE);
   const bucketSum = useMemo(() => {
     const m = new Map<number, { gain: number; n: number }>();
-    for (const o of listed) { const k = bucketOf(dayOf(o.t), group); const x = m.get(k) ?? { gain: 0, n: 0 }; x.gain += o.buy ? -o.gmf : o.gain; x.n++; m.set(k, x); }
+    for (const o of listed) { const k = bucketOf(dayOf(o.t), group); const x = m.get(k) ?? { gain: 0, n: 0 }; x.gain += o.buy ? (show === "compras" ? -o.gmf : 0) : o.net; x.n++; m.set(k, x); }
     return m;
   }, [listed, group]);
 
@@ -277,7 +280,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   ];
   const quick = (live ? ["hoy", "semana", "mes", "año"] : ["año"]).map((id) => presets.find((p) => p.id === id)!).filter(Boolean);
   const periodText = custom ? `${clean(F_SHORT.format(dateOf(a)))} – ${clean(F_SHORT.format(dateOf(b)))}` : cur.label.toLowerCase();
-  const margin = sum.cost > 0 ? (sum.gain / sum.cost) * 100 : 0;
+  const margin = sum.cost > 0 ? (sum.salesNet / sum.cost) * 100 : 0;
 
   return (
     <div className="stack">
@@ -304,7 +307,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
         <div className="kpi accent">
           <small>{sum.net < -0.5 ? "Perdiste" : "Ganaste"} · {periodText}</small>
           <b className={tone(sum.net)}>{signedMoney(sum.net)}</b>
-          <span>Operaciones {signedMoney(sum.gain)}{gmf > 0 ? ` · 4x1000 −${money(gmf)}` : ""}</span>
+          <span>Operaciones {signedMoney(sum.gain)}{sum.gmf >= 0.5 ? ` · 4x1000 −${money(sum.gmf)}` : ""}</span>
         </div>
         <div className="kpi">
           <small>Compraste</small>
@@ -329,7 +332,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
           <div className="card-head">
             <div>
               <h2>Ganancia por {GROUP_LABEL[group].toLowerCase()}</h2>
-              <span className="sub">Verde ganaste · rojo perdiste</span>
+              <span className="sub">Ya sin el 4x1000 · verde ganaste · rojo perdiste</span>
             </div>
             <div className="seg">
               {(Object.keys(GROUP_LABEL) as Group[]).map((g) => <button key={g} className={group === g ? "on" : ""} onClick={() => setGroup(g)}>{GROUP_LABEL[g]}</button>)}
@@ -447,7 +450,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                     <th>Qué hiciste</th>
                     <th className="r">Te costó</th>
                     <th className="r hide-sm">Recibiste</th>
-                    <th className="r" title="Venta: lo que recibiste menos lo que te costó. Compra: su 4x1000, que se paga una sola vez al transferir">Te quedó</th>
+                    <th className="r" title="Venta: lo que recibiste menos lo que te costó, ya sin la parte del 4x1000 de la compra. El 4x1000 de una compra se resta en las ventas que salen de ella, una sola vez">Te quedó</th>
                     <th className="r hide-sm">%</th>
                   </tr>
                 </thead>
@@ -456,7 +459,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                     const k = bucketOf(dayOf(o.t), group);
                     const head = i === 0 || bucketOf(dayOf(slice[i - 1].t), group) !== k;
                     const g = bucketSum.get(k);
-                    const pct = o.cost > 0 ? (o.gain / o.cost) * 100 : null;
+                    const pct = o.cost > 0 ? (o.net / o.cost) * 100 : null;
                     return [
                       head && g && (
                         <tr key={`h${k}`} className="group-row">
@@ -512,7 +515,9 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                           <td className="r">{money(o.cost + o.gmf)}{o.gmf >= 1 && <span className="cell-sub">{money(o.cost)} + 4x1000</span>}</td>
                           <td className="r hide-sm">{qty(o.qty)} {o.asset}</td>
                           <td className="r">
-                            {o.gmf >= 1 ? <><b><Pnl v={-o.gmf} /></b><span className="cell-sub">4x1000 de esta compra</span></> : <span className="muted">—</span>}
+                            {o.gmf >= 1 ? <><span className="muted">4x1000 −{money(o.gmf)}</span>
+                              <span className="cell-sub" title="No se resta aquí: se resta en cada venta que sale de esta compra, en proporción a lo que vendes">se resta al vender</span></>
+                              : <span className="muted">—</span>}
                             {o.now && (
                               <span className="cell-sub" title={`Al mejor comprador de P2P que acepta lo que te queda: ${o.now.nick}. Ya con este 4x1000.`}>
                                 si vendes ya a {money(o.now.price)}: <span className={tone(o.now.profit)}>{signedMoney(o.now.profit)}</span>
@@ -555,10 +560,10 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                             return <span className="cell-sub" title="La comisión de Binance sale en cripto: ya está dentro de lo que vendiste y no te llega">
                               comisión {fq ? `${num(fq, 2)} ${o.asset}` : money(o.fee)}</span>;
                           })()}</td>
-                        <td className="r"><b><Pnl v={o.gain} /></b>
+                        <td className="r"><b><Pnl v={o.net} /></b>
                           {o.gmf >= 1 && (
-                            <span className="cell-sub" title="Ya sin la parte del 4x1000 que pagaste al comprar lo que vendiste (las comisiones de Binance ya van en el costo y en lo recibido)">
-                              neta <span className={tone(o.net)}>{signedMoney(o.net)}</span> · 4x1000 −{money(o.gmf)}
+                            <span className="cell-sub" title="La ganancia de verdad: lo que recibiste menos lo que te costó, menos la parte del 4x1000 que pagaste al comprar lo que vendiste (las comisiones de Binance ya van en el costo y en lo recibido)">
+                              {signedMoney(o.gain)} − 4x1000 {money(o.gmf)}
                             </span>
                           )}
                           {pct != null && <span className={`cell-sub show-sm ${tone(pct)}`}>{pct >= 0 ? "+" : "−"}{num(Math.abs(pct), 2)} %</span>}</td>
