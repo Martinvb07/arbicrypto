@@ -15,7 +15,7 @@ export function ImportModal({ onClose }: { onClose: () => void }) {
 
 function CsvImport() {
   const { toast, refresh } = useWallet();
-  const [file, setFile] = useState<{ name: string; text: string } | null>(null);
+  const [file, setFile] = useState<{ name: string; text?: string; pdf?: string } | null>(null);
   const [result, setResult] = useState<CsvResult | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [valid, setValid] = useState(0);
@@ -26,6 +26,16 @@ function CsvImport() {
   async function pick(f: File | undefined) {
     if (!f) return;
     setResult(null); setErrors([]); setError("");
+    if (f.name.toLowerCase().endsWith(".pdf")) {  // el historial P2P que Binance ahora entrega en PDF
+      if (f.size > 8 * 1024 * 1024) return setError("El PDF pesa más de 8 MB. Expórtalo por periodos más cortos.");
+      const pdf = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+        r.onerror = () => reject(new Error("No se pudo leer el archivo."));
+        r.readAsDataURL(f);
+      });
+      return setFile({ name: f.name, pdf });
+    }
     if (f.size > 2.5 * 1024 * 1024) return setError("El archivo pesa más de 2,5 MB. Divídelo por años.");
     const buf = await f.arrayBuffer();
     let text = new TextDecoder("utf-8").decode(buf);
@@ -37,7 +47,7 @@ function CsvImport() {
     if (!file) return;
     setBusy(true); setError("");
     try {
-      const r = await api.importCsv(file.text, partial);
+      const r = file.pdf ? await api.importPdf(file.pdf, partial) : await api.importCsv(file.text ?? "", partial);
       setResult(r); setErrors(r.errors); setFile(null);
       toast("Archivo importado", `${r.added} movimientos nuevos`, "good");
       refresh();
@@ -53,7 +63,7 @@ function CsvImport() {
   return (
     <div className="stack">
       <Note>
-        Acepta <b>el archivo de órdenes P2P de Binance</b> (P2P → Órdenes → Exportar; súbelo tal cual, sin abrirlo en Excel)
+        Acepta <b>el historial de órdenes P2P de Binance</b> en PDF o CSV (P2P → Órdenes → Exportar; súbelo tal cual, sin abrirlo en Excel)
         o <b>la plantilla</b> para cualquier otro movimiento.{" "}
         <a href="/api/plantilla.csv" download className="link">Descargar plantilla</a>
       </Note>
@@ -61,9 +71,9 @@ function CsvImport() {
         onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); void pick(e.dataTransfer.files[0]); }}>
         <Icon name="upload" size={22} />
-        <b>{file ? file.name : "Elige o arrastra tu archivo .csv"}</b>
-        <span>Si Binance te da un .zip, descomprímelo primero</span>
-        <input type="file" accept=".csv,text/csv" onChange={(e) => void pick(e.target.files?.[0])} />
+        <b>{file ? file.name : "Elige o arrastra tu archivo: PDF o CSV"}</b>
+        <span>Si Binance te da un .zip, descomprímelo primero · lo que ya estaba no se duplica</span>
+        <input type="file" accept=".pdf,.csv,text/csv,application/pdf" onChange={(e) => void pick(e.target.files?.[0])} />
       </label>
       {error && (
         <Note kind="bad">

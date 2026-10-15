@@ -682,7 +682,10 @@ def binance_sync():
 @needs_binance
 def import_csv():
     d = body()
-    rows, errors, examples = read_csv(str(d.get("text") or ""), gmf=True)
+    text = str(d.get("text") or "")
+    if d.get("pdf"):  # el historial P2P que Binance entrega en PDF
+        text = pdf_text(d["pdf"])
+    rows, errors, examples = read_csv(text, gmf=True)
     moves = []
     for n, raw in rows:
         try:
@@ -697,6 +700,26 @@ def import_csv():
     moves = [m for m in moves if m["t"] > lock]
     added = db.add_movements(g.user["id"], moves, time.time())
     return jsonify(added=added, skipped=len(moves) - added, examples=examples, locked=frozen, errors=errors[:50])
+
+
+def pdf_text(b64):
+    """Texto de un PDF subido en base64 (el historial P2P de Binance)."""
+    import base64
+    import pdfplumber
+    try:
+        data = base64.b64decode(str(b64), validate=False)
+    except ValueError:
+        raise Bad("No pude leer el archivo.")
+    if len(data) > 8 * 1024 * 1024:
+        raise Bad("El PDF pesa más de 8 MB. Expórtalo por periodos más cortos.")
+    try:
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+    except Exception:  # noqa: BLE001 - pdfminer lanza varios tipos
+        raise Bad("No pude abrir el PDF. Descárgalo otra vez de Binance (P2P → Órdenes → Exportar).")
+    if not text.strip():
+        raise Bad("El PDF no tiene texto. Descárgalo otra vez de Binance.")
+    return text
 
 
 def csv_move(raw):

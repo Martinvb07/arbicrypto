@@ -10,7 +10,7 @@ import re
 import threading
 import time
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import requests
@@ -518,10 +518,64 @@ def parse_date(v, tz=CO_TZ):
     raise ValueError(f"fecha inválida «{v}» (usa AAAA-MM-DD HH:MM)")
 
 
+P2P_LINE_STATUS = ("system cancelled", "completed", "cancelled", "appeal", "pending", "completada", "cancelada")
+
+
+def is_p2p_statement(text):
+    """El 'Historial de órdenes C2C' que Binance ahora entrega en PDF (o ese PDF pasado a texto/CSV)."""
+    head = _norm(text[:3000])
+    return "historial de ordenes c2c" in head or "c2c order history" in head
+
+
+def read_p2p_statement(text, gmf=True):
+    """Lee el historial P2P de Binance en PDF: una orden por línea
+    'número tipo cripto fiat total precio cantidad [tipo de cambio] [comisiones] contraparte estado fecha hora'.
+    Solo las completadas. Las horas vienen en la zona del encabezado ('Periodo(UTC--5)'); si no dice, Colombia."""
+    m = re.search(r"UTC\s*([+-]+)\s*(\d{1,2})", text)
+    tz = timezone(timedelta(hours=-int(m[2]) if "-" in m[1] else int(m[2]))) if m else CO_TZ
+    moves, errors, seen = [], [], 0
+    for n, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip().strip('"').strip()
+        tok = line.split()
+        if len(tok) < 11 or not re.fullmatch(r"\d{12,}", tok[0]) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", tok[-2]):
+            continue
+        seen += 1
+        # estado: puede ser de dos palabras ("System cancelled")
+        two, one = _norm(" ".join(tok[-4:-2])), _norm(tok[-3])
+        status, cut = (two, 4) if two in P2P_LINE_STATUS else (one, 3)
+        if status not in COMPLETED:
+            continue
+        try:
+            order, side_txt, asset, fiat = tok[0], _norm(tok[1]), tok[2].upper(), tok[3].upper()
+            side = "BUY" if side_txt in ("buy", "compra", "comprar") else "SELL" if side_txt in ("sell", "venta", "vender") else None
+            if not side:
+                raise ValueError(f"tipo de orden «{tok[1]}»")
+            counterpart = tok[-cut - 1]
+            nums = [parse_number(x) for x in tok[4:-cut - 1]]
+            if len(nums) < 3 or any(x is None for x in nums):
+                raise ValueError("no pude leer los valores de la orden")
+            total, qty, extra = nums[0], nums[2], nums[3:]
+            # lo que sigue a la cantidad: [tipo de cambio] y las comisiones (del creador / del tomador)
+            if len(extra) >= 2 and extra[0] > 50:
+                extra = extra[1:]  # el primero era el tipo de cambio
+            fee = sum(extra)
+            t = datetime.strptime(f"{tok[-2]} {tok[-1]}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=tz).timestamp()
+            mv = p2p_move(order, side, asset, fiat, qty, total, fee, t, counterpart, gmf)
+            if mv:
+                moves.append((n, mv))
+        except ValueError as e:
+            errors.append(f"Orden {tok[0]}: {e}")
+    if not seen:
+        errors.append("No encontré órdenes en el historial de Binance. ¿Es el archivo de P2P → Órdenes → Exportar?")
+    return moves, errors, 0
+
+
 def read_csv(text, gmf=True):
     """Devuelve (movimientos sin validar, errores, filas de ejemplo ignoradas). Detecta ; o , como separador.
     Reconoce la plantilla propia y el archivo de órdenes P2P que se descarga en Binance."""
     text = text.lstrip("﻿")
+    if is_p2p_statement(text):
+        return read_p2p_statement(text, gmf)
     first = text.split("\n", 1)[0]
     delim = ";" if first.count(";") >= first.count(",") else ","
     rows = list(csv.reader(io.StringIO(text), delimiter=delim))

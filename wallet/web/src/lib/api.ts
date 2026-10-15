@@ -576,6 +576,7 @@ export const api = {
   binance: () => get<BinanceStatus>("/api/binance"),
   binanceSync: () => post<BinanceStatus>("/api/binance/sync"),
   importCsv: (text: string, partial: boolean) => post<CsvResult>("/api/import/csv", { text, partial }),
+  importPdf: (pdf: string, partial = false) => post<CsvResult>("/api/import/csv", { pdf, partial }),
 
   report: (year: number) => get<Report>(`/api/report?year=${year}`),
   saldos: () => get<Saldos>("/api/saldos"),

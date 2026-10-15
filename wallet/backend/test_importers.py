@@ -2,6 +2,7 @@
 import unittest
 from datetime import datetime, timezone
 
+import importers
 from importers import ImportJob, read_csv
 
 EN = """Order Number,Order Type,Asset Type,Fiat Type,Total Price,Price,Quantity,Exchange rate,Maker Fee,Maker Fee Rate,Taker Fee,Taker Fee Rate,Couterparty,Status,Created Time
@@ -188,6 +189,29 @@ class Sincronizacion(unittest.TestCase):
         job._run(uid, FakeBinance(_t.time()), True, saved["cursor"], lambda u, ok, c, e: None)
         self.assertEqual(job.jobs[uid]["added"], 0)
 
+
+HISTORIAL_PDF = """www.binance.com Page 1/1
+Historial de órdenes C2C
+Id. de usuario: 123 Periodo(UTC--5): 2026-04-14 to 2026-10-14
+Número de orden Activo Precio total Precio Cantidad del Creado del tomad Contraparte Estado
+22941560102382657536 Buy USDT COP 108773 3217.73 33.8 3219.34 0.07 VENDEDOR Completed 2026-10-08 12:10:25
+22941953194110771200 Sell ETH COP 118499.45 7860993.83 0.01507436 3193.32 0 COMPRADOR Completed 2026-10-09 14:12:26
+22941968647793750016 Sell USDT COP 120599.7 3210 37.57 0.07 OTRO System cancelled 2026-10-09 15:13:50
+"22942405566905016320 Buy USDT COP 500000 3179.99 157.23 0.07 ALGUIEN Completed 2026-10-10 20:10:00"
+"""
+
+
+class HistorialP2PEnPdf(unittest.TestCase):
+    def test_lee_completadas_con_comision_y_hora_de_colombia(self):
+        moves, errors, _ = importers.read_csv(HISTORIAL_PDF)
+        self.assertEqual(errors, [])
+        ms = [m for _, m in moves]
+        self.assertEqual([m["kind"] for m in ms], ["compra", "venta", "compra"])  # la cancelada no entra
+        self.assertAlmostEqual(ms[0]["in_qty"], 33.73)          # 33,8 − 0,07 de comisión
+        self.assertEqual(ms[0]["out_qty"], 108773)
+        self.assertEqual(ms[1]["fee_qty"], 0)                    # 3193,32 era el tipo de cambio, no comisión
+        self.assertEqual(ms[2]["ext_id"], "p2p:22942405566905016320")  # misma referencia que la API: no se duplica
+        self.assertEqual(datetime.fromtimestamp(ms[0]["t"], importers.CO_TZ).strftime("%Y-%m-%d %H:%M"), "2026-10-08 12:10")
 
 if __name__ == "__main__":
     unittest.main()
