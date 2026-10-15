@@ -1270,3 +1270,7 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
   .dacc-row .select { grid-column: 1 / -1; }
 }
 .link.warn { color: var(--warn); }
+
+.acc-bal-missing { color: var(--muted); }
+.acc-bal .link { font-size: inherit; }
+.acc-bal-edit { margin-left: 6px; }

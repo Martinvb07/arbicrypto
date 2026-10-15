@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type AccountKind, type BankAccount, type BankCategory, type BanksSummary, type StatementPreview } from "@/lib/api";
-import { date, dateTime, money, num, signedMoney, tone } from "@/lib/format";
+import { date, dateTime, money, num, signedMoney, tone, parseNum } from "@/lib/format";
 import { methodName } from "../GmfChoice";
 import { INSTITUTIONS, institutionOf, type Institution } from "@/lib/banks";
 import { Select, type SelectOption } from "../Select";
@@ -31,6 +31,7 @@ export function Banks() {
   const [error, setError] = useState("");
   const [modal, setModal] = useState<"" | "upload" | "account">("");
   const [delSel, setDelSel] = useState<Set<number>>(new Set());
+  const [balanceFor, setBalanceFor] = useState<BankAccount | null>(null);
   const [confirmDel, setConfirmDel] = useState<number[] | null>(null);
   const [editing, setEditing] = useState<BankAccount | null>(null);
   const [uploadFor, setUploadFor] = useState<number | null>(null);
@@ -152,8 +153,19 @@ export function Banks() {
                   <button className="btn btn-sm btn-icon btn-ghost" title="Editar cuenta" onClick={() => { setEditing(a); setModal("account"); }}><Icon name="edit" size={15} /></button>
                 </div>
                 <div className="acc-bal">
-                  <span>{a.last_balance != null ? money(a.last_balance) : "Sin extracto"}</span>
-                  <small>{a.last_day ? `Saldo al ${fmtDay(a.last_day)}` : "Sube el primero"}</small>
+                  {a.last_balance != null ? <>
+                    <span>{money(a.last_balance)}</span>
+                    <small>
+                      Saldo al {fmtDay(a.last_day)}{a.balance_from === "manual" && " · lo escribiste tú"}
+                      {a.balance_from === "manual" && <button className="link acc-bal-edit" onClick={() => setBalanceFor(a)}>cambiar</button>}
+                    </small>
+                  </> : a.files ? <>
+                    <span className="acc-bal-missing">Sin saldo</span>
+                    <small>Los extractos de {a.name} no traen el saldo · <button className="link" onClick={() => setBalanceFor(a)}>Escríbelo</button></small>
+                  </> : <>
+                    <span>Sin extracto</span>
+                    <small>Sube el primero</small>
+                  </>}
                 </div>
                 {a.pay_methods.length > 0 && (
                   <div className="acc-pms">
@@ -329,6 +341,7 @@ export function Banks() {
         </>
       )}
 
+      {balanceFor && <BalanceModal account={balanceFor} onClose={() => setBalanceFor(null)} onDone={() => { setBalanceFor(null); load(); refresh(); }} />}
       {modal === "account" && <AccountModal account={editing} onClose={() => setModal("")} onDone={() => { setModal(""); load(); }} />}
       {modal === "upload" && <UploadModal accounts={data.accounts} initial={uploadFor} onClose={() => setModal("")} onDone={() => { setModal(""); load(); refresh(); }} />}
     </div>
@@ -459,6 +472,50 @@ function AccountModal({ account, onClose, onDone }: { account: BankAccount | nul
         {account && <button className="btn btn-danger" style={{ marginRight: "auto" }} onClick={remove}><Icon name="trash" size={15} /> Borrar</button>}
         <button className="btn" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary" disabled={!name.trim()} onClick={save}>Guardar</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Saldo escrito a mano: para bancos cuyo extracto no trae la columna de saldo (p. ej. Nu). */
+function BalanceModal({ account, onClose, onDone }: { account: BankAccount; onClose: () => void; onDone: () => void }) {
+  const { toast } = useWallet();
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date());
+  const [value, setValue] = useState(account.balance_manual != null ? String(Math.round(account.balance_manual)) : "");
+  const [day, setDay] = useState(account.balance_manual_day ?? today);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const v = parseNum(value);
+
+  async function save(balance: number | null) {
+    setBusy(true);
+    setError("");
+    try {
+      await api.bancoSaldo(account.id, balance, day);
+      toast(balance == null ? "Saldo quitado" : "Saldo guardado", balance == null ? undefined : `${account.name}: ${money(balance)}`, "good");
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={`Saldo de ${account.name}`} onClose={busy ? () => undefined : onClose}>
+      <p className="kind-hint">Los extractos de {account.name} no traen el saldo. Mira cuánto tienes en la app del banco y escríbelo: cuenta para tu total y para la declaración (patrimonio al 31 de diciembre).</p>
+      <div className="form">
+        <Field label="Saldo">
+          <input type="text" inputMode="decimal" className="num" value={value} onChange={(e) => setValue(e.target.value)} placeholder="$ 0" autoFocus />
+        </Field>
+        <Field label="A la fecha">
+          <input type="date" value={day} max={today} onChange={(e) => setDay(e.target.value)} />
+        </Field>
+      </div>
+      {error && <p className="form-error" style={{ marginTop: 12 }}>{error}</p>}
+      <div className="form-actions">
+        {account.balance_manual != null && <button className="btn btn-ghost" disabled={busy} onClick={() => void save(null)}>Quitar</button>}
+        <button className="btn" onClick={onClose} disabled={busy}>Cancelar</button>
+        <button className="btn btn-primary" disabled={busy || v == null} onClick={() => v != null && void save(v)}>{busy ? "Guardando…" : "Guardar"}</button>
       </div>
     </Modal>
   );

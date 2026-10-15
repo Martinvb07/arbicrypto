@@ -438,6 +438,10 @@ export interface BankAccount {
   balance_end_day: string | null;
   last_balance: number | null;
   last_day: string | null;
+  /** de dónde sale el saldo: del extracto, escrito a mano (el extracto de ese banco no trae saldo) o ninguno */
+  balance_from?: "extracto" | "manual" | null;
+  balance_manual?: number | null;
+  balance_manual_day?: string | null;
   files: number;
   day_from: string | null;
   day_to: string | null;
@@ -582,6 +586,7 @@ export const api = {
   saldos: () => get<Saldos>("/api/saldos"),
   bancos: (year: number) => get<BanksSummary>(`/api/bancos?year=${year}`),
   bancoCuenta: (a: { id?: number; name: string; kind: AccountKind; pay_methods: string[] }) => post<{ id: number }>("/api/bancos/cuentas", a),
+  bancoSaldo: (id: number, balance: number | null, day: string) => post(`/api/bancos/cuentas/${id}/saldo`, { balance, day }),
   bancoCuentaBorrar: (id: number) => post(`/api/bancos/cuentas/${id}/borrar`),
   extractoPreview: (i: StatementInput) => post<StatementPreview>("/api/bancos/extracto/preview", i),
   extractoSubir: (i: StatementInput) => post<{ file_id: number; added: number; skipped: number; warnings: string[] }>("/api/bancos/extracto", i),

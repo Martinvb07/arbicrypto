@@ -180,6 +180,8 @@ ADDED_COLUMNS = (
     ("profile", "auto_close", "INTEGER NOT NULL DEFAULT 1"),   # cierres automáticos (0 = en pausa)
     ("profile", "cash_account", "TEXT NOT NULL DEFAULT ''"),   # cuenta de pesos con la que se lleva la caja
     ("closings", "auto", "INTEGER NOT NULL DEFAULT 0"),        # 1 = lo hizo la app
+    ("accounts", "balance_manual", "{real}"),                   # saldo escrito a mano (bancos cuyo extracto no trae saldo)
+    ("accounts", "balance_manual_day", "TEXT"),
     ("year_extra", "gmf_cert", "{real} NOT NULL DEFAULT 0"),   # 4x1000 del certificado del banco
 )
 

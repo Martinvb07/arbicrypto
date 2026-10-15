@@ -868,6 +868,24 @@ def bancos_cuenta():
     return jsonify(id=aid)
 
 
+@app.post("/api/bancos/cuentas/<int:aid>/saldo")
+@with_session
+@needs_binance
+def bancos_cuenta_saldo(aid):
+    """Saldo de hoy escrito a mano (si el extracto de ese banco no trae saldo). Vacío = quitarlo."""
+    d = body()
+    raw = d.get("balance")
+    balance = None if raw in (None, "") else num(raw, "Saldo", minimum=-1e12)
+    day = str(d.get("day") or datetime.now(tax.CO_TZ).date().isoformat())[:10]
+    try:
+        datetime.fromisoformat(day)
+    except ValueError:
+        raise Bad("Fecha inválida.")
+    if not banks.set_manual_balance(g.user["id"], aid, balance, day):
+        return jsonify(error="No existe esa cuenta."), 404
+    return jsonify(ok=True)
+
+
 @app.post("/api/bancos/cuentas/<int:aid>/borrar")
 @with_session
 @needs_binance

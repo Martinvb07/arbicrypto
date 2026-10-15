@@ -3,6 +3,7 @@ import hashlib
 import os
 import re
 import time
+from datetime import datetime
 
 import statements as st
 import tax
@@ -26,7 +27,8 @@ class Banks:
     def accounts(self, uid):
         if not self.db.linked(uid):  # sin Binance conectado la wallet sale vacía
             return []
-        rows = self.db.q("SELECT id, name, kind, pay_methods, created FROM accounts WHERE user_id=? ORDER BY created", (uid,))
+        rows = self.db.q("SELECT id, name, kind, pay_methods, created, balance_manual, balance_manual_day FROM accounts "
+                         "WHERE user_id=? ORDER BY created", (uid,))
         for r in rows:
             r["pay_methods"] = [p for p in r["pay_methods"].split(",") if p]
         return rows
@@ -38,6 +40,11 @@ class Banks:
             return aid
         return self.db.run("INSERT INTO accounts (user_id, name, kind, pay_methods, created) VALUES (?,?,?,?,?)",
                            (uid, name, kind, pm, time.time()))[0]
+
+    def set_manual_balance(self, uid, aid, balance, day):
+        """Saldo escrito a mano: para bancos cuyo extracto no trae la columna de saldo (p. ej. Nu)."""
+        return self.db.run("UPDATE accounts SET balance_manual=?, balance_manual_day=? WHERE id=? AND user_id=?",
+                           (balance, day if balance is not None else None, aid, uid))[1]
 
     def account(self, uid, aid):
         return self.db.one("SELECT * FROM accounts WHERE id=? AND user_id=?", (aid, uid))
@@ -176,6 +183,12 @@ class Banks:
             year_tx.append({k: t[k] for k in ("id", "account_id", "day", "t", "description", "amount", "balance", "category", "auto", "note")}
                            | {"match": {"id": m["id"], "kind": m["kind"], "asset": m["in_asset"] if m["kind"] == "compra" else m["out_asset"],
                                         "qty": m["in_qty"] if m["kind"] == "compra" else m["out_qty"]} if m else None})
+        for a in acc.values():  # sin saldo en los extractos: el que escribiste a mano
+            a["balance_from"] = "extracto" if a["last_balance"] is not None else None
+            if a["last_balance"] is None and a.get("balance_manual") is not None:
+                a["last_balance"], a["last_day"], a["balance_from"] = a["balance_manual"], a["balance_manual_day"], "manual"
+                if a["balance_manual_day"] and a["balance_manual_day"] < datetime.fromtimestamp(end, tax.CO_TZ).date().isoformat():
+                    a["balance_end"], a["balance_end_day"] = a["balance_manual"], a["balance_manual_day"]
         matched = {t["match_id"] for t in txs if t["match_id"]}
         unmatched = [{"id": m["id"], "t": m["t"], "kind": m["kind"], "cop_value": m["cop_value"], "pay_method": m["pay_method"]}
                      for m in moves.values() if start <= m["t"] < end and m["id"] not in matched]
