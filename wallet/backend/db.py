@@ -175,6 +175,7 @@ ADDED_COLUMNS = (
     ("movements", "fee_asset", "TEXT NOT NULL DEFAULT ''"),    # cripto de la comisión de Binance
     ("movements", "fee_qty", "{real} NOT NULL DEFAULT 0"),     # comisión que Binance cobró en cripto
     ("movements", "gmf_choice", "INTEGER"),                     # 4x1000 elegido a mano en esa compra: 1 sí, 0 no, NULL = el de siempre
+    ("movements", "lot_from", "INTEGER"),                       # venta: id de la compra de la que salió (NULL = FIFO)
     ("profile", "gmf_mode", "TEXT"),                           # NULL = aún no ha dicho si su banco cobra el 4x1000
     ("profile", "gmf_methods", "TEXT NOT NULL DEFAULT '{{}}'"),  # 4x1000 por medio de pago
     ("profile", "auto_close", "INTEGER NOT NULL DEFAULT 1"),   # cierres automáticos (0 = en pausa)
@@ -335,6 +336,11 @@ class DB:
         marks = ",".join("?" * len(ids))
         return self.run(f"UPDATE movements SET gmf_choice=? WHERE user_id=? AND kind='compra' AND id IN ({marks})",
                         (1 if on else 0, uid, *ids))[1]
+
+    def set_lot_from(self, uid, mid, buy_id):
+        """En esa venta, de qué compra salió (None vuelve al orden normal)."""
+        return self.run("UPDATE movements SET lot_from=? WHERE user_id=? AND id=? AND kind IN ('venta','permuta','comision')",
+                        (buy_id, uid, mid))[1]
 
     def update_movement(self, uid, mid, m):
         keep = ("ext_id", "source", "pay_method", "fee_qty", "fee_asset")

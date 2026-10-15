@@ -287,5 +287,41 @@ class GmfElegido(unittest.TestCase):
         out = {m["id"]: m["gmf_cop"] for m in tax.apply_gmf(ms, "elegir")}
         self.assertEqual(out, {1: 400, 2: 0.0, 3: 400.0, 4: 0})
 
+
+class LoteElegido(unittest.TestCase):
+    def test_venta_sale_de_la_compra_que_digas(self):
+        def buy(i, t, q, cop):
+            return dict(id=i, t=t, kind="compra", out_asset="COP", out_qty=cop, in_asset="USDT", in_qty=q, cop_value=cop,
+                        fee_cop=0, gmf_cop=cop * 0.004)
+
+        def sell(i, t, q, cop, lot=None):
+            return dict(id=i, t=t, kind="venta", out_asset="USDT", out_qty=q, in_asset="COP", in_qty=cop, cop_value=cop,
+                        fee_cop=0, gmf_cop=0, lot_from=lot)
+        t0 = 1760400000
+        ms = [buy(1, t0, 99.68, 315710), buy(2, t0 + 60, 157.9, 500000),
+              sell(3, t0 + 120, 99.19, 316131.94), sell(4, t0 + 180, 72.79, 231980, lot=2), sell(5, t0 + 240, 61.70, 196600, lot=2)]
+        a, b, c = tax.compute(ms, 2025, True)["disposals"]
+        self.assertEqual([s["id"] for s in b["sources"]], [2])                # la de 72,72 salió de la de 500k
+        self.assertAlmostEqual(b["sources"][0]["left"], 157.9 - 72.79)
+        self.assertAlmostEqual(b["cost"], 500000 * 72.79 / 157.9)
+        self.assertEqual([s["id"] for s in c["sources"]], [2])
+        self.assertAlmostEqual(c["sources"][0]["left"], 157.9 - 72.79 - 61.70)
+        # la siguiente sin elegir sigue en orden: primero lo que quedó de la de 99,68
+        ms[4]["lot_from"] = None
+        c = tax.compute(ms, 2025, True)["disposals"][2]
+        self.assertEqual([s["id"] for s in c["sources"]], [1, 2])
+        self.assertAlmostEqual(c["sources"][0]["qty"], 99.68 - 99.19)
+        # sin elegir nada: FIFO de siempre
+        ms[3]["lot_from"] = None
+        self.assertEqual([s["id"] for s in tax.compute(ms, 2025, True)["disposals"][1]["sources"]], [1, 2])
+        # la compra elegida se acaba: sale de la lista y lo demás sigue igual
+        led = tax.Ledger("fifo")
+        led.add("USDT", 10, 100, 1, {"id": 1}); led.add("USDT", 10, 100, 2, {"id": 2})
+        parts, miss = led.take("USDT", 12, prefer=2)
+        self.assertEqual([p[3]["id"] for p in parts], [2, 1])
+        self.assertEqual([l[3]["id"] for l in led.lots["USDT"]], [1])
+        self.assertAlmostEqual(led.lots["USDT"][0][0], 8)
+
+
 if __name__ == "__main__":
     unittest.main()

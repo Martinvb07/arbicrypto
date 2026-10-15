@@ -278,7 +278,7 @@ def moves(uid, start=None, end=None):
 def public_move(m):
     return {**{k: m.get(k) for k in ("id", "t", "kind", "out_asset", "out_qty", "in_asset", "in_qty", "cop_value", "fee_cop",
                                      "gmf_cop", "platform", "counterpart", "source", "note", "category", "pay_method",
-                                     "fee_qty", "fee_asset", "gmf_choice")},
+                                     "fee_qty", "fee_asset", "gmf_choice", "lot_from")},
             "ref": tax.ref_label(m.get("ext_id"))}
 
 
@@ -425,6 +425,30 @@ def movements_gmf():
     if ids and not open_ids:
         check_open(uid, *[mine[i]["t"] for i in ids])
     return jsonify(changed=db.set_gmf_choice(uid, open_ids, bool(d.get("on"))), skipped=len(ids) - len(open_ids))
+
+
+@app.post("/api/movements/<int:mid>/lote")
+@with_session
+@needs_binance
+def movement_lot(mid):
+    """Dice de qué compra salió esa venta (la plata de un amigo, etc.); sin `from` vuelve al orden normal (FIFO)."""
+    uid = g.user["id"]
+    mine = {m["id"]: m for m in db.movements(uid)}
+    sale = mine.get(mid)
+    if not sale or sale["kind"] not in ("venta", "permuta", "comision"):
+        raise Bad("Esa venta no existe.")
+    buy_id = body().get("from")
+    if buy_id is not None:
+        try:
+            buy_id = int(buy_id)
+        except (TypeError, ValueError):
+            raise Bad("Compra inválida.")
+        buy = mine.get(buy_id)
+        if not buy or buy.get("in_asset") != sale.get("out_asset") or buy["t"] > sale["t"]:
+            raise Bad("Esa compra no puede ser el origen de esta venta.")
+    check_open(uid, sale["t"])
+    db.set_lot_from(uid, mid, buy_id)
+    return jsonify(ok=True)
 
 
 @app.post("/api/movements/delete")

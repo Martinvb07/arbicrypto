@@ -742,17 +742,24 @@ def apply_order(w, o):
     before = {"qty": w["qty"], "cost": w["cost"], "status": w["status"], "target": w.get("target") or 0}
     fee = float(o.get("commission") or 0)
     if o["side"] == "BUY":
-        w["qty"] += max(o["amount"] - fee, 0)
+        moved, cost_moved = max(o["amount"] - fee, 0), o["total"]
+        w["qty"] += moved
         w["cost"] += o["total"]
         kind = "compraste"
     else:
-        out = min(o["amount"] + fee, w["qty"])
-        w["cost"] -= w["cost"] * (out / w["qty"]) if w["qty"] > 0 else w["cost"]
-        w["qty"] -= out
+        moved = min(o["amount"] + fee, w["qty"])
+        cost_moved = w["cost"] * (moved / w["qty"]) if w["qty"] > 0 else w["cost"]
+        w["cost"] -= cost_moved
+        w["qty"] -= moved
         kind = "vendiste"
+    # historial de la moneda: cómo empezó y cada orden que la movió (se ve al desplegar el ajuste)
+    w.setdefault("start", {"t": w["created"], "qty": before["qty"], "cost": before["cost"]})
+    w["moves"] = (w.get("moves") or [])[-49:] + [{
+        "id": o.get("id"), "t": (o.get("time") or 0) / 1000 or time.time(), "kind": kind, "qty": o["amount"], "fee": fee,
+        "price": o["price"], "total": o["total"], "moved": moved, "cost": cost_moved, "left": w["qty"], "cost_left": w["cost"]}]
     w["orders"] = sorted(set(w.get("orders") or []) | {o["id"]})[-300:]
     w["synced"] = {"t": time.time(), "kind": kind, "qty": o["amount"], "price": o["price"], "total": o["total"], "before": before,
-                   "order": {k: o.get(k) for k in ("id", "side", "amount", "commission", "total", "price")}}
+                   "order": {k: o.get(k) for k in ("id", "side", "amount", "commission", "total", "price", "time")}}
     dust = 0.01 if w["asset"] in ("USDT", "USDC", "FDUSD") else 1e-8
     if w["qty"] <= dust:
         w.update(status="vendida", qty=max(w["qty"], 0.0), cost=max(w["cost"], 0.0))
@@ -1489,10 +1496,13 @@ def api_watch_update():
         if "alert" in b:
             changed["alert"] = bool(b["alert"])
         numbers = any(changed.get(k) != w.get(k) for k in ("asset", "qty", "cost", "target"))
+        amounts = any(changed.get(k) != w.get(k) for k in ("qty", "cost"))
         w.update(changed)
         if numbers:  # con datos nuevos se vuelve a calcular desde cero
             w.update(status="vigilando", last=None, full_t=0)
             w.pop("synced", None)  # lo escribiste a mano: el último ajuste con Binance ya no aplica
+            if w.get("moves") and amounts:  # queda en el historial que lo corregiste
+                w["moves"] = w["moves"][-49:] + [{"t": time.time(), "kind": "editaste", "left": w["qty"], "cost_left": w["cost"]}]
         elif b.get("alert") is True and w["status"] == "lista":
             w["status"] = "vigilando"  # al prender el aviso con una oferta ya buena: se confirma y avisa
         save_json(WATCH_FILE, watches)
@@ -1516,6 +1526,9 @@ def api_watch_move_sync():
         src.update(qty=sync["before"]["qty"], cost=sync["before"]["cost"], status=sync["before"]["status"],
                    target=sync["before"].get("target", src.get("target")), last=None, full_t=0)
         src["orders"] = [i for i in (src.get("orders") or []) if i != sync["order"]["id"]]
+        src["moves"] = [m for m in (src.get("moves") or []) if m.get("id") != sync["order"]["id"]]
+        if not src["moves"]:
+            src.pop("start", None)
         src.pop("synced", None)
         apply_order(dst, sync["order"])
         save_json(WATCH_FILE, watches)

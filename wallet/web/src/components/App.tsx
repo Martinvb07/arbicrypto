@@ -79,6 +79,31 @@ function LivePill({ onClick }: { onClick: () => void }) {
   );
 }
 
+/** Traer ya lo último de Binance, sin esperar la sincronización automática. */
+function SyncButton() {
+  const { binance, setBinance, toast } = useWallet();
+  const [asking, setAsking] = useState(false);
+  if (!binance?.connected) return null;
+  const running = asking || binance.job.state === "running";
+  async function sync() {
+    if (running) return;
+    setAsking(true);
+    try {
+      setBinance(await api.binanceSync());
+    } catch (e) {
+      toast("No se pudo sincronizar", (e as Error).message, "bad");
+    }
+    setAsking(false);
+  }
+  return (
+    <button className={`sync-btn ${running ? "busy" : ""}`} onClick={() => void sync()} disabled={running}
+      title={running ? "Trayendo tus órdenes de Binance…" : "Traer ya tus últimas órdenes de Binance"}>
+      <Icon name="refresh" size={15} />
+      <span className="hide-sm">{running ? "Sincronizando…" : "Sincronizar"}</span>
+    </button>
+  );
+}
+
 /** Foto de perfil del panel (la trae la wallet por /api/me/avatar); si no hay, la inicial. */
 function Avatar({ name, size }: { name: string; size?: number }) {
   const [failed, setFailed] = useState(false);
@@ -182,6 +207,7 @@ export function App() {
             </span>
           </div>
           <LivePill onClick={() => setTab("inicio")} />
+          <SyncButton />
           <div className="top-actions">
             <div className="year-select">
               <Select label="Año gravable" value={String(year)} searchable={false} onChange={(v) => setYear(Number(v))}

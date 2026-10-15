@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type Kind, type Market, type Movement, type SaleSource } from "@/lib/api";
 import { cashValue, currentYear, hourMin, KIND_LABEL, money, num, qty, signedMoney, tone } from "@/lib/format";
+import { LotModal } from "../LotModal";
 import { Select, type SelectOption } from "../Select";
 import { Asset, Badge, Coin, Empty, Icon, Pager, Pnl, Skeleton } from "../ui";
 import { useWallet } from "../wallet";
@@ -56,6 +57,8 @@ function bucketLabel(b: number, g: Group, long = false) {
 interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; received: string | null; cost: number; gross: number; fee: number; gain: number; missing: boolean;
   /** 4x1000 de lo vendido, ganancia ya sin él y de qué compras salió */
   gmf: number; net: number; sources: SaleSource[];
+  /** venta: su movimiento (para elegir de qué compra salió) */
+  id?: number;
   /** compra: pagaste `cost` y te llegó `qty` (no tiene ganancia; su 4x1000 se reparte en las ventas que salgan de ella) */
   buy?: boolean; method?: string; counterpart?: string;
   /** compra: cuánto queda sin vender, a cuánto vender para no perder y cuánto ganas si lo vendes ya en P2P */
@@ -82,6 +85,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   const [market, setMarket] = useState<Market | null>(null);
   const [marketErr, setMarketErr] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
+  const [lotOf, setLotOf] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -143,7 +147,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
     if (!report) return [];
     const sales = report.disposals.map((d) => ({ key: `d${d.id}-${d.t}`, t: d.t, kind: d.kind, asset: d.asset, qty: d.qty, received: d.received,
       cost: d.cost, gross: d.gross, fee: d.fee, gain: d.gain, missing: d.missing > 1e-9,
-      gmf: d.gmf ?? 0, net: d.net ?? d.gain, sources: d.sources ?? [] }));
+      gmf: d.gmf ?? 0, net: d.net ?? d.gain, sources: d.sources ?? [], id: d.id }));
     const incomes = report.incomes.map((x) => ({ key: `i${x.id}`, t: x.t, kind: x.kind, asset: x.asset, qty: x.qty, received: null,
       cost: 0, gross: x.value, fee: 0, gain: x.value, missing: false, gmf: 0, net: x.value, sources: [] }));
     return [...sales, ...incomes].sort((p, q) => q.t - p.t);
@@ -188,6 +192,8 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
     for (const d of report?.disposals ?? []) for (const s of d.sources ?? []) if (s.id != null) u.set(s.id, (u.get(s.id) ?? 0) + s.qty);
     return u;
   }, [report]);
+  const moveById = useMemo(() => new Map((moves ?? []).map((m) => [m.id, m])), [moves]);
+  const allBuys = useMemo(() => (moves ?? []).filter((m) => m.kind === "compra"), [moves]);
   const buyOps = useMemo<Op[]>(() => buys.map((m) => {
     const asset = m.in_asset ?? "", q = m.in_qty ?? 0, cost = m.cop_value + (m.fee_cop || 0), g = m.gmf_cop || 0;
     const p2p = market?.p2p;
@@ -460,11 +466,25 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                               Compraste a <b>{unitPrice(o.cost / o.qty)}</b> → vendiste a <b>{unitPrice(o.gross / o.qty)}</b> por {o.asset}
                             </span>
                           )}
-                          {o.sources.length > 0 && <span className="cell-sub">{sourceText(o)}</span>}
+                          {o.sources.length > 0 && (() => {
+                            const mv = o.id != null ? moveById.get(o.id) : undefined;
+                            return mv ? (
+                              <button className="cell-sub op-source" onClick={() => setLotOf(mv.id)} title="Cambiar de qué compra salió esta venta">
+                                <span>{sourceText(o)}</span>
+                                {mv.lot_from != null && <span className="tag">elegida</span>}
+                                <Icon name="edit" size={12} />
+                              </button>
+                            ) : <span className="cell-sub">{sourceText(o)}</span>;
+                          })()}
                         </td>
                         <td className="r">{o.cost || o.fee ? money(o.cost + o.fee) : <span className="muted">—</span>}</td>
                         <td className="r hide-sm">{money(o.gross)}</td>
                         <td className="r"><b><Pnl v={o.gain} /></b>
+                          {o.gmf >= 1 && (
+                            <span className="cell-sub" title="Ya sin la parte del 4x1000 que pagaste al comprar lo que vendiste (las comisiones de Binance ya van en el costo y en lo recibido)">
+                              neta <span className={tone(o.net)}>{signedMoney(o.net)}</span> · 4x1000 −{money(o.gmf)}
+                            </span>
+                          )}
                           {pct != null && <span className={`cell-sub show-sm ${tone(pct)}`}>{pct >= 0 ? "+" : "−"}{num(Math.abs(pct), 2)} %</span>}</td>
                         <td className={`r hide-sm ${pct == null ? "muted" : tone(pct)}`}>{pct == null ? "—" : `${pct >= 0 ? "+" : "−"}${num(Math.abs(pct), 2)} %`}</td>
                       </tr>
@@ -475,6 +495,9 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
               </table>
             </div>
             <Pager page={page} pages={pages} onPage={setPage} />
+            {lotOf != null && moveById.get(lotOf) && (
+              <LotModal sale={moveById.get(lotOf)!} buys={allBuys} used={usedOf} onClose={() => setLotOf(null)} />
+            )}
           </>
         )}
       </div>

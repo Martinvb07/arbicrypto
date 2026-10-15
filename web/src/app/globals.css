@@ -1390,5 +1390,41 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
 /* "No era de esta": la etiqueta del ajuste abre un menú para pasarlo a otra fila */
 .crow-coin .menu { display: inline-block; max-width: 100%; }
 .crow-coin .crow-synced.as-btn { cursor: pointer; height: auto; font-weight: 500; transition: border-color .15s, background-color .15s; }
-.crow-coin .crow-synced.as-btn:hover, .crow-coin .crow-synced.as-btn.open { border-color: var(--brand); color: var(--text); }
+.crow-coin .crow-synced.as-btn:hover, .crow-coin .crow-synced.as-btn.open, .crow-coin .crow-synced.as-btn.on { border-color: var(--brand); color: var(--text); }
+.crow-coin .crow-synced .chev { transition: transform .25s cubic-bezier(.2, .8, .2, 1); }
+.crow-coin .crow-synced.on .chev { transform: rotate(180deg); }
+
+/* historial de la moneda (se despliega desde la etiqueta del ajuste) */
+.crow-hist-wrap.open > div { padding-top: 14px; padding-bottom: 14px; }
+.chist { display: grid; gap: 14px; }
+.chist-head { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.chist-stat { display: grid; gap: 3px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); min-width: 0; }
+.chist-stat small { font-size: 11px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.chist-stat b { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chist-stat .dim { font-size: 12px; }
+.chist-bar { display: block; height: 4px; border-radius: 4px; background: var(--border); overflow: hidden; margin-top: 3px; }
+.chist-bar > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--brand-2), var(--brand));
+  transition: width .6s cubic-bezier(.2, .8, .2, 1); }
+.chist-list { list-style: none; margin: 0; padding: 0; display: grid; position: relative; }
+.chist-item { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; position: relative;
+  animation: chist-in .32s ease-out both; }
+.chist-item:not(:last-child)::before { content: ""; position: absolute; left: 12.5px; top: 30px; bottom: -10px; width: 1px; background: var(--border-2); }
+.chist-dot { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; position: relative; z-index: 1;
+  background: var(--surface-3); color: var(--muted); border: 1px solid var(--border-2); }
+.chist-item.vendiste .chist-dot { background: var(--down-soft); color: var(--down); border-color: color-mix(in srgb, var(--down) 30%, transparent); }
+.chist-item.compraste .chist-dot { background: var(--up-soft); color: var(--up); border-color: var(--up-line); }
+.chist-item.start .chist-dot { background: var(--brand-soft); color: var(--brand-text); border-color: color-mix(in srgb, var(--brand) 40%, transparent); }
+.chist-txt { display: grid; gap: 1px; min-width: 0; }
+.chist-txt b { font-size: 13.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.chist-txt b .dim { font-weight: 500; color: var(--muted); }
+.chist-txt small, .chist-right small { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chist-right { display: grid; justify-items: end; gap: 1px; text-align: right; }
+.chist-right b { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.chist-move { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px dashed var(--border-2); font-size: 12.5px; }
+@keyframes chist-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (max-width: 640px) {
+  .chist-head { grid-template-columns: 1fr 1fr; }
+  .chist-head .chist-stat:last-child { grid-column: 1 / -1; }
+}
+@media (prefers-reduced-motion: reduce) { .chist-item { animation: none; } }
 .crow-coin .menu .menu-pop { left: 0; right: auto; min-width: 260px; }

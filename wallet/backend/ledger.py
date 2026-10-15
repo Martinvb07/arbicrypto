@@ -96,10 +96,10 @@ def journal(movements, closings=(), habitual=True, method="fifo", notes=()):
         gmf = float(m.get("gmf_cop") or 0)
         cost = 0.0
         if k in OUTFLOW and m.get("out_asset") and m["out_asset"] != COP:
-            parts, _missing = led.take(m["out_asset"], float(m["out_qty"]))
+            parts, _missing = led.take(m["out_asset"], float(m["out_qty"]), m.get("lot_from"))
             cost = sum(p[1] for p in parts)
         if k in INFLOW and m.get("in_asset") and m["in_asset"] != COP:
-            led.add(m["in_asset"], float(m["in_qty"]), v + fee if k == "compra" else v, m["t"])
+            led.add(m["in_asset"], float(m["in_qty"]), v + fee if k == "compra" else v, m["t"], {"id": m.get("id")})
 
         L = []
 

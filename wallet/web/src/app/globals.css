@@ -1199,6 +1199,15 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
 .gmf-pick-txt small { color: var(--muted); font-size: 12px; }
 .gmf-pick-val { font-size: 13.5px; white-space: nowrap; color: var(--muted); transition: color .18s; }
 .gmf-pick-val.down { color: var(--down); }
+.lot-radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border-2); position: relative; flex: none; transition: border-color .18s; }
+.lot-radio::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--brand); transform: scale(0); transition: transform .18s cubic-bezier(.3, 1.5, .6, 1); }
+.lot-radio.on { border-color: var(--brand); }
+.lot-radio.on::after { transform: scale(1); }
+.op-source { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 0; border: 0; background: none; color: var(--muted); font: inherit;
+  font-size: 12.5px; text-align: left; cursor: pointer; border-bottom: 1px dashed transparent; transition: color .15s, border-color .15s; }
+.op-source:hover { color: var(--text); border-bottom-color: var(--border-2); }
+.op-source .icon { flex: none; opacity: .7; }
+.op-source .tag { font-size: 11px; font-weight: 600; color: var(--brand); padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--brand) 12%, transparent); }
 .gmf-pick-empty { padding: 28px; text-align: center; color: var(--muted); }
 @keyframes gmf-row-in { from { opacity: 0; transform: translateY(6px); } }
 @media (max-width: 640px) {
@@ -1277,3 +1286,15 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
 
 .op-prices { color: var(--text-2, var(--muted)); }
 .op-prices b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 650; }
+
+/* Sincronizar Binance ya, desde la barra de arriba */
+.sync-btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-2);
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: border-color .15s, background-color .15s, color .15s, transform .1s; }
+.sync-btn:hover:not(:disabled) { border-color: var(--brand); }
+.sync-btn:active:not(:disabled) { transform: scale(.97); }
+.sync-btn:disabled { cursor: default; color: var(--muted); }
+.sync-btn .icon { transition: transform .3s; }
+.sync-btn:hover:not(:disabled) .icon { transform: rotate(90deg); }
+.sync-btn.busy .icon { animation: spin .9s linear infinite; color: var(--brand); }
+@media (max-width: 640px) { .sync-btn { width: 32px; padding: 0; justify-content: center; } }

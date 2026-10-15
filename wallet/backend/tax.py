@@ -152,20 +152,30 @@ class Ledger:
             for l in lots:
                 l[1] = l[0] * avg
 
-    def take(self, asset, qty):
+    def take(self, asset, qty, prefer=None):
         """Saca `qty` y devuelve [(cantidad, costo, fecha, compra de origen, lo que queda de ese lote)] más la cantidad
-        sin historial de compra."""
+        sin historial de compra. `prefer`: id de la compra de la que dijiste que salió la venta; se saca primero de ella
+        y, si no alcanza, sigue en orden (FIFO)."""
         lots, parts, left = self.lots[asset], [], qty
-        while left > 1e-12 and lots:
-            lot = lots[0]
+        first = next((l for l in lots if prefer is not None and l[3] and l[3].get("id") == prefer), None)
+        for lot in ([first] if first else []) + list(lots):  # el elegido primero; el orden de los demás no cambia
+            if left <= 1e-12:
+                break
+            if lot[0] <= 1e-12:
+                continue
             q = min(left, lot[0])
             cost = lot[1] * q / lot[0]
             lot[0] -= q
             lot[1] -= cost
             left -= q
             parts.append((q, cost, lot[2], lot[3], max(lot[0], 0.0)))
-            if lot[0] <= 1e-12:
-                lots.popleft()
+        while lots and lots[0][0] <= 1e-12:
+            lots.popleft()
+        if first and first[0] <= 1e-12:
+            for i, l in enumerate(lots):
+                if l is first:
+                    del lots[i]
+                    break
         return parts, max(0.0, left)
 
     def holdings(self):
@@ -215,7 +225,7 @@ def compute(movements, year, habitual=False, method="fifo"):
 
         if kind in OUTFLOW and m.get("out_asset") and m["out_asset"] != COP:
             asset, qty = m["out_asset"], float(m["out_qty"])
-            parts, missing = ledger.take(asset, qty)
+            parts, missing = ledger.take(asset, qty, m.get("lot_from"))
             gross = value if kind in ("venta", "permuta") else 0.0
             proceeds = gross - fee
             if missing > 1e-9 and in_year:  # cada año avisa solo de sus propias ventas
@@ -336,7 +346,7 @@ def kardex(movements, year, method="fifo"):
         fee_q = {"fee_qty": float(m.get("fee_qty") or 0), "fee_asset": m.get("fee_asset") or ""}
         if k in OUTFLOW and m.get("out_asset") and m["out_asset"] != COP:
             a, q = m["out_asset"], float(m["out_qty"])
-            parts, missing = led.take(a, q)
+            parts, missing = led.take(a, q, m.get("lot_from"))
             cost = sum(p[1] for p in parts)
             gross = v if k in ("venta", "permuta") else 0.0
             if in_year:
@@ -348,7 +358,7 @@ def kardex(movements, year, method="fifo"):
         if k in INFLOW and m.get("in_asset") and m["in_asset"] != COP:
             a, q = m["in_asset"], float(m["in_qty"])
             cost = v + fee if k == "compra" else v
-            led.add(a, q, cost, m["t"])
+            led.add(a, q, cost, m["t"], {"id": m.get("id")})
             if in_year:
                 bq, bc = snap(a)
                 # en la compra la comisión de Binance va dentro del costo; el 4x1000 es un gasto aparte

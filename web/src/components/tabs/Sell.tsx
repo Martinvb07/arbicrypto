@@ -5,8 +5,8 @@ import { api } from "@/lib/api";
 import { advertiserUrl, COIN_NAMES, copyQty, isDollar, spotUrl } from "@/lib/calc";
 import { hhmm, money, num, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
-import type { ExitOption, Watch } from "@/lib/types";
-import { ask, Menu, Select, Sheet } from "../overlay";
+import type { ExitOption, Watch, WatchMove } from "@/lib/types";
+import { ask, Select, Sheet } from "../overlay";
 import { Asset, Coin, CopyButton, GoButton, Icon, Toggle } from "../ui";
 
 /** Cantidad de cripto: acepta 0,0021 o 0.0021. */
@@ -215,11 +215,88 @@ function CoinForm({ edit, choices, holdings, onClose }: {
 }
 
 /** Una moneda de la lista: lo que te dejaría venderla ya, qué tan cerca está, su aviso y el paso a paso. */
+/** Movimientos de la moneda; las anotadas antes del historial muestran al menos su último ajuste. */
+function historyOf(w: Watch): WatchMove[] {
+  if (w.moves?.length) return w.moves;
+  const y = w.synced;
+  if (!y) return [];
+  const moved = y.before ? Math.abs(y.before.qty - w.qty) : y.qty;
+  return [{ t: y.t, kind: y.kind, qty: y.qty, price: y.price, total: y.total, moved,
+    cost: y.before ? Math.abs(y.before.cost - w.cost) : undefined, left: w.qty, cost_left: w.cost }];
+}
+
+/** Historial al desplegar el ajuste: cómo empezó, cada venta o compra con lo que ganaste, y lo que te queda. */
+function CoinHistory({ w, hist, gmf, others, onMove }: { w: Watch; hist: WatchMove[]; gmf: number; others: Watch[]; onMove: (o: Watch) => void }) {
+  const sales = hist.filter((m) => m.kind === "vendiste");
+  const gainOf = (m: WatchMove) => (m.cost != null && m.total != null ? m.total - m.cost * (1 + gmf) : null);
+  const won = sales.reduce((a, m) => a + (gainOf(m) ?? 0), 0);
+  const soldQty = sales.reduce((a, m) => a + (m.moved ?? m.qty ?? 0), 0);
+  const startQty = w.start?.qty ?? (hist[0] && hist[0].kind !== "editaste" ? hist[0].left + (hist[0].kind === "vendiste" ? 1 : -1) * (hist[0].moved ?? 0) : null);
+  const soldPct = startQty ? Math.min(100, (soldQty / (startQty + hist.filter((m) => m.kind === "compraste").reduce((a, m) => a + (m.moved ?? 0), 0))) * 100) : 0;
+  return (
+    <div className="chist">
+      <div className="chist-head">
+        <div className="chist-stat"><small>Vendido</small><b>{num(soldQty, 2)} {w.asset}</b>
+          {soldPct > 0 && <span className="chist-bar"><span style={{ width: `${soldPct}%` }} /></span>}</div>
+        <div className="chist-stat"><small>Te queda</small><b>{num(w.qty, 2)} {w.asset}</b><span className="dim">costo {money(w.cost * (1 + gmf), 0)}</span></div>
+        <div className="chist-stat"><small>Ganado en ventas</small><b className={tone(won)}>{sales.length ? signedMoney(won) : "—"}</b>
+          <span className="dim">{sales.length} venta{sales.length === 1 ? "" : "s"}</span></div>
+      </div>
+      <ol className="chist-list">
+        {[...hist].reverse().map((m, i) => {
+          const g = m.kind === "vendiste" ? gainOf(m) : null;
+          return (
+            <li key={`${m.id ?? ""}${m.t}${i}`} className={`chist-item ${m.kind}`} style={{ animationDelay: `${Math.min(i, 10) * 40}ms` }}>
+              <span className="chist-dot"><Icon name={m.kind === "vendiste" ? "handCoins" : m.kind === "compraste" ? "cart" : "book"} size={12} /></span>
+              <div className="chist-txt">
+                <b>{m.kind === "editaste" ? "Lo editaste a mano" : `${m.kind === "vendiste" ? "Vendiste" : "Compraste"} ${num(m.qty ?? 0, 2)} ${w.asset}`}
+                  {m.price ? <span className="dim"> a {money(m.price)}</span> : null}</b>
+                <small>
+                  {hhmm(m.t)} · {new Date(m.t * 1000).toLocaleDateString("es-CO", { day: "numeric", month: "short" }).replace(".", "")}
+                  {m.total ? ` · ${m.kind === "vendiste" ? "recibiste" : "pagaste"} ${money(m.total, 0)}` : ""}
+                  {m.fee ? ` · comisión ${num(m.fee, 2)}` : ""}
+                </small>
+              </div>
+              <div className="chist-right">
+                {g != null && <b className={tone(g)}>{signedMoney(g)}</b>}
+                <small>quedan {num(m.left, 2)}</small>
+              </div>
+            </li>
+          );
+        })}
+        {w.start && (
+          <li className="chist-item start" style={{ animationDelay: `${Math.min(hist.length, 10) * 40}ms` }}>
+            <span className="chist-dot"><Icon name="plus" size={12} /></span>
+            <div className="chist-txt">
+              <b>La anotaste: {num(w.start.qty, 2)} {w.asset}</b>
+              <small>{hhmm(w.start.t)} · {new Date(w.start.t * 1000).toLocaleDateString("es-CO", { day: "numeric", month: "short" }).replace(".", "")} · te costó {money(w.start.cost * (1 + gmf), 0)}</small>
+            </div>
+            <div className="chist-right"><small>{money(w.start.cost / w.start.qty)}/{isDollar(w.asset) ? "dólar" : w.asset}</small></div>
+          </li>
+        )}
+      </ol>
+      {others.length > 0 && (
+        <div className="chist-move">
+          <span className="dim">¿El último ajuste era de otra fila?</span>
+          {others.map((o) => (
+            <button key={o.id} className="btn btn-sm" onClick={() => onMove(o)}>
+              <Icon name="arrowRight" size={14} /> Pasarlo a la de {amount(o.asset, o.qty)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CoinRow({ w, i, onEdit, others }: { w: Watch; i: number; onEdit: () => void; others: Watch[] }) {
   const { state, toast, refresh } = useLive();
   const gmf = state?.settings.gmf ?? 0; // 4x1000 que pagaste al comprar
   const [open, setOpen] = useState(false);
+  const [showHist, setShowHist] = useState(false);
   const [saving, setSaving] = useState(false);
+  const hist = historyOf(w);
+  const last = hist[hist.length - 1];
   const b = w.last?.best;
   const alert = w.alert ?? true;
   const ready = !!b?.ok;
@@ -263,30 +340,14 @@ function CoinRow({ w, i, onEdit, others }: { w: Watch; i: number; onEdit: () => 
           <div className="crow-coin-txt">
             <b>{amount(w.asset, w.qty)}</b>
             <small>{COIN_NAMES[w.asset] ?? w.asset}</small>
-            {w.synced && (w.synced.before && others.length ? (
-              <Menu label="Ajuste con Binance" buttonClass={`crow-synced ${w.synced.kind} as-btn`}
-                button={<><Icon name="refresh" size={10} /><span>{w.synced.kind === "vendiste" ? "−" : "+"}{num(w.synced.qty, 2)} · {hhmm(w.synced.t)}</span><Icon name="chevronDown" size={10} /></>}>
-                {(close) => (
-                  <>
-                    <div className="menu-who">
-                      <b>{w.synced!.kind === "vendiste" ? "Vendiste" : "Compraste"} {num(w.synced!.qty, 2)} {w.asset} a {money(w.synced!.price)}</b>
-                      <span className="sub">Se ajustó aquí. ¿Era de otra fila? Pásalo:</span>
-                    </div>
-                    {others.map((o) => (
-                      <button key={o.id} onClick={() => { close(); void move(o); }}>
-                        <Icon name="arrowRight" size={15} /> A la de {amount(o.asset, o.qty)} · te costó {money(o.cost, 0)}
-                      </button>
-                    ))}
-                  </>
-                )}
-              </Menu>
-            ) : (
-              <span className={`crow-synced ${w.synced.kind}`}
-                title={`Se ajustó sola con tu orden de Binance: ${w.synced.kind} ${num(w.synced.qty, 2)} a ${money(w.synced.price)} · ${hhmm(w.synced.t)}`}>
+            {(w.synced || hist.length > 0) && (
+              <button className={`crow-synced ${last?.kind ?? w.synced?.kind ?? ""} as-btn ${showHist ? "on" : ""}`} onClick={() => setShowHist(!showHist)}
+                aria-expanded={showHist} title="Ver el historial de esta moneda">
                 <Icon name="refresh" size={10} />
-                <span>{w.synced.kind === "vendiste" ? "−" : "+"}{num(w.synced.qty, 2)} · {hhmm(w.synced.t)}</span>
-              </span>
-            ))}
+                <span>{last && last.kind !== "editaste" ? `${last.kind === "vendiste" ? "−" : "+"}${num(last.qty ?? 0, 2)} · ${hhmm(last.t)}` : `${hist.length} movimiento${hist.length === 1 ? "" : "s"}`}</span>
+                <Icon name="chevronDown" size={10} className="chev" />
+              </button>
+            )}
           </div>
         </div>
         <div className="crow-cell"><small>Te costó</small><b>{money(w.cost * (1 + gmf), 0)}</b>
@@ -323,6 +384,11 @@ function CoinRow({ w, i, onEdit, others }: { w: Watch; i: number; onEdit: () => 
           <button className="icon-btn danger" onClick={() => void remove()} title="Quitar" aria-label={`Quitar ${w.asset}`}><Icon name="trash" size={16} /></button>
         </div>
       </div>
+      {hist.length > 0 && (
+        <div className={`wcard-steps crow-hist-wrap ${showHist ? "open" : ""}`}>
+          <div><CoinHistory w={w} hist={hist} gmf={gmf} others={w.synced?.before ? others : []} onMove={(o) => void move(o)} /></div>
+        </div>
+      )}
       {b && (
         <div className={`wcard-steps ${open ? "open" : ""}`}>
           <div><SellSteps asset={w.asset} qty={w.qty} o={b} /></div>
