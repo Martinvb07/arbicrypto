@@ -1312,3 +1312,18 @@ tr:hover .op-hide, .op-hide:focus-visible { opacity: 1; transform: none; }
 .third-row .op-mine { white-space: nowrap; }
 .seg-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px;
   font-size: 11px; background: var(--surface-3, var(--border)); color: var(--text); }
+
+/* Ajustar a mano lo que costó una venta */
+.op-adjust { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 600;
+  color: var(--muted); cursor: pointer; opacity: .75; transition: color .15s, opacity .15s; }
+tr:hover .op-adjust, .op-adjust:focus-visible { opacity: 1; }
+.op-adjust:hover { color: var(--brand); }
+.op-adjust.warn { color: var(--warn, var(--brand)); opacity: 1; }
+.cost-preview { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding: 12px 14px;
+  border-radius: 14px; border: 1px solid var(--border); background: var(--surface-2); transition: opacity .2s; }
+.cost-preview.empty { opacity: .6; }
+.cost-preview > div { display: grid; gap: 2px; }
+.cost-preview small { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.cost-preview b { font-variant-numeric: tabular-nums; font-size: 14.5px; transition: color .2s; }
+.cost-preview > span { color: var(--muted); font-weight: 600; }
+.cost-preview .res b { font-size: 17px; }

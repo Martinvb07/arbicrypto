@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type Kind, type Market, type Movement, type SaleSource } from "@/lib/api";
 import { cashValue, currentYear, hourMin, KIND_LABEL, money, num, qty, signedMoney, tone } from "@/lib/format";
+import { CostModal } from "../CostModal";
 import { LotModal } from "../LotModal";
 import { Select, type SelectOption } from "../Select";
 import { Asset, Badge, Coin, Empty, Icon, Pager, Pnl, Skeleton } from "../ui";
@@ -59,6 +60,8 @@ interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; r
   gmf: number; net: number; sources: SaleSource[];
   /** venta: su movimiento (para elegir de qué compra salió) */
   id?: number;
+  /** venta: costo escrito a mano */
+  manual?: boolean;
   /** compra: pagaste `cost` y te llegó `qty` (no tiene ganancia; su 4x1000 se reparte en las ventas que salgan de ella) */
   buy?: boolean; method?: string; counterpart?: string;
   /** compra: cuánto queda sin vender, a cuánto vender para no perder y cuánto ganas si lo vendes ya en P2P */
@@ -95,6 +98,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   const [marketErr, setMarketErr] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const [lotOf, setLotOf] = useState<number | null>(null);
+  const [costOf, setCostOf] = useState<Op | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -156,7 +160,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
     if (!report) return [];
     const sales = report.disposals.map((d) => ({ key: `d${d.id}-${d.t}`, t: d.t, kind: d.kind, asset: d.asset, qty: d.qty, received: d.received,
       cost: d.cost, gross: d.gross, fee: d.fee, gain: d.gain, missing: d.missing > 1e-9,
-      gmf: d.gmf ?? 0, net: d.net ?? d.gain, sources: d.sources ?? [], id: d.id }));
+      gmf: d.gmf ?? 0, net: d.net ?? d.gain, sources: d.sources ?? [], id: d.id, manual: !!d.manual }));
     const incomes = report.incomes.map((x) => ({ key: `i${x.id}`, t: x.t, kind: x.kind, asset: x.asset, qty: x.qty, received: null,
       cost: 0, gross: x.value, fee: 0, gain: x.value, missing: false, gmf: 0, net: x.value, sources: [] }));
     return [...sales, ...incomes].sort((p, q) => q.t - p.t);
@@ -542,7 +546,11 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                               Compraste a <b>{unitPrice(o.cost / o.qty)}</b> → vendiste a <b>{unitPrice(o.gross / o.qty)}</b> por {o.asset}
                             </span>
                           )}
-                          {o.sources.length > 0 && (() => {
+                          {o.manual ? (
+                            <button className="cell-sub op-source" onClick={() => setCostOf(o)} title="Cambiar lo que te costó">
+                              <span>Costo escrito a mano</span><span className="tag">a mano</span><Icon name="edit" size={12} />
+                            </button>
+                          ) : o.sources.length > 0 && (() => {
                             const mv = o.id != null ? moveById.get(o.id) : undefined;
                             return mv ? (
                               <button className="cell-sub op-source" onClick={() => setLotOf(mv.id)} title="Cambiar de qué compra salió esta venta">
@@ -552,6 +560,11 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                               </button>
                             ) : <span className="cell-sub">{sourceText(o)}</span>;
                           })()}
+                          {o.id != null && !o.manual && (o.kind === "venta" || o.kind === "permuta") && (
+                            <button className={`cell-sub op-adjust ${o.missing ? "warn" : ""}`} onClick={() => setCostOf(o)}>
+                              <Icon name="edit" size={12} /> {o.missing ? "Escribir cuánto te costó" : "Ajustar costo"}
+                            </button>
+                          )}
                         </td>
                         <td className="r">{o.cost ? money(o.cost) : <span className="muted">—</span>}</td>
                         <td className="r hide-sm">{money(o.gross - o.fee)}
@@ -576,6 +589,10 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
               </table>
             </div>
             <Pager page={page} pages={pages} onPage={setPage} />
+            {costOf && costOf.id != null && (
+              <CostModal sale={{ id: costOf.id, asset: costOf.asset, qty: costOf.qty, received: costOf.gross - costOf.fee, cost: costOf.cost,
+                gmf: costOf.gmf, manual: !!costOf.manual }} onClose={() => setCostOf(null)} />
+            )}
             {lotOf != null && moveById.get(lotOf) && (
               <LotModal sale={moveById.get(lotOf)!} buys={allBuys} used={usedOf} onClose={() => setLotOf(null)} />
             )}

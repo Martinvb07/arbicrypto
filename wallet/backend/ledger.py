@@ -5,7 +5,7 @@ Plan Único de Cuentas (Decreto 2650 de 1993) a nivel de cuenta (4 dígitos). Tu
 """
 from datetime import datetime
 
-from tax import CO_TZ, COP, INFLOW, OUTFLOW, Ledger, year_bounds
+from tax import CO_TZ, COP, INFLOW, OUTFLOW, Ledger, manual_cost, year_bounds
 
 # código: (nombre, naturaleza D = débito / C = crédito, clase). Las que usan los movimientos y las más comunes para
 # que el contador haga sus notas de contabilidad (pasivos, gastos, impuesto de renta…).
@@ -98,6 +98,8 @@ def journal(movements, closings=(), habitual=True, method="fifo", notes=()):
         if k in OUTFLOW and m.get("out_asset") and m["out_asset"] != COP:
             parts, _missing = led.take(m["out_asset"], float(m["out_qty"]), m.get("lot_from"))
             cost = sum(p[1] for p in parts)
+            if manual_cost(m) is not None:
+                cost = manual_cost(m)
         if k in INFLOW and m.get("in_asset") and m["in_asset"] != COP:
             led.add(m["in_asset"], float(m["in_qty"]), v + fee if k == "compra" else v, m["t"], {"id": m.get("id")})
 

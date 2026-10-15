@@ -132,6 +132,13 @@ def deadline(year, nit):
     return table.get(99 if key >= 99 else key)
 
 
+def manual_cost(m):
+    """Costo de una venta escrito a mano (para casos que el historial no cuadra: plata de otro, compras que no están).
+    None = el de siempre, sacado de las compras."""
+    v = m.get("cost_manual")
+    return None if v is None else float(v)
+
+
 class Ledger:
     """Lotes por cripto. FIFO para fechas de tenencia; el costo puede ser FIFO o promedio ponderado."""
 
@@ -226,18 +233,23 @@ def compute(movements, year, habitual=False, method="fifo"):
         if kind in OUTFLOW and m.get("out_asset") and m["out_asset"] != COP:
             asset, qty = m["out_asset"], float(m["out_qty"])
             parts, missing = ledger.take(asset, qty, m.get("lot_from"))
+            manual = manual_cost(m)
+            if manual is not None:
+                missing = 0.0  # le dijiste cuánto te costó: ya no falta la compra
             gross = value if kind in ("venta", "permuta") else 0.0
             proceeds = gross - fee
             if missing > 1e-9 and in_year:  # cada año avisa solo de sus propias ventas
                 warnings.append({"t": m["t"], "asset": asset, "qty": missing, "id": m.get("id"),
                                  "msg": f"Se vendieron {missing:.8g} {asset} sin compra registrada: su costo quedó en $0."})
             if in_year:
-                cost = sum(p[1] for p in parts)
+                cost = sum(p[1] for p in parts) if manual is None else manual
                 go_share = 0.0 if habitual or qty <= 0 else sum(p[0] for p in parts if held_two_years(p[2], m["t"])) / qty
                 days = [(m["t"] - p[2]) / 86400 for p in parts]
                 gain = proceeds - cost
                 sources = sale_sources(parts)
                 gmf_share = sum(x["gmf"] for x in sources)
+                if manual is not None:
+                    gmf_share = float(m["gmf_manual"]) if m.get("gmf_manual") is not None else gmf_share
                 disposals.append({
                     "id": m.get("id"), "t": m["t"], "kind": kind, "asset": asset, "qty": qty,
                     "received": m.get("in_asset"), "gross": gross, "fee": fee, "proceeds": proceeds, "cost": cost, "gain": gain,
@@ -245,7 +257,7 @@ def compute(movements, year, habitual=False, method="fifo"):
                     "go_gain": gain * go_share, "ro_gain": gain * (1 - go_share),
                     "days_min": min(days) if days else 0, "days_max": max(days) if days else 0, "missing": missing,
                     # el 4x1000 que pagaste al comprar lo que vendiste, y la ganancia ya sin él
-                    "gmf": gmf_share, "net": gain - gmf_share, "sources": sources,
+                    "gmf": gmf_share, "net": gain - gmf_share, "sources": sources, "manual": manual is not None,
                 })
                 if kind == "venta":
                     totals["sold_cop"] += value
@@ -348,6 +360,8 @@ def kardex(movements, year, method="fifo"):
             a, q = m["out_asset"], float(m["out_qty"])
             parts, missing = led.take(a, q, m.get("lot_from"))
             cost = sum(p[1] for p in parts)
+            if manual_cost(m) is not None:
+                cost, missing = manual_cost(m), 0.0
             gross = v if k in ("venta", "permuta") else 0.0
             if in_year:
                 bq, bc = snap(a)

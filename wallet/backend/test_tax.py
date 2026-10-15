@@ -323,5 +323,21 @@ class LoteElegido(unittest.TestCase):
         self.assertAlmostEqual(led.lots["USDT"][0][0], 8)
 
 
+
+class CostoAMano(unittest.TestCase):
+    def test_venta_con_costo_escrito(self):
+        ms = [dict(id=1, t=1760400000, kind="venta", out_asset="USDT", out_qty=96.26, in_asset="COP", in_qty=317793,
+                   cop_value=317793, fee_cop=0, gmf_cop=0, cost_manual=304685, gmf_manual=1219)]
+        r = tax.compute(ms, 2025, True)
+        d = r["disposals"][0]
+        self.assertAlmostEqual(d["cost"], 304685)
+        self.assertAlmostEqual(d["gain"], 13108)
+        self.assertAlmostEqual(d["net"], 13108 - 1219)
+        self.assertEqual(d["missing"], 0)
+        self.assertEqual(r["warnings"], [])                   # ya no avisa que falta la compra
+        self.assertTrue(d["manual"])
+        self.assertAlmostEqual(tax.books(r, ms, 2025)["pnl"]["unmatched"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

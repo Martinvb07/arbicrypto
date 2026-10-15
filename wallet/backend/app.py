@@ -282,7 +282,7 @@ def moves(uid, start=None, end=None, third=False):
 def public_move(m):
     return {**{k: m.get(k) for k in ("id", "t", "kind", "out_asset", "out_qty", "in_asset", "in_qty", "cop_value", "fee_cop",
                                      "gmf_cop", "platform", "counterpart", "source", "note", "category", "pay_method",
-                                     "fee_qty", "fee_asset", "gmf_choice", "lot_from", "tercero")},
+                                     "fee_qty", "fee_asset", "gmf_choice", "lot_from", "tercero", "cost_manual", "gmf_manual")},
             "ref": tax.ref_label(m.get("ext_id"))}
 
 
@@ -447,6 +447,32 @@ def movements_third():
         raise Bad("Esas operaciones no existen.")
     check_open(uid, *[mine[i]["t"] for i in ids])
     return jsonify(changed=db.set_tercero(uid, ids, bool(d.get("on"))))
+
+
+@app.post("/api/movements/<int:mid>/costo")
+@with_session
+@needs_binance
+def movement_cost(mid):
+    """Cuánto te costó lo de esa venta, escrito a mano (y su 4x1000). Sin `cost` vuelve a sacarse de las compras."""
+    uid = g.user["id"]
+    sale = next((m for m in db.movements(uid) if m["id"] == mid), None)
+    if not sale or sale["kind"] not in ("venta", "permuta"):
+        raise Bad("Esa venta no existe.")
+    d = body()
+    cost, gmf = d.get("cost"), d.get("gmf")
+    if cost is not None:
+        try:
+            cost = float(cost)
+            gmf = None if gmf is None else float(gmf)
+        except (TypeError, ValueError):
+            raise Bad("Revisa los números.")
+        if not 0 <= cost < 1e12 or (gmf is not None and not 0 <= gmf < 1e10):
+            raise Bad("Revisa los números.")
+    else:
+        gmf = None
+    check_open(uid, sale["t"])
+    db.set_cost_manual(uid, mid, cost, gmf)
+    return jsonify(ok=True)
 
 
 @app.post("/api/movements/<int:mid>/lote")
