@@ -285,34 +285,50 @@ LINE_DATE = re.compile(r"^\s*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}(
 AMOUNT_RE = re.compile(r"(?<![\w/])-?\$?\s?-?\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?-?(?![\w/])|(?<![\w/.,])-?\$?\s?\d+[.,]\d{2}-?(?![\w/])")
 
 
+GMF_LINE = re.compile(r"^\s*(impuesto del 4 ?x ?1000|gmf|gravamen[a-z ]*|4 ?x ?1000)\b", re.I)
+FINAL_BALANCE = re.compile(r"(?:dinero a final del mes|saldo final|nuevo saldo|saldo al corte)[^\d$-]*(-?\$?\s?-?[\d.,]+)", re.I)
+
+
 def _from_text(text, year_hint):
-    """Extracto en texto: cada línea que empieza con fecha y trae valores es un movimiento."""
-    rows, prev_balance = [], None
+    """Extracto en texto: cada línea que empieza con fecha y trae valores es un movimiento. Las líneas de 4x1000 sin
+    fecha (Nu las pone debajo de cada envío) van con la fecha del movimiento anterior. Si el extracto no trae saldo
+    fila por fila pero sí el saldo final del periodo (Nu: 'Tu dinero a final del mes'), queda en el último movimiento."""
+    rows, prev_balance, last_day = [], None, None
     for line in text.splitlines():
         m = LINE_DATE.match(line)
-        if not m:
+        if m:
+            day = parse_day(m[1], year_hint)
+            rest = m[2]
+        elif last_day and GMF_LINE.match(line):
+            day, rest = last_day, line  # 4x1000 sin fecha: es del movimiento de arriba
+        else:
             continue
-        day = parse_day(m[1], year_hint)
         if not day:
             continue
-        rest = m[2]
         nums = [(x.group(0), x.start()) for x in AMOUNT_RE.finditer(rest)]
         if not nums:
             continue
         values = [money(n) for n, _ in nums]
-        desc = rest[:nums[0][1]].strip(" $-") or "(sin descripción)"
+        desc = rest[:nums[0][1]].strip(" $-+") or "(sin descripción)"
         balance = values[-1] if len(values) >= 2 else None
         amount = values[-2] if len(values) >= 2 else values[0]
         if amount is None:
             continue
+        pos = nums[-2][1] if len(values) >= 2 else nums[0][1]
+        explicit_plus = rest[max(0, pos - 2):pos + 2].lstrip().startswith("+")  # '+$50.000': entró, aunque no diga "recibiste"
         if balance is not None and prev_balance is not None and abs(abs(balance - prev_balance) - abs(amount)) < 1:
             amount = balance - prev_balance  # el saldo dice si entró o salió
-        elif amount > 0 and not re.search(INFLOW_WORDS, norm(desc)):
+        elif amount > 0 and not explicit_plus and not re.search(INFLOW_WORDS, norm(desc)):
             amount = -amount  # sin signo y sin palabra de entrada: es una salida
         if balance is not None:
             prev_balance = balance
+        last_day = day
         rows.append({"day": day, "description": " ".join(desc.split())[:200], "amount": amount, "balance": balance})
     warnings = [] if rows else ["No pude leer movimientos de este PDF. Pásame el archivo y ajusto el lector para tu banco."]
+    if rows and all(r["balance"] is None for r in rows):
+        fb = FINAL_BALANCE.search(text)
+        if fb and money(fb[1]) is not None:
+            rows[-1]["balance"] = money(fb[1])  # saldo al final del periodo
     if rows:
         warnings.append("Leí el PDF línea por línea: revisa en la vista previa que entradas y salidas queden bien.")
     return rows, warnings

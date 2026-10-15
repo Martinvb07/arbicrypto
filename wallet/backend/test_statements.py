@@ -169,5 +169,28 @@ class SignosNequi(unittest.TestCase):
         rows = [mk("4", 30000.0, 560000.0), mk("3", 20000.0, 530000.0), mk("2", 50000.0, 550000.0), mk("1", 100000.0, 600000.0)]
         self.assertEqual([r["amount"] for r in st.fix_signs(rows)], [30000, -20000, -50000, 100000])
 
+NU_TEXTO = """Llegó tu extracto de Marzo
+Período 01 - 31 MAR 2026
+Tu dinero al inicio del mes $148.526,76
+Lo que entró a tu cuenta +$56.400,00
+Tu dinero a final del mes $476,03
+Movimientos
+02 mar Enviaste a ALGUIEN -$100.000,00
+Impuesto del 4x1000 -$400,00
+23 mar Recibiste de Fulano +$50.000,00
+28 mar Compra en TIENDA con tarjeta débito -$5.737,00
+Impuesto del 4x1000 -$22,95
+Rendimiento total de tu cuenta +$0,82
+"""
+
+
+class ExtractoNu(unittest.TestCase):
+    def test_4x1000_sin_fecha_y_saldo_final(self):
+        rows, _ = st._from_text(NU_TEXTO, 2026)
+        self.assertEqual([r["amount"] for r in rows], [-100000, -400, 50000, -5737, -22.95])
+        self.assertEqual(str(rows[1]["day"]), "2026-03-02")   # el 4x1000 va con el envío de arriba
+        self.assertEqual(rows[-1]["balance"], 476.03)          # 'Tu dinero a final del mes'
+        self.assertEqual(st.classify(rows[1]["description"]), "gmf")
+
 if __name__ == "__main__":
     unittest.main()
