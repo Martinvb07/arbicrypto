@@ -160,10 +160,10 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   const sum = useMemo(() => {
     const sales = inPeriod.filter((o) => o.kind === "venta" || o.kind === "permuta");
     const gain = inPeriod.reduce((s, o) => s + o.gain, 0);
-    const cost = sales.reduce((s, o) => s + o.cost + o.fee, 0);
+    const cost = sales.reduce((s, o) => s + o.cost, 0);
     return {
       gain, cost,
-      sold: sales.reduce((s, o) => s + o.gross, 0), nSold: sales.length,
+      sold: sales.reduce((s, o) => s + o.gross - o.fee, 0), nSold: sales.length,
       won: sales.filter((o) => Math.round(o.gain) > 0).length,
       bought: buys.reduce((s, m) => s + cashValue(m), 0), nBought: buys.length,
       net: gain - gmf,
@@ -411,7 +411,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                     const k = bucketOf(dayOf(o.t), group);
                     const head = i === 0 || bucketOf(dayOf(slice[i - 1].t), group) !== k;
                     const g = bucketSum.get(k);
-                    const pct = o.cost > 0 ? (o.gain / (o.cost + o.fee)) * 100 : null;
+                    const pct = o.cost > 0 ? (o.gain / o.cost) * 100 : null;
                     return [
                       head && g && (
                         <tr key={`h${k}`} className="group-row">
@@ -477,8 +477,13 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                             ) : <span className="cell-sub">{sourceText(o)}</span>;
                           })()}
                         </td>
-                        <td className="r">{o.cost || o.fee ? money(o.cost + o.fee) : <span className="muted">—</span>}</td>
-                        <td className="r hide-sm">{money(o.gross)}</td>
+                        <td className="r">{o.cost ? money(o.cost) : <span className="muted">—</span>}</td>
+                        <td className="r hide-sm">{money(o.gross - o.fee)}
+                          {o.fee >= 1 && (() => {
+                            const fq = o.id != null ? moveById.get(o.id)?.fee_qty : 0;
+                            return <span className="cell-sub" title="La comisión de Binance sale en cripto: ya está dentro de lo que vendiste y no te llega">
+                              comisión {fq ? `${num(fq, 2)} ${o.asset}` : money(o.fee)}</span>;
+                          })()}</td>
                         <td className="r"><b><Pnl v={o.gain} /></b>
                           {o.gmf >= 1 && (
                             <span className="cell-sub" title="Ya sin la parte del 4x1000 que pagaste al comprar lo que vendiste (las comisiones de Binance ya van en el costo y en lo recibido)">
