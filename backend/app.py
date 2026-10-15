@@ -84,7 +84,6 @@ PUBLISH_EVERY = 5                     # refresco de pantallas por cambios de Spo
 HISTORY_SECONDS = 24 * 3600
 # Vigilancia de ventas ("avisame cuando pueda vender sin perder")
 WATCH_INTERVAL = 5                # cada 5 s revisa las salidas que importan (vender directo, la mejor del momento y USDT)
-WATCH_FULL_EVERY = 60             # cada 60 s revisa las 8 criptos por si aparece una salida mejor por otro camino
 WATCH_MAX = 10                    # maximo de monedas en la lista por usuario
 WATCH_PER_STEP = 2                # en cada vuelta se revisan las 2 que llevan mas tiempo sin revisar (cupo de Binance)
 WATCH_SPOT_EXTRA = 0.001          # si hay que cambiar en Spot antes de vender, se exige 0,1 % mas (el cambio toma tiempo)
@@ -673,16 +672,9 @@ def watch_eval(w, targets):
 
 
 def watch_targets(w, now):
-    """Cada 5 s solo lo que importa; cada 60 s todas las criptos."""
-    last = (w.get("last") or {}).get("best")
-    if not last and not w.get("full_t"):  # primera revision: solo vender directo y por USDT; la completa viene despues
-        w["full_t"] = now
-        return [a for a in P2P_ASSETS if a in (w["asset"], "USDT")]
-    if not last or now - w.get("full_t", 0) >= WATCH_FULL_EVERY:
-        w["full_t"] = now
-        return P2P_ASSETS
-    keep = [w["asset"], last["to"], "USDT"]
-    return [a for a in P2P_ASSETS if a in keep]
+    """Mis monedas: solo vender directo en P2P la misma moneda (sin cambiar antes en Spot: es mas simple y sin riesgo de
+    que el precio se mueva a mitad de camino). Solo si esa cripto no se vende en P2P en pesos, se pasa por USDT."""
+    return [w["asset"]] if w["asset"] in P2P_ASSETS else ["USDT"]
 
 
 def watch_alert(w, o):
