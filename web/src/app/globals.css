@@ -1386,3 +1386,9 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
   .crow-partial { white-space: normal; border-radius: 10px; align-items: flex-start; line-height: 1.35; }
   .crow-partial .i { margin-top: 2px; }
 }
+
+/* "No era de esta": la etiqueta del ajuste abre un menú para pasarlo a otra fila */
+.crow-coin .menu { display: inline-block; max-width: 100%; }
+.crow-coin .crow-synced.as-btn { cursor: pointer; height: auto; font-weight: 500; transition: border-color .15s, background-color .15s; }
+.crow-coin .crow-synced.as-btn:hover, .crow-coin .crow-synced.as-btn.open { border-color: var(--brand); color: var(--text); }
+.crow-coin .menu .menu-pop { left: 0; right: auto; min-width: 260px; }

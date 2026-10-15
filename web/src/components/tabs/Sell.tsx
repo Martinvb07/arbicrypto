@@ -6,7 +6,7 @@ import { advertiserUrl, COIN_NAMES, copyQty, isDollar, spotUrl } from "@/lib/cal
 import { hhmm, money, num, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { ExitOption, Watch } from "@/lib/types";
-import { ask, Select, Sheet } from "../overlay";
+import { ask, Menu, Select, Sheet } from "../overlay";
 import { Asset, Coin, CopyButton, GoButton, Icon, Toggle } from "../ui";
 
 /** Cantidad de cripto: acepta 0,0021 o 0.0021. */
@@ -215,7 +215,7 @@ function CoinForm({ edit, choices, holdings, onClose }: {
 }
 
 /** Una moneda de la lista: lo que te dejaría venderla ya, qué tan cerca está, su aviso y el paso a paso. */
-function CoinRow({ w, i, onEdit }: { w: Watch; i: number; onEdit: () => void }) {
+function CoinRow({ w, i, onEdit, others }: { w: Watch; i: number; onEdit: () => void; others: Watch[] }) {
   const { state, toast, refresh } = useLive();
   const gmf = state?.settings.gmf ?? 0; // 4x1000 que pagaste al comprar
   const [open, setOpen] = useState(false);
@@ -226,6 +226,15 @@ function CoinRow({ w, i, onEdit }: { w: Watch; i: number; onEdit: () => void }) 
   const unit = b && (isDollar(b.to) ? "dólar" : b.to);
   const pct = b ? Math.min(100, (b.ad.price / b.need_price) * 100) : 0;
   const missing = b ? (b.need_price / b.ad.price - 1) * 100 : 0;
+  const move = async (to: Watch) => {
+    try {
+      await api.moveSync(w.id, to.id);
+      toast("Ajuste movido", `Ahora está en la fila de ${amount(to.asset, to.qty)}; esta volvió a como estaba`, "good");
+      refresh();
+    } catch (e) {
+      toast("No se pudo mover", (e as Error).message, "bad");
+    }
+  };
   const toggle = async (on: boolean) => {
     setSaving(true);
     try {
@@ -254,13 +263,30 @@ function CoinRow({ w, i, onEdit }: { w: Watch; i: number; onEdit: () => void }) 
           <div className="crow-coin-txt">
             <b>{amount(w.asset, w.qty)}</b>
             <small>{COIN_NAMES[w.asset] ?? w.asset}</small>
-            {w.synced && (
+            {w.synced && (w.synced.before && others.length ? (
+              <Menu label="Ajuste con Binance" buttonClass={`crow-synced ${w.synced.kind} as-btn`}
+                button={<><Icon name="refresh" size={10} /><span>{w.synced.kind === "vendiste" ? "−" : "+"}{num(w.synced.qty, 2)} · {hhmm(w.synced.t)}</span><Icon name="chevronDown" size={10} /></>}>
+                {(close) => (
+                  <>
+                    <div className="menu-who">
+                      <b>{w.synced!.kind === "vendiste" ? "Vendiste" : "Compraste"} {num(w.synced!.qty, 2)} {w.asset} a {money(w.synced!.price)}</b>
+                      <span className="sub">Se ajustó aquí. ¿Era de otra fila? Pásalo:</span>
+                    </div>
+                    {others.map((o) => (
+                      <button key={o.id} onClick={() => { close(); void move(o); }}>
+                        <Icon name="arrowRight" size={15} /> A la de {amount(o.asset, o.qty)} · te costó {money(o.cost, 0)}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </Menu>
+            ) : (
               <span className={`crow-synced ${w.synced.kind}`}
                 title={`Se ajustó sola con tu orden de Binance: ${w.synced.kind} ${num(w.synced.qty, 2)} a ${money(w.synced.price)} · ${hhmm(w.synced.t)}`}>
                 <Icon name="refresh" size={10} />
                 <span>{w.synced.kind === "vendiste" ? "−" : "+"}{num(w.synced.qty, 2)} · {hhmm(w.synced.t)}</span>
               </span>
-            )}
+            ))}
           </div>
         </div>
         <div className="crow-cell"><small>Te costó</small><b>{money(w.cost * (1 + gmf), 0)}</b>
@@ -341,7 +367,8 @@ export function Sell() {
             <div className="clist-head">
               <span>Moneda</span><span>Te costó</span><span>Si vendes ahora</span><span>Meta</span><span>Aviso</span><span />
             </div>
-            {live.map((w, i) => <CoinRow key={w.id} w={w} i={i} onEdit={() => setForm({ edit: w })} />)}
+            {live.map((w, i) => <CoinRow key={w.id} w={w} i={i} onEdit={() => setForm({ edit: w })}
+              others={live.filter((x) => x.id !== w.id && x.asset === w.asset)} />)}
           </div>
         ) : (
           <div className="wempty">

@@ -56,6 +56,8 @@ export const api = {
   updateWatch: (id: string, patch: { asset?: string; qty?: number; cost?: number; target?: number; alert?: boolean }) =>
     post("/api/watches/update", { id, ...patch }),
   deleteWatch: (id: string) => post("/api/watches/delete", { id }),
+  /** "No era de esta": pasa el último ajuste automático (una orden de Binance) a otra moneda de la lista. */
+  moveSync: (from: string, to: string) => post("/api/watches/move-sync", { from, to }),
   chat: () => getJson<ChatSummary>("/api/chat"),
   chatMessages: (peer: string, before = 0) =>
     getJson<{ messages: ChatMessage[] }>(`/api/chat/messages?peer=${encodeURIComponent(peer)}${before ? `&before=${before}` : ""}`),

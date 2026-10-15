@@ -735,42 +735,51 @@ def watch_partial_alert(w, part):
                 telegram_too=w["user"] == main_user(), links=[(f"Vender {w['asset']} a {ad['nick']}", advertiser_url(ad))])
 
 
+def apply_order(w, o):
+    """Una orden P2P sobre una moneda de la lista: comprar suma (cripto menos comisión, costo = lo pagado); vender
+    resta lo vendido más la comisión y la parte proporcional de lo que costó. Guarda cómo estaba antes, para poder
+    pasar el ajuste a otra moneda si no era de esta."""
+    before = {"qty": w["qty"], "cost": w["cost"], "status": w["status"], "target": w.get("target") or 0}
+    fee = float(o.get("commission") or 0)
+    if o["side"] == "BUY":
+        w["qty"] += max(o["amount"] - fee, 0)
+        w["cost"] += o["total"]
+        kind = "compraste"
+    else:
+        out = min(o["amount"] + fee, w["qty"])
+        w["cost"] -= w["cost"] * (out / w["qty"]) if w["qty"] > 0 else w["cost"]
+        w["qty"] -= out
+        kind = "vendiste"
+    w["orders"] = sorted(set(w.get("orders") or []) | {o["id"]})[-300:]
+    w["synced"] = {"t": time.time(), "kind": kind, "qty": o["amount"], "price": o["price"], "total": o["total"], "before": before,
+                   "order": {k: o.get(k) for k in ("id", "side", "amount", "commission", "total", "price")}}
+    dust = 0.01 if w["asset"] in ("USDT", "USDC", "FDUSD") else 1e-8
+    if w["qty"] <= dust:
+        w.update(status="vendida", qty=max(w["qty"], 0.0), cost=max(w["cost"], 0.0))
+    else:
+        w["target"] = min(w.get("target") or 0, w["cost"] * 0.9)
+        w.update(status="vigilando", last=None, full_t=0)  # con lo que te queda se calcula de nuevo
+
+
 def sync_watches(user, orders):
     """Mis monedas se ajustan solas con las órdenes P2P de Binance hechas DESPUÉS de anotar la moneda: si vendes una
     parte, queda lo que te quedó con su costo proporcional (costo promedio); si compras más, se suma con lo que pagaste.
-    Cada orden se cuenta una sola vez. Si vendiste todo, la moneda pasa a Terminadas."""
+    Cada orden se cuenta una sola vez. Si vendiste todo, la moneda pasa a Terminadas. Con varias filas de la misma
+    cripto va a la más reciente; si no era de esa, 'No era de esta' la pasa a otra (api_watch_move_sync)."""
     changed = False
     with watch_lock:
         live = [w for w in watches if w["user"] == user and w["status"] in ("vigilando", "lista")]
+        mine = [w for w in watches if w["user"] == user]
         for asset in {w["asset"] for w in live}:
             w = max((x for x in live if x["asset"] == asset), key=lambda x: x["created"])  # la más reciente de esa cripto
-            seen = set(w.get("orders") or [])
+            seen = {i for x in mine if x["asset"] == asset for i in (x.get("orders") or [])}  # ya contada en cualquier fila
             new = sorted((o for o in orders if o.get("status") == "COMPLETED" and o.get("asset") == asset
                           and (o.get("fiat") or FIAT) == FIAT and o.get("id") and o["id"] not in seen
                           and (o.get("time") or 0) / 1000 > w["created"]), key=lambda o: o["time"])
-            if not new:
-                continue
             for o in new:
-                fee = float(o.get("commission") or 0)
-                if o["side"] == "BUY":  # te llega la cripto menos la comisión; el costo es lo que pagaste
-                    w["qty"] += max(o["amount"] - fee, 0)
-                    w["cost"] += o["total"]
-                    kind = "compraste"
-                else:  # sale lo vendido más la comisión; se va la parte proporcional de lo que te costó
-                    out = min(o["amount"] + fee, w["qty"])
-                    w["cost"] -= w["cost"] * (out / w["qty"]) if w["qty"] > 0 else w["cost"]
-                    w["qty"] -= out
-                    kind = "vendiste"
-                seen.add(o["id"])
-                w["synced"] = {"t": time.time(), "kind": kind, "qty": o["amount"], "price": o["price"], "total": o["total"]}
-            w["orders"] = sorted(seen)[-300:]
-            dust = 0.01 if asset in ("USDT", "USDC", "FDUSD") else 1e-8
-            if w["qty"] <= dust:
-                w.update(status="vendida", qty=max(w["qty"], 0.0), cost=max(w["cost"], 0.0))
-            else:
-                w["target"] = min(w.get("target") or 0, w["cost"] * 0.9)
-                w.update(status="vigilando", last=None, full_t=0)  # con lo que te queda se calcula de nuevo
-            changed = True
+                if w["status"] in ("vigilando", "lista"):
+                    apply_order(w, o)
+                    changed = True
         if changed:
             save_json(WATCH_FILE, watches)
     if changed:
@@ -1486,6 +1495,29 @@ def api_watch_update():
             w.pop("synced", None)  # lo escribiste a mano: el último ajuste con Binance ya no aplica
         elif b.get("alert") is True and w["status"] == "lista":
             w["status"] = "vigilando"  # al prender el aviso con una oferta ya buena: se confirma y avisa
+        save_json(WATCH_FILE, watches)
+    wake["watch"].set()
+    publish("watch")
+    return jsonify(ok=True)
+
+
+@app.post("/api/watches/move-sync")
+def api_watch_move_sync():
+    """'No era de esta': deshace el último ajuste automático de una moneda y lo aplica a otra de la misma cripto."""
+    b = body()
+    with watch_lock:
+        mine = {w["id"]: w for w in watches if w["user"] == g.user["name"]}
+        src, dst = mine.get(str(b.get("from") or "")), mine.get(str(b.get("to") or ""))
+        sync = (src or {}).get("synced") or {}
+        if not src or not dst or src is dst or src["asset"] != dst["asset"] or not sync.get("before") or not sync.get("order"):
+            return jsonify(error="No se puede pasar ese ajuste."), 400
+        if dst["status"] not in ("vigilando", "lista"):
+            return jsonify(error="Esa moneda ya está terminada."), 400
+        src.update(qty=sync["before"]["qty"], cost=sync["before"]["cost"], status=sync["before"]["status"],
+                   target=sync["before"].get("target", src.get("target")), last=None, full_t=0)
+        src["orders"] = [i for i in (src.get("orders") or []) if i != sync["order"]["id"]]
+        src.pop("synced", None)
+        apply_order(dst, sync["order"])
         save_json(WATCH_FILE, watches)
     wake["watch"].set()
     publish("watch")

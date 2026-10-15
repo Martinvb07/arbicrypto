@@ -232,7 +232,7 @@ export interface Watch {
   alert?: boolean;
   alerts: number;
   /** Último ajuste automático con una orden P2P de Binance (vendiste una parte o compraste más). */
-  synced?: { t: number; kind: "compraste" | "vendiste"; qty: number; price: number; total: number };
+  synced?: { t: number; kind: "compraste" | "vendiste"; qty: number; price: number; total: number; before?: { qty: number; cost: number } };
   last: {
     t: number;
     failed: string[];
