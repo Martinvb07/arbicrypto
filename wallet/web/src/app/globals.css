@@ -1274,3 +1274,6 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
 .acc-bal-missing { color: var(--muted); }
 .acc-bal .link { font-size: inherit; }
 .acc-bal-edit { margin-left: 6px; }
+
+.op-prices { color: var(--text-2, var(--muted)); }
+.op-prices b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 650; }

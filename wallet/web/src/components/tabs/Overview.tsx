@@ -23,6 +23,8 @@ const isoOf = (d: number) => dateOf(d).toISOString().slice(0, 10);
 
 const F_DAY = new Intl.DateTimeFormat("es-CO", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
 const F_SHORT = new Intl.DateTimeFormat("es-CO", { timeZone: "UTC", day: "numeric", month: "short" });
+/** Precio por unidad con centavos: "$ 3.166,56" (en dólares los centavos cuentan). */
+const unitPrice = (v: number) => `$ ${num(v, v < 1000 ? 4 : 2)}`;
 const F_BUY = new Intl.DateTimeFormat("es-CO", { timeZone: "America/Bogota", day: "numeric", month: "short" });
 
 /** "De tu compra del 14 oct (157,83 USDT por $500.000) · quedan 16,70" o "Del resto de tu compra…" */
@@ -422,6 +424,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                               <Badge kind={KIND_BADGE[o.kind]}>{KIND_LABEL[o.kind]}</Badge>
                               <Asset asset={o.asset} qty={qty(o.qty)} />
                             </span>
+                            {o.qty > 0 && <span className="cell-sub op-prices">Compraste a <b>{unitPrice(o.cost / o.qty)}</b> por {o.asset}</span>}
                             <span className="cell-sub">{o.method ?? ""}{o.counterpart ? ` · a ${o.counterpart}` : ""}</span>
                             {o.even != null && (
                               <span className="cell-sub buy-even">
@@ -452,6 +455,11 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                             {o.kind === "permuta" && o.received && <span className="muted nowrap">→ {o.received}</span>}
                           </span>
                           {o.missing && <span className="cell-sub warn">Falta la compra: la ganancia puede salir más alta</span>}
+                          {o.qty > 0 && o.kind === "venta" && o.cost > 0 && (
+                            <span className="cell-sub op-prices">
+                              Compraste a <b>{unitPrice(o.cost / o.qty)}</b> → vendiste a <b>{unitPrice(o.gross / o.qty)}</b> por {o.asset}
+                            </span>
+                          )}
                           {o.sources.length > 0 && <span className="cell-sub">{sourceText(o)}</span>}
                         </td>
                         <td className="r">{o.cost || o.fee ? money(o.cost + o.fee) : <span className="muted">—</span>}</td>
