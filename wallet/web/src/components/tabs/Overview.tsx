@@ -53,9 +53,11 @@ function bucketLabel(b: number, g: Group, long = false) {
 /** Una venta, cambio o ingreso con lo que te costó y lo que ganaste */
 interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; received: string | null; cost: number; gross: number; fee: number; gain: number; missing: boolean;
   /** 4x1000 de lo vendido, ganancia ya sin él y de qué compras salió */
-  gmf: number; net: number; sources: SaleSource[] }
+  gmf: number; net: number; sources: SaleSource[];
+  /** compra: pagaste `cost` y te llegó `qty` (no tiene ganancia; su 4x1000 se reparte en las ventas que salgan de ella) */
+  buy?: boolean; method?: string; counterpart?: string }
 
-type Show = "todas" | "gana" | "pierde";
+type Show = "todas" | "compras" | "gana" | "pierde";
 const PAGE = 50;
 
 /** Resultados fáciles: elige un periodo y mira cuánto compraste, cuánto ganaste en cada operación y cómo vas ahorita. */
@@ -176,12 +178,18 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   const hasPos = bars.some((x) => x.gain > 0.5);
 
   /* ---------- lista de operaciones ---------- */
-  const listed = inPeriod.filter((o) => show === "todas" || (show === "gana" ? Math.round(o.net) > 0 : Math.round(o.net) < 0));
+  const buyOps = useMemo<Op[]>(() => buys.map((m) => ({
+    key: `b${m.id}`, t: m.t, kind: m.kind, asset: m.in_asset ?? "", qty: m.in_qty ?? 0, received: null, cost: m.cop_value + (m.fee_cop || 0),
+    gross: 0, fee: 0, gain: 0, missing: false, gmf: m.gmf_cop || 0, net: 0, sources: [], buy: true,
+    method: m.pay_method, counterpart: m.counterpart })), [buys]);
+  const listed = show === "compras" ? buyOps
+    : show === "todas" ? [...inPeriod, ...buyOps].sort((p, q) => q.t - p.t)
+    : inPeriod.filter((o) => (show === "gana" ? Math.round(o.net) > 0 : Math.round(o.net) < 0));
   const pages = Math.ceil(listed.length / PAGE);
   const slice = listed.slice(page * PAGE, page * PAGE + PAGE);
   const bucketSum = useMemo(() => {
     const m = new Map<number, { gain: number; n: number }>();
-    for (const o of listed) { const k = bucketOf(dayOf(o.t), group); const x = m.get(k) ?? { gain: 0, n: 0 }; x.gain += o.net; x.n++; m.set(k, x); }
+    for (const o of listed) { const k = bucketOf(dayOf(o.t), group); const x = m.get(k) ?? { gain: 0, n: 0 }; x.gain += o.buy ? 0 : o.net; x.n++; m.set(k, x); }
     return m;
   }, [listed, group]);
 
@@ -342,11 +350,11 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
         <div className="card-head">
           <div>
             <h2>Cada operación</h2>
-            <span className="sub">Cuánto te costó lo que vendiste, cuánto recibiste y cuánto ganaste</span>
+            <span className="sub">Tus compras y ventas: cuánto pagaste, cuánto recibiste y cuánto te quedó</span>
           </div>
           <div className="actions">
             <div className="seg">
-              {([["todas", "Todas"], ["gana", "Con ganancia"], ["pierde", "Con pérdida"]] as const).map(([k, l]) => (
+              {([["todas", "Todas"], ["compras", "Compras"], ["gana", "Con ganancia"], ["pierde", "Con pérdida"]] as const).map(([k, l]) => (
                 <button key={k} className={show === k ? "on" : ""} onClick={() => { setShow(k); setPage(0); }}>{l}</button>
               ))}
             </div>
@@ -387,6 +395,23 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                           <td className="hide-sm" />
                         </tr>
                       ),
+                      o.buy ? (
+                        <tr key={o.key} className="buy-row">
+                          <td className="nowrap">{hourMin(o.t)}{group !== "dia" && <span className="cell-sub">{clean(F_SHORT.format(dateOf(dayOf(o.t))))}</span>}</td>
+                          <td>
+                            <span className="op-what">
+                              <Badge kind={KIND_BADGE[o.kind]}>{KIND_LABEL[o.kind]}</Badge>
+                              <Asset asset={o.asset} qty={qty(o.qty)} />
+                            </span>
+                            <span className="cell-sub">Pagaste {money(o.cost)}{o.method ? ` · ${o.method}` : ""}{o.counterpart ? ` · a ${o.counterpart}` : ""}</span>
+                          </td>
+                          <td className="r">{money(o.cost)}</td>
+                          <td className="r hide-sm">{qty(o.qty)} {o.asset}</td>
+                          <td className="r"><span className="muted">—</span>
+                            {o.gmf >= 1 && <span className="cell-sub">4x1000 {money(o.gmf)}</span>}</td>
+                          <td className="r hide-sm muted">—</td>
+                        </tr>
+                      ) : (
                       <tr key={o.key}>
                         <td className="nowrap">{hourMin(o.t)}{group !== "dia" && <span className="cell-sub">{clean(F_SHORT.format(dateOf(dayOf(o.t))))}</span>}</td>
                         <td>
@@ -401,10 +426,11 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                         <td className="r">{o.cost || o.fee ? money(o.cost + o.fee) : <span className="muted">—</span>}</td>
                         <td className="r hide-sm">{money(o.gross)}</td>
                         <td className="r"><b><Pnl v={o.net} /></b>
-                          {o.gmf >= 1 && <span className="cell-sub">{signedMoney(o.gain)} − 4x1000 {money(o.gmf)}</span>}
+                          {o.gmf >= 1 && <span className="cell-sub"><span className="hide-sm">{signedMoney(o.gain)} </span>−4x1000 {money(o.gmf)}</span>}
                           {pct != null && <span className={`cell-sub show-sm ${tone(pct)}`}>{pct >= 0 ? "+" : "−"}{num(Math.abs(pct), 2)} %</span>}</td>
                         <td className={`r hide-sm ${pct == null ? "muted" : tone(pct)}`}>{pct == null ? "—" : `${pct >= 0 ? "+" : "−"}${num(Math.abs(pct), 2)} %`}</td>
-                      </tr>,
+                      </tr>
+                      ),
                     ];
                   })}
                 </tbody>

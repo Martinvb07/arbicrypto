@@ -1201,3 +1201,14 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
   .gmf-pick-txt b { white-space: normal; }
 }
 @media (prefers-reduced-motion: reduce) { .gmf-pick-row, .gmf-bar { animation: none; } }
+
+/* Cada operación: en celular las opciones se deslizan y las cifras no se salen */
+@media (max-width: 640px) {
+  .card-head .actions .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .card-head .actions .seg::-webkit-scrollbar { display: none; }
+  .card-head .actions .seg button { flex: none; }
+  table.mv-table .r .cell-sub { white-space: normal; font-size: 11px; }
+  table.mv-table th, table.mv-table td { padding-left: 6px; padding-right: 6px; }
+  table.mv-table th:first-child, table.mv-table td:first-child { padding-left: 14px; }
+  table.mv-table th:last-child, table.mv-table td:last-child { padding-right: 14px; }
+}
