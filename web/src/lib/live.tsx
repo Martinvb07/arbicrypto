@@ -194,6 +194,11 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   const beep = useCallback((kind: string = "test") => {
     const ctx = audio.current;
     if (!ctx || !prefsRef.current.sound) return;
+    // Windows o el navegador pausan el audio (suspensión, audífonos, mucho rato sin tocar): se reanuda antes de sonar
+    if (ctx.state !== "running") {
+      void ctx.resume().then(() => ctx.state === "running" && beep(kind), () => undefined);
+      return;
+    }
     const t = ctx.currentTime;
     const notes = SOUNDS[kind === "p2p" || kind === "spot" || kind === "sell" ? "opp" : kind] ?? SOUNDS.test;
     notes.forEach((n) => {
@@ -211,6 +216,47 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       o.stop(at + n.len + 0.02);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Avisos push: llegan aunque Chrome/Edge duerma la pestaña o esté cerrada (ver public/sw.js)
+  const syncPush = useCallback(async (on: boolean) => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    try {
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      const cur = await reg.pushManager.getSubscription();
+      if (!on || Notification.permission !== "granted") {
+        if (cur) {
+          await api.pushUnsubscribe(cur.endpoint).catch(() => undefined);
+          await cur.unsubscribe();
+        }
+        return;
+      }
+      const { key } = await api.pushKey();
+      const raw = Uint8Array.from(atob(key.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+      let sub = cur;
+      const old = sub?.options.applicationServerKey;
+      if (sub && old && new Uint8Array(old).join() !== raw.join()) {  // la llave del servidor cambió
+        await sub.unsubscribe();
+        sub = null;
+      }
+      sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
+      await api.pushSubscribe(sub.endpoint);
+    } catch {
+      /* navegador sin push (o bloqueado): quedan los avisos con la página abierta */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (prefsReady && state?.user.name) void syncPush(prefs.desktop);
+  }, [prefsReady, prefs.desktop, permission, state?.user.name, syncPush]);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const go = (e: MessageEvent<{ hash?: string }>) => {
+      if (e.data?.hash) window.location.hash = e.data.hash;
+    };
+    navigator.serviceWorker.addEventListener("message", go);
+    return () => navigator.serviceWorker.removeEventListener("message", go);
+  }, []);
 
   const enableSound = useCallback(() => {
     try {

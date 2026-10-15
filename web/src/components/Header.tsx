@@ -71,7 +71,7 @@ function AlertsMenu({ onTelegram }: { onTelegram: () => void }) {
             {prefs.sound && !soundReady && <button className="btn btn-sm" onClick={enableSound}>Activar</button>}
             <Switch checked={prefs.sound} onChange={(v) => setPrefs({ sound: v })} label="Sonido" />
           </Row>
-          <Row title="Notificaciones de Windows" sub="Con el panel abierto en el navegador">
+          <Row title="Notificaciones de Windows" sub="Llegan aunque la pestaña esté dormida o cerrada">
             {permission === "granted"
               ? <Switch checked={prefs.desktop} onChange={(v) => setPrefs({ desktop: v })} label="Notificaciones" />
               : <button className="btn btn-sm btn-brand" onClick={() => void askPermission()}>Activar</button>}

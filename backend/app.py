@@ -27,6 +27,7 @@ from urllib.parse import quote
 import requests
 
 import storage
+import webpush
 from httpkit import App, Response, abort, asgi, g, jsonify, redirect, request, safe_join, send_from_directory
 
 import engine
@@ -118,6 +119,7 @@ if sql.mysql:
 auth = Auth(store=store, redis=redis)
 live = LiveBook()
 telegram = Telegram()
+push = webpush.WebPush(store.load, store.save)  # avisos aunque la pestaña esté dormida o cerrada
 lock = threading.RLock()
 wake = {name: threading.Event() for name in ("spot", "p2p", "account", "watch")}
 subscribers = []
@@ -349,6 +351,7 @@ def raise_alert(key, kind, title, body, capital=None, user=None, telegram_too=Tr
         state["alerts"].insert(0, {"id": alert_id, "t": now, "kind": kind, "title": title, "body": body,
                                    "capital": capital, "user": user, "users": users, "audience": audience, "links": links})
         del state["alerts"][200:]
+    push.send([n for n, u in auth.users.items() if u.get("role") == "admin"] if ADMINS in audience else audience)
     icon = {"p2p": "💰", "spot": "⚡", "system": "⚠️", "sell": "🎯", "price": "🔔"}.get(kind, "✅")
     if telegram_too:
         buttons = "\n" + "".join(f'\n👉 <a href="{html.escape(l["url"])}">{html.escape(l["label"])}</a>' for l in links) if links else ""
@@ -1290,6 +1293,7 @@ def api_team_rename():
                 x["user"] = new
         save_json(PRICE_FILE, price_alerts)
     vault.rename(old, new)
+    push.rename(old, new)
     with lock:
         for d in (accounts, acc_state, acc_errors):
             if old in d:
@@ -1748,6 +1752,35 @@ def api_test_alert():
     raise_alert(f"test:{now}", "test", "Aviso de prueba", "Si te llegó, tus avisos están funcionando.",
                 user=g.user["name"], telegram_too=g.user["name"] == main_user())
     return jsonify(ok=True)
+
+
+@app.get("/api/push/key")
+def api_push_key():
+    return jsonify(key=push.public)
+
+
+@app.post("/api/push/subscribe")
+def api_push_subscribe():
+    try:
+        push.subscribe(g.user["name"], str(body().get("endpoint") or ""))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True)
+
+
+@app.post("/api/push/unsubscribe")
+def api_push_unsubscribe():
+    push.unsubscribe(g.user["name"], str(body().get("endpoint") or ""))
+    return jsonify(ok=True)
+
+
+@app.get("/api/push/recent")
+def api_push_recent():
+    """Lo que muestra el service worker cuando llega un push: los avisos de los últimos 2 minutos."""
+    since = time.time() - 120
+    with lock:
+        mine = [a for a in state["alerts"] if a["t"] >= since and alert_visible(a, g.user)]
+    return jsonify([{k: a.get(k) for k in ("id", "kind", "title", "body")} for a in mine[:4]])
 
 
 @app.get("/api/events")
