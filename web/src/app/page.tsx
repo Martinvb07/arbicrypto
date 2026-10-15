@@ -35,14 +35,14 @@ function Banners() {
 }
 
 function App() {
-  const [tab, setTab] = useState<TabId>("inicio");
+  const [tab, setTab] = useState<TabId>("mercado");
   const [noWallet, setNoWallet] = useState(false);
 
   useEffect(() => {
     const read = () => {
       if (window.location.hash === "#sin-wallet") setNoWallet(true);
       const h = window.location.hash.slice(1) as TabId;
-      setTab(TABS.some((t) => t.id === h) ? h : "inicio");
+      setTab(TABS.some((t) => t.id === h) ? h : "mercado");  // Precios P2P es la principal
     };
     read();
     window.addEventListener("hashchange", read);

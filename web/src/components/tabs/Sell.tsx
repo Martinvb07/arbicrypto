@@ -274,6 +274,13 @@ function CoinRow({ w, i, onEdit }: { w: Watch; i: number; onEdit: () => void }) 
             </button>
           )}
           {b && <span className="dim">{b.ad.nick} · {money(b.ad.price)}/{unit}</span>}
+          {w.last?.partial?.ok && (
+            <a className="crow-partial" href={advertiserUrl(w.last.partial.ad)} target="_blank" rel="noopener noreferrer"
+              title={`${w.last.partial.ad.nick} compra entre ${money(w.last.partial.ad.min, 0)} y ${money(w.last.partial.ad.max, 0)}: no te recibe todo, pero una parte sí`}>
+              <Icon name="sparkle" size={12} />
+              <span>Parte {num(w.last.partial.qty, 2)}<span className="hide-sm"> a {money(w.last.partial.ad.price)}</span> → <b>{signedMoney(w.last.partial.profit)}</b></span>
+            </a>
+          )}
         </div>
         <div className="crow-cell crow-goal">
           <small>{ready ? (w.target > 0 ? `Ya ganas +${money(w.target, 0)}` : "Ya puedes vender ganando") : b ? `Falta ${num(Math.max(missing, 0), missing < 1 ? 2 : 1)} %` : "Meta"}</small>

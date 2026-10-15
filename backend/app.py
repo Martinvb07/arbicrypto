@@ -699,6 +699,42 @@ def watch_alert(w, o):
                 links=links)
 
 
+def watch_partial(w):
+    """Comprador que NO acepta todo lo que tienes pero sí una parte (p. ej. compra de $200.000 a $300.000 y tú tienes
+    $500.000): cuánto le vendes, cuánto recibes y cuánto ganas con esa parte, contra lo que te costó esa parte (con su
+    4x1000). Solo venta directa en P2P. El mejor por ganancia; None si no hay."""
+    p2p = state["p2p"]
+    ads = ((p2p or {}).get("market", {}).get(w["asset"]) or {}).get("SELL") or []
+    if not ads or not graph or w["qty"] <= 0:
+        return None
+    paid = paid_with_gmf(w["user"], w["cost"])
+    fee = taker_fee_of(profile(w["user"]))
+    best = None
+    for ad in ads:
+        if ad["max"] >= w["qty"] * ad["price"]:
+            continue  # ese acepta todo: ya es la venta normal
+        q = min(w["qty"], ad["max"] / ad["price"], ad["available"] or float("inf"))
+        if q <= 0 or q * ad["price"] < ad["min"]:
+            continue
+        cut = engine.p2p_taker_fee(graph, w["asset"], q, *fee)
+        received = (q - cut) * ad["price"]
+        profit = received - paid * q / w["qty"]
+        if best is None or profit > best["profit"]:
+            best = {"ad": ad, "qty": q, "received": received, "profit": profit,
+                    "ok": profit >= max(w["target"], 0) * q / w["qty"] and profit > 0}
+    return best
+
+
+def watch_partial_alert(w, part):
+    ad, gain = part["ad"], round(part["profit"])
+    title = f"Puedes vender una parte de tu {w['asset']} ganando {money(gain)}"
+    body = (f"{ad['nick']} compra entre {money(ad['min'])} y {money(ad['max'])} a {money(ad['price'])}: no te recibe todo, pero "
+            f"si le vendes {qty8(part['qty'])} {w['asset']} recibes {money(part['received'])} y ganas {money(gain)} con esa parte "
+            f"(ya con comisión y 4x1000) · {', '.join(ad['methods'][:2])}\nEl resto lo sigo vigilando. Confirma el precio antes de vender.")
+    raise_alert(f"sellpart:{w['id']}:{ad.get('user')}:{ad['price']}", "sell", title, body, user=w["user"],
+                telegram_too=w["user"] == main_user(), links=[(f"Vender {w['asset']} a {ad['nick']}", advertiser_url(ad))])
+
+
 def sync_watches(user, orders):
     """Mis monedas se ajustan solas con las órdenes P2P de Binance hechas DESPUÉS de anotar la moneda: si vendes una
     parte, queda lo que te quedó con su costo proporcional (costo promedio); si compras más, se suma con lo que pagaste.
@@ -763,7 +799,17 @@ def watch_step():
                 best = again or best
         finally:
             p2p_hold.clear()
-        w["last"] = {"t": time.time(), "failed": failed, "best": best and {
+        part = watch_partial(w)
+        if part and best and part["ad"]["price"] <= best["ad"]["price"]:
+            part = None  # vender todo paga igual o mejor: no hace falta partir
+        if part and part["ok"] and alert_on and not (best and best["ok"]):
+            key = f"{part['ad'].get('user')}:{part['ad']['price']}"
+            if w.get("partial_key") != key:  # una vez por oferta: si cambia de precio o de comprador, avisa de nuevo
+                w["partial_key"] = key
+                watch_partial_alert(w, part)
+        elif not (part and part["ok"]):
+            w.pop("partial_key", None)
+        w["last"] = {"t": time.time(), "failed": failed, "partial": part, "best": best and {
             "to": best["to"], "path": best["path"], "qty": best["qty"], "received": best["received"], "hops": best["hops"],
             "profit": best["profit"], "need_price": best["need_price"], "even_price": best["even_price"], "ok": best["ok"],
             "ad": best["ad"]}}

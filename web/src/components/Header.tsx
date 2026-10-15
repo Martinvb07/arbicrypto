@@ -12,9 +12,9 @@ import { Ago, Brand, Icon, PasswordInput, UserAvatar, useThumb, type IconName } 
 export type TabId = "inicio" | "vender" | "mercado" | "anuncios" | "historial" | "chat" | "cuenta" | "equipo";
 
 export const TABS: { id: TabId; label: string; icon: IconName; admin?: boolean }[] = [
-  { id: "inicio", label: "Arbitraje", icon: "bolt" },
+  { id: "mercado", label: "Precios P2P", icon: "chart" },  // la principal: abre aquí
   { id: "vender", label: "¿Dónde vendo?", icon: "target" },
-  { id: "mercado", label: "Precios P2P", icon: "chart" },
+  { id: "inicio", label: "Arbitraje", icon: "bolt" },
   { id: "anuncios", label: "Simular anuncios", icon: "megaphone" },
   { id: "historial", label: "Historial", icon: "clock" },
   { id: "chat", label: "Chat", icon: "chat" },
@@ -206,7 +206,7 @@ export function Header({ onTab }: { onTab: (t: TabId) => void }) {
   return (
     <header className="top">
       <div className="wrap top-in">
-        <a href="#inicio" onClick={() => onTab("inicio")} style={{ textDecoration: "none" }}><Brand /></a>
+        <a href="#mercado" onClick={() => onTab("mercado")} style={{ textDecoration: "none" }}><Brand /></a>
         <span className={`live ${liveCls}`} title="Conexión con Binance">
           <span className="dot" />
           <b>{offline ? "SIN CONEXIÓN" : !state ? "CONECTANDO" : errors ? "CON ERRORES" : "EN VIVO"}</b>

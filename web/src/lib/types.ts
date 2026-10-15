@@ -236,6 +236,8 @@ export interface Watch {
   last: {
     t: number;
     failed: string[];
+    /** Comprador que solo acepta una parte: cuánto le vendes, recibes y ganas con esa parte. */
+    partial?: { ad: Ad; qty: number; received: number; profit: number; ok: boolean } | null;
     best: { to: string; path: string[]; hops?: SpotHop[]; qty: number; received: number; profit: number; need_price: number; even_price?: number; ok: boolean; ad: Ad } | null;
   } | null;
 }
