@@ -278,7 +278,7 @@ def moves(uid, start=None, end=None):
 def public_move(m):
     return {**{k: m.get(k) for k in ("id", "t", "kind", "out_asset", "out_qty", "in_asset", "in_qty", "cop_value", "fee_cop",
                                      "gmf_cop", "platform", "counterpart", "source", "note", "category", "pay_method",
-                                     "fee_qty", "fee_asset")},
+                                     "fee_qty", "fee_asset", "gmf_choice")},
             "ref": tax.ref_label(m.get("ext_id"))}
 
 
@@ -406,6 +406,25 @@ def edit_movement(mid):
     if not db.update_movement(g.user["id"], mid, m):
         return jsonify(error="No existe ese movimiento."), 404
     return jsonify(ok=True)
+
+
+@app.post("/api/movements/gmf")
+@with_session
+@needs_binance
+def movements_gmf():
+    """Modo 'elegir cuáles': marca si esas compras pagaron 4x1000 (las ventas nunca lo pagan)."""
+    uid = g.user["id"]
+    d = body()
+    ids = d.get("ids")
+    if not isinstance(ids, list) or not ids:
+        raise Bad("Elige al menos una compra.")
+    mine = {m["id"]: m for m in db.movements(uid) if m["kind"] == "compra"}
+    ids = [int(i) for i in ids if isinstance(i, (int, float, str)) and str(i).isdigit() and int(i) in mine]
+    lock = db.lock_until(uid)
+    open_ids = [i for i in ids if not lock or mine[i]["t"] > lock]  # las de meses cerrados no se tocan
+    if ids and not open_ids:
+        check_open(uid, *[mine[i]["t"] for i in ids])
+    return jsonify(changed=db.set_gmf_choice(uid, open_ids, bool(d.get("on"))), skipped=len(ids) - len(open_ids))
 
 
 @app.post("/api/movements/delete")
@@ -1683,7 +1702,8 @@ def cierre_reopen():
 
 GMF_TEXT = {"todas": "Se paga en todas las compras: $4.000 por cada $1.000.000 que sale de tu cuenta.",
             "exenta": "Cuenta exenta: el banco no lo cobra.",
-            "tope350": "Cuenta exenta hasta 350 UVT al mes: se paga solo sobre lo que pase de ese tope."}
+            "tope350": "Cuenta exenta hasta 350 UVT al mes: se paga solo sobre lo que pase de ese tope.",
+            "elegir": "Elegido compra por compra: solo se cuenta en las compras marcadas con 4x1000 (las ventas no lo pagan)."}
 
 
 def gmf_text(p):

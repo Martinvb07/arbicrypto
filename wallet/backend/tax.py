@@ -25,7 +25,7 @@ ART_241 = [  # (desde UVT, hasta UVT, tarifa marginal, impuesto fijo en UVT)
 ]
 GMF_RATE = 0.004            # 4x1000: $4.000 por cada $1.000.000
 GMF_EXEMPT_UVT = 350        # cuenta marcada como exenta: no paga hasta 350 UVT de retiros al mes (art. 879 ET)
-GMF_MODES = ("todas", "exenta", "tope350")
+GMF_MODES = ("todas", "exenta", "tope350", "elegir")
 OUTFLOW = {"venta", "permuta", "comision"}
 INFLOW = {"compra", "permuta", "ingreso", "airdrop"}
 
@@ -45,9 +45,18 @@ DEADLINES = {2025: {
 
 def apply_gmf(movements, mode, methods=None):
     """4x1000 que de verdad se pagó, según la cuenta desde la que compras.
-    todas: el registrado en cada compra · exenta: nada · tope350: solo lo que pase de 350 UVT en el mes.
+    todas: el registrado en cada compra · exenta: nada · tope350: solo lo que pase de 350 UVT en el mes ·
+    elegir: compra por compra (gmf_choice 0 = no pagó; si no se marcó, el registrado). Las ventas nunca pagan 4x1000.
     `methods` permite elegir por medio de pago (Nequi, Bancolombia…); si no está, manda `mode`."""
     methods = methods or {}
+    if mode == "elegir":
+        out = []
+        for m in movements:
+            if m["kind"] == "compra" and m.get("gmf_choice") is not None:
+                base = float(m.get("cop_value") or 0) + float(m.get("fee_cop") or 0)  # lo que salió de la cuenta
+                m = {**m, "gmf_cop": round(base * GMF_RATE, 2) if m["gmf_choice"] else 0.0}
+            out.append(m)
+        return out
     if mode not in ("exenta", "tope350") and not any(v in ("exenta", "tope350") for v in methods.values()):
         return movements
     out, used = [], {}

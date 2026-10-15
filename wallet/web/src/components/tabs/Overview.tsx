@@ -60,7 +60,7 @@ const PAGE = 50;
 
 /** Resultados fáciles: elige un periodo y mira cuánto compraste, cuánto ganaste en cada operación y cómo vas ahorita. */
 export function Overview({ onDetail }: { onDetail: () => void }) {
-  const { report, year } = useWallet();
+  const { report, year, version } = useWallet();
   const live = year >= currentYear();
   const today = dayOf(Date.now() / 1000);
   const y0 = Math.floor(Date.UTC(year, 0, 1) / 1000 / DAY);
@@ -79,12 +79,16 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
 
   useEffect(() => {
     let alive = true;
-    api.movements(year).then((r) => alive && setMoves(r.movements), () => alive && setMoves([]));
     setMarket(null);
     setMarketErr(false);
     api.market(year).then((m) => alive && setMarket(m), () => alive && setMarketErr(true));
     return () => { alive = false; };
   }, [year]);
+  useEffect(() => {  // movimientos (con su 4x1000) de nuevo cada vez que algo cambia
+    let alive = true;
+    api.movements(year).then((r) => alive && setMoves(r.movements), () => alive && setMoves([]));
+    return () => { alive = false; };
+  }, [year, version]);
   useEffect(() => { setPeriod(live ? "mes" : "año"); setGroup(live ? "dia" : "mes"); setPage(0); }, [year, live]);
 
   /* ---------- periodos ---------- */

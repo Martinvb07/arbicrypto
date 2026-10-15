@@ -23,11 +23,13 @@ export interface Movement {
   /** comisión que Binance cobró en cripto (ya descontada de la cantidad); fee_cop es su valor en pesos */
   fee_qty?: number;
   fee_asset?: string;
+  /** 4x1000 elegido a mano en esta compra (modo "elegir cuáles"): 1 sí, 0 no, null = el de siempre */
+  gmf_choice?: 0 | 1 | null;
 }
 
 export type MovementInput = Partial<Omit<Movement, "id" | "source">> & { kind: Kind; t: number };
 
-export type GmfMode = "todas" | "exenta" | "tope350";
+export type GmfMode = "todas" | "exenta" | "tope350" | "elegir";
 
 export interface Profile {
   name: string;
@@ -560,6 +562,7 @@ export const api = {
   movements: (year: number | null) => get<{ movements: Movement[]; lock_until: number }>(`/api/movements${year ? `?year=${year}` : ""}`),
   addMovement: (m: MovementInput) => post("/api/movements", m),
   editMovement: (id: number, m: MovementInput) => post(`/api/movements/${id}`, m),
+  movementsGmf: (ids: number[], on: boolean) => post<{ changed: number }>("/api/movements/gmf", { ids, on }),
   deleteMovements: (ids: number[]) => post<{ deleted: number }>("/api/movements/delete", { ids }),
   deleteSource: (source: "binance" | "csv" | "manual") => post<{ deleted: number }>("/api/movements/delete", { source }),
   value: (asset: string, qty: number, t: number) =>

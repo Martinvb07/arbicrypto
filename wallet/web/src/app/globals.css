@@ -1171,3 +1171,20 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
 @media (max-width: 640px) {
   .cd-stats > div, .cd-history-head, .cd-day { padding-left: 16px; padding-right: 16px; }
 }
+
+/* ---------- Resultados: 4x1000 de tus compras ---------- */
+.gmf-panel { display: grid; gap: 12px; }
+.gmf-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.gmf-panel-head h2 { margin: 0 0 2px; }
+.gmf-panel-head p { margin: 0; font-size: 13px; }
+.gmf-pick-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13.5px; }
+.gmf-pick { display: grid; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.gmf-pick-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 14px; cursor: pointer;
+  transition: background-color .12s; }
+.gmf-pick-row + .gmf-pick-row { border-top: 1px solid var(--border); }
+.gmf-pick-row:hover { background: var(--hover); }
+.gmf-pick-row input { width: 17px; height: 17px; accent-color: var(--brand); }
+.gmf-pick-txt { display: grid; min-width: 0; }
+.gmf-pick-txt b { font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gmf-pick-txt small { color: var(--muted); font-size: 12px; }
+.gmf-pick-row .num { font-size: 13.5px; white-space: nowrap; }

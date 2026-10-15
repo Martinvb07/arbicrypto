@@ -275,5 +275,17 @@ class VentaEnPartes(unittest.TestCase):
         self.assertAlmostEqual(b["sources"][0]["left"], 0)
         self.assertEqual(a["sources"][0]["id"], 1)
 
+
+class GmfElegido(unittest.TestCase):
+    def test_compra_por_compra_y_ventas_sin_4x1000(self):
+        base = dict(out_asset="COP", in_asset="USDT", in_qty=30, fee_cop=0, gmf_cop=400, cop_value=100000, out_qty=100000)
+        ms = [dict(base, id=1, t=1, kind="compra", gmf_choice=None),   # sin marcar: el registrado
+              dict(base, id=2, t=2, kind="compra", gmf_choice=0),      # marcada sin 4x1000
+              dict(base, id=3, t=3, kind="compra", gmf_choice=1, gmf_cop=0),  # marcada con: se calcula
+              dict(id=4, t=4, kind="venta", out_asset="USDT", out_qty=30, in_asset="COP", in_qty=101000, cop_value=101000,
+                   fee_cop=0, gmf_cop=0, gmf_choice=None)]
+        out = {m["id"]: m["gmf_cop"] for m in tax.apply_gmf(ms, "elegir")}
+        self.assertEqual(out, {1: 400, 2: 0.0, 3: 400.0, 4: 0})
+
 if __name__ == "__main__":
     unittest.main()

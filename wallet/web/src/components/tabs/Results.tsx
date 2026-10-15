@@ -7,6 +7,7 @@ import { GmfQuestion } from "../GmfQuestion";
 import { Asset, Badge, Coin, Empty, Note, Segmented, Skeleton } from "../ui";
 import { useWallet } from "../wallet";
 import { Gains } from "./Gains";
+import { GmfPanel } from "../GmfPanel";
 import { Overview } from "./Overview";
 
 const MONTH = new Intl.DateTimeFormat("es-CO", { month: "long", timeZone: "UTC" });
@@ -61,7 +62,10 @@ export function Results({ onTab, initialView = "resumen" }: { onTab: (t: TabId) 
       {me.movements === 0 ? (
         <div className="card"><Empty icon="trend" title="Todavía no hay movimientos">Conecta tu Binance en Inicio y todo aparece solo.</Empty></div>
       ) : view === "resumen" ? (
-        <Overview onDetail={() => setView("operaciones")} />
+        <>
+          <GmfPanel />
+          <Overview onDetail={() => setView("operaciones")} />
+        </>
       ) : view === "operaciones" ? (
         <Gains embedded />
       ) : view === "rondas" ? (
@@ -151,6 +155,7 @@ export function Results({ onTab, initialView = "resumen" }: { onTab: (t: TabId) 
                     <span className="cell-sub">
                       {me.profile.gmf_mode === "exenta" ? "Tu cuenta es exenta: no pagas 4x1000"
                         : me.profile.gmf_mode === "tope350" ? "Solo lo que pasa de 350 UVT al mes"
+                        : me.profile.gmf_mode === "elegir" ? "Solo en las compras que marcaste (Resumen → 4x1000)"
                         : "$4.000 por cada $1.000.000 que pagaste comprando"}
                       {" · "}<button className="link" onClick={() => onTab("ajustes")}>cambiar</button>
                     </span>
