@@ -55,7 +55,9 @@ interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; r
   /** 4x1000 de lo vendido, ganancia ya sin él y de qué compras salió */
   gmf: number; net: number; sources: SaleSource[];
   /** compra: pagaste `cost` y te llegó `qty` (no tiene ganancia; su 4x1000 se reparte en las ventas que salgan de ella) */
-  buy?: boolean; method?: string; counterpart?: string }
+  buy?: boolean; method?: string; counterpart?: string;
+  /** compra: cuánto queda sin vender, a cuánto vender para no perder y cuánto ganas si lo vendes ya en P2P */
+  left?: number; even?: number | null; now?: { profit: number; price: number; nick: string } | null }
 
 type Show = "todas" | "compras" | "gana" | "pierde";
 const PAGE = 50;
@@ -178,10 +180,27 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   const hasPos = bars.some((x) => x.gain > 0.5);
 
   /* ---------- lista de operaciones ---------- */
-  const buyOps = useMemo<Op[]>(() => buys.map((m) => ({
-    key: `b${m.id}`, t: m.t, kind: m.kind, asset: m.in_asset ?? "", qty: m.in_qty ?? 0, received: null, cost: m.cop_value + (m.fee_cop || 0),
-    gross: 0, fee: 0, gain: 0, missing: false, gmf: m.gmf_cop || 0, net: 0, sources: [], buy: true,
-    method: m.pay_method, counterpart: m.counterpart })), [buys]);
+  // cuánto se ha vendido de cada compra (las ventas dicen de qué compra salieron)
+  const usedOf = useMemo(() => {
+    const u = new Map<number, number>();
+    for (const d of report?.disposals ?? []) for (const s of d.sources ?? []) if (s.id != null) u.set(s.id, (u.get(s.id) ?? 0) + s.qty);
+    return u;
+  }, [report]);
+  const buyOps = useMemo<Op[]>(() => buys.map((m) => {
+    const asset = m.in_asset ?? "", q = m.in_qty ?? 0, cost = m.cop_value + (m.fee_cop || 0), g = m.gmf_cop || 0;
+    const p2p = market?.p2p;
+    // comisión al vender en P2P: el porcentaje o el mínimo por orden (en dólares; solo se sabe directo en USDT/USDC/FDUSD)
+    const feeQty = (x: number) => Math.min(x, Math.max((p2p?.fee ?? 0) * x, ["USDT", "USDC", "FDUSD"].includes(asset) ? p2p?.min_usd ?? 0 : 0));
+    const left = Math.max(q - (usedOf.get(m.id) ?? 0), 0);
+    const even = q > 0 ? (cost + g) / (q - feeQty(q)) : null;
+    let now: Op["now"] = null;
+    if (left > 1e-6 && p2p) {
+      const ad = (p2p.buyers[asset] ?? []).find((b) => b.min <= left * b.price && left * b.price <= b.max && (!b.available || b.available >= left));
+      if (ad) now = { profit: (left - feeQty(left)) * ad.price - (cost + g) * (left / q), price: ad.price, nick: ad.nick };
+    }
+    return { key: `b${m.id}`, t: m.t, kind: m.kind, asset, qty: q, received: null, cost, gross: 0, fee: 0, gain: 0, missing: false,
+      gmf: g, net: 0, sources: [], buy: true, method: m.pay_method, counterpart: m.counterpart, left, even, now };
+  }), [buys, usedOf, market]);
   const listed = show === "compras" ? buyOps
     : show === "todas" ? [...inPeriod, ...buyOps].sort((p, q) => q.t - p.t)
     : inPeriod.filter((o) => (show === "gana" ? Math.round(o.net) > 0 : Math.round(o.net) < 0));
@@ -403,12 +422,22 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                               <Badge kind={KIND_BADGE[o.kind]}>{KIND_LABEL[o.kind]}</Badge>
                               <Asset asset={o.asset} qty={qty(o.qty)} />
                             </span>
-                            <span className="cell-sub">Pagaste {money(o.cost)}{o.method ? ` · ${o.method}` : ""}{o.counterpart ? ` · a ${o.counterpart}` : ""}</span>
+                            <span className="cell-sub">{o.method ?? ""}{o.counterpart ? ` · a ${o.counterpart}` : ""}</span>
+                            {o.even != null && (
+                              <span className="cell-sub buy-even">
+                                Para no perder: vende a <b>{money(o.even)}</b>/{o.asset} o más
+                                {(o.left ?? 0) <= 1e-6 ? " · ya la vendiste toda" : (o.left ?? 0) < o.qty - 1e-6 ? ` · te quedan ${qty(o.left)}` : ""}
+                              </span>
+                            )}
                           </td>
-                          <td className="r">{money(o.cost)}</td>
+                          <td className="r">{money(o.cost + o.gmf)}{o.gmf >= 1 && <span className="cell-sub">{money(o.cost)} + 4x1000</span>}</td>
                           <td className="r hide-sm">{qty(o.qty)} {o.asset}</td>
-                          <td className="r"><span className="muted">—</span>
-                            {o.gmf >= 1 && <span className="cell-sub">4x1000 {money(o.gmf)}</span>}</td>
+                          <td className="r">
+                            {o.now ? <>
+                              <b><Pnl v={o.now.profit} /></b>
+                              <span className="cell-sub" title={`Al mejor comprador de P2P que acepta lo que te queda: ${o.now.nick}`}>si vendes ya · {money(o.now.price)}</span>
+                            </> : <span className="muted">—</span>}
+                          </td>
                           <td className="r hide-sm muted">—</td>
                         </tr>
                       ) : (

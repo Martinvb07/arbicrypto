@@ -1212,3 +1212,6 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
   table.mv-table th:first-child, table.mv-table td:first-child { padding-left: 14px; }
   table.mv-table th:last-child, table.mv-table td:last-child { padding-right: 14px; }
 }
+
+.buy-even { color: var(--text-2, var(--muted)); }
+.buy-even b { color: var(--text); font-variant-numeric: tabular-nums; }

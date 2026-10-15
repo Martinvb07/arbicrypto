@@ -482,10 +482,15 @@ export interface StatementPreview {
 
 export type StatementInput = { account_id: number; filename: string; data: string; password?: string };
 
+export interface P2PBuyer { price: number; nick: string; min: number; max: number; available: number | null }
+
 export interface Market {
   t: number;
   values: Record<string, { cop: number; usd: number; trm: number }>;
   errors: string[];
+  /** Del panel: tu comisión al vender en P2P (porcentaje y mínimo por orden en dólares) y los compradores de ahora */
+  p2p?: { fee: number; min_usd: number; buyers: Record<string, P2PBuyer[]> } | null;
+  gmf?: number | null;
 }
 
 export interface BinanceStatus {

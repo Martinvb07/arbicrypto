@@ -952,7 +952,9 @@ def market():
             out[a] = {"cop": v["cop"], "usd": v["usd"] * h["qty"], "trm": v["trm"]}
         except RateError as e:
             errors.append(f"{a}: {e}")
-    return jsonify(t=t, values=out, errors=errors)
+    live = (panel_account(g.user["id"]) or {}).get("account") or {}
+    # compradores de P2P y tu comisión, del panel: en cada compra, a cuánto vender y cuánto ganas si vendes ya
+    return jsonify(t=t, values=out, errors=errors, p2p=live.get("p2p"), gmf=live.get("gmf"))
 
 
 def fmt_t(t):

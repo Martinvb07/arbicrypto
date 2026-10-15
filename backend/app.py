@@ -1437,6 +1437,7 @@ def api_watch_update():
         w.update(changed)
         if numbers:  # con datos nuevos se vuelve a calcular desde cero
             w.update(status="vigilando", last=None, full_t=0)
+            w.pop("synced", None)  # lo escribiste a mano: el último ajuste con Binance ya no aplica
         elif b.get("alert") is True and w["status"] == "lista":
             w["status"] = "vigilando"  # al prender el aviso con una oferta ya buena: se confirma y avisa
         save_json(WATCH_FILE, watches)
@@ -2113,6 +2114,12 @@ def internal_account():
             held[a] = held.get(a, 0.0) + r["qty"]
         account["sell"] = {a: v for a, q in held.items() if a in P2P_ASSETS and (v := sell_now(name, a, q))}
         account["gmf"] = profile(name)["gmf"]
+        # para que la wallet diga en cada compra a cuánto vender y cuánto ganas si vendes ya (igual que Mis monedas)
+        rate, min_usd = taker_fee_of(profile(name))
+        market = (state["p2p"] or {}).get("market") or {}
+        account["p2p"] = {"fee": rate, "min_usd": min_usd, "buyers": {
+            a: [{k: ad[k] for k in ("price", "nick", "min", "max", "available")} for ad in (market.get(a) or {}).get("SELL", [])[:15]]
+            for a in P2P_ASSETS}}
     resp = jsonify(connected=bool(name and name in accounts), account=account,
                    error=error["msg"] if error else None, fiat=FIAT)
     resp.headers["Cache-Control"] = "no-store"

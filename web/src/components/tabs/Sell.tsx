@@ -251,13 +251,15 @@ function CoinRow({ w, i, onEdit }: { w: Watch; i: number; onEdit: () => void }) 
       <div className="crow-main">
         <div className="crow-coin">
           <span className="wcard-coin"><Coin s={w.asset} size={28} /></span>
-          <div>
+          <div className="crow-coin-txt">
             <b>{amount(w.asset, w.qty)}</b>
             <small>{COIN_NAMES[w.asset] ?? w.asset}</small>
             {w.synced && (
-              <small className="crow-synced" title="Se ajusta sola con tus órdenes P2P de Binance">
-                <Icon name="refresh" size={11} /> {w.synced.kind === "vendiste" ? "Vendiste" : "Compraste"} {num(w.synced.qty, 2)} a {money(w.synced.price)} · {hhmm(w.synced.t)}
-              </small>
+              <span className={`crow-synced ${w.synced.kind}`}
+                title={`Se ajustó sola con tu orden de Binance: ${w.synced.kind} ${num(w.synced.qty, 2)} a ${money(w.synced.price)} · ${hhmm(w.synced.t)}`}>
+                <Icon name="refresh" size={10} />
+                <span>{w.synced.kind === "vendiste" ? "−" : "+"}{num(w.synced.qty, 2)} · {hhmm(w.synced.t)}</span>
+              </span>
             )}
           </div>
         </div>
