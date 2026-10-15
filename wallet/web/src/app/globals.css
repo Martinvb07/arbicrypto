@@ -1215,3 +1215,16 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
 
 .buy-even { color: var(--text-2, var(--muted)); }
 .buy-even b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Subir varios extractos a la vez */
+.up-files { display: grid; margin-top: 12px; border: 1px solid var(--border); border-radius: 12px; overflow: auto; max-height: 240px; }
+.up-file { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; align-items: center; padding: 9px 12px;
+  animation: gmf-row-in .25s ease-out both; transition: background-color .2s; }
+.up-file + .up-file { border-top: 1px solid var(--border); }
+.up-file .icon { color: var(--muted); grid-row: span 2; transition: color .2s; }
+.up-file.ok .icon { color: var(--up); }
+.up-file.bad .icon { color: var(--down); }
+.up-file-name { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.up-file small { color: var(--muted); font-size: 12px; }
+.up-file.bad small { color: var(--down); }
+.drop.has-files { border-style: solid; }

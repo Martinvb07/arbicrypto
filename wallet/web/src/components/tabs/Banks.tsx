@@ -429,106 +429,160 @@ function AccountModal({ account, onClose, onDone }: { account: BankAccount | nul
   );
 }
 
+type PickedFile = { name: string; data: string };
+type FileCheck = { file: PickedFile; preview?: StatementPreview; error?: string };
+
+/** Subir extractos: uno o varios a la vez (por ejemplo, un PDF por mes con la misma clave). Lo repetido no se duplica. */
 function UploadModal({ accounts, initial, onClose, onDone }: { accounts: BankAccount[]; initial: number | null; onClose: () => void; onDone: () => void }) {
   const { toast } = useWallet();
   const [aid, setAid] = useState<number>(initial ?? accounts[0]?.id);
-  const [file, setFile] = useState<{ name: string; data: string } | null>(null);
+  const [files, setFiles] = useState<PickedFile[]>([]);
   const [password, setPassword] = useState("");
-  const [preview, setPreview] = useState<StatementPreview | null>(null);
+  const [checks, setChecks] = useState<FileCheck[] | null>(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const isPdf = file?.name.toLowerCase().endsWith(".pdf");
+  const [busy, setBusy] = useState("");
+  const anyPdf = files.some((f) => f.name.toLowerCase().endsWith(".pdf"));
 
-  async function pick(f: File | undefined) {
-    setPreview(null);
+  const read = (f: File) => new Promise<PickedFile>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve({ name: f.name, data: String(r.result).split(",")[1] ?? "" });
+    r.onerror = () => reject(new Error(`No se pudo leer ${f.name}.`));
+    r.readAsDataURL(f);
+  });
+
+  async function pick(list: FileList | null) {
+    setChecks(null);
     setError("");
-    if (!f) return;
-    if (f.size > 12 * 1024 * 1024) return setError("El archivo pesa más de 12 MB.");
-    const data = await new Promise<string>((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
-      r.onerror = () => reject(new Error("No se pudo leer el archivo."));
-      r.readAsDataURL(f);
-    });
-    setFile({ name: f.name, data });
+    const chosen = Array.from(list ?? []);
+    if (!chosen.length) return;
+    const big = chosen.filter((f) => f.size > 12 * 1024 * 1024);
+    if (big.length) return setError(`${big.map((f) => f.name).join(", ")} pesa${big.length > 1 ? "n" : ""} más de 12 MB.`);
+    if (chosen.length > 24) return setError("Máximo 24 archivos a la vez.");
+    try {
+      setFiles(await Promise.all(chosen.map(read)));
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
 
   async function check() {
-    if (!file) return;
-    setBusy(true);
+    if (!files.length) return;
     setError("");
-    try {
-      setPreview(await api.extractoPreview({ account_id: aid, filename: file.name, data: file.data, password }));
-    } catch (e) {
-      setError((e as Error).message);
+    const out: FileCheck[] = [];
+    for (const [i, file] of files.entries()) {  // uno por uno: el servidor lee cada PDF con la misma clave
+      setBusy(files.length > 1 ? `Leyendo ${i + 1} de ${files.length}…` : "Leyendo…");
+      try {
+        out.push({ file, preview: await api.extractoPreview({ account_id: aid, filename: file.name, data: file.data, password }) });
+      } catch (e) {
+        out.push({ file, error: (e as Error).message });
+      }
+      setChecks([...out]);
     }
-    setBusy(false);
+    setBusy("");
   }
 
   async function upload() {
-    if (!file) return;
-    setBusy(true);
-    try {
-      const r = await api.extractoSubir({ account_id: aid, filename: file.name, data: file.data, password });
-      toast("Extracto importado", `${r.added} movimientos nuevos${r.skipped ? ` · ${r.skipped} ya estaban` : ""}`, "good");
-      onDone();
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(false);
+    const ready = (checks ?? []).filter((c) => c.preview && c.preview.total - c.preview.known > 0);
+    let added = 0, skipped = 0;
+    const failed: string[] = [];
+    for (const [i, c] of ready.entries()) {
+      setBusy(ready.length > 1 ? `Importando ${i + 1} de ${ready.length}…` : "Importando…");
+      try {
+        const r = await api.extractoSubir({ account_id: aid, filename: c.file.name, data: c.file.data, password });
+        added += r.added;
+        skipped += r.skipped;
+      } catch (e) {
+        failed.push(`${c.file.name}: ${(e as Error).message}`);
+      }
     }
+    setBusy("");
+    if (added || !failed.length) {
+      toast(ready.length > 1 ? `${ready.length - failed.length} extractos importados` : "Extracto importado",
+        `${added} movimientos nuevos${skipped ? ` · ${skipped} ya estaban` : ""}`, "good");
+    }
+    if (failed.length) setError(`No se pudieron importar: ${failed.join(" · ")}`);
+    else onDone();
   }
 
+  const ok = (checks ?? []).filter((c) => c.preview);
+  const sum = ok.reduce((a, c) => ({ total: a.total + c.preview!.total, known: a.known + c.preview!.known, inflow: a.inflow + c.preview!.inflow,
+    outflow: a.outflow + c.preview!.outflow }), { total: 0, known: 0, inflow: 0, outflow: 0 });
+  const days = ok.flatMap((c) => [c.preview!.day_from, c.preview!.day_to]).filter((d): d is string => !!d).sort();
+  const fresh = sum.total - sum.known;
+  const rows = ok.flatMap((c) => c.preview!.rows).sort((x, y) => (x.day < y.day ? 1 : -1));
+  const one = files.length === 1;
+
   return (
-    <Modal title="Subir extracto" onClose={onClose} wide>
+    <Modal title="Subir extractos" onClose={busy ? () => undefined : onClose} wide>
       <div className="form">
         <Field label="Cuenta">
-          <Select label="Cuenta" value={String(aid)} onChange={(v) => { setAid(Number(v)); setPreview(null); }}
+          <Select label="Cuenta" value={String(aid)} onChange={(v) => { setAid(Number(v)); setChecks(null); }}
             options={accounts.map((a) => ({ value: String(a.id), label: a.name, search: a.name, icon: <BankLogo name={a.name} kind={a.kind} size={22} />, hint: KIND_LABEL[a.kind] }))} />
         </Field>
-        <Field label="Clave del PDF (si tiene)" hint="Muchos bancos usan tu número de cédula.">
-          <input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setPreview(null); }} disabled={!isPdf} autoComplete="off" placeholder={isPdf ? "Opcional" : "Solo para PDF"} />
+        <Field label="Clave de los PDF (si tienen)" hint="La misma para todos. Muchos bancos usan tu número de cédula.">
+          <input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setChecks(null); }} disabled={!anyPdf} autoComplete="off" placeholder={anyPdf ? "Opcional" : "Solo para PDF"} />
         </Field>
-        <label className="drop field wide">
+        <label className={`drop field wide ${files.length ? "has-files" : ""}`}>
           <Icon name="upload" size={22} />
-          <b>{file ? file.name : "Elige el extracto: PDF, Excel (.xlsx, .xls) o CSV"}</b>
-          <span>Puedes subir varios meses: lo repetido no se duplica</span>
-          <input type="file" accept=".pdf,.xlsx,.xls,.csv,.txt" onChange={(e) => void pick(e.target.files?.[0])} />
+          <b>{!files.length ? "Elige uno o varios extractos: PDF, Excel (.xlsx, .xls) o CSV" : one ? files[0].name : `${files.length} archivos elegidos`}</b>
+          <span>{files.length > 1 ? "Toca para cambiarlos · se revisan todos con la misma clave" : "Puedes elegir varios meses a la vez: lo repetido no se duplica"}</span>
+          <input type="file" multiple accept=".pdf,.xlsx,.xls,.csv,.txt" onChange={(e) => void pick(e.target.files)} />
         </label>
       </div>
 
-      {error && <div style={{ marginTop: 12 }}><Note kind="bad">{error}</Note></div>}
+      {files.length > 1 && (
+        <div className="up-files">
+          {files.map((f, i) => {
+            const c = checks?.find((x) => x.file === f);
+            return (
+              <div key={`${f.name}-${i}`} className={`up-file ${c?.error ? "bad" : c?.preview ? "ok" : ""}`} style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}>
+                <Icon name={c?.error ? "alert" : c?.preview ? "check" : "file"} size={15} />
+                <span className="up-file-name">{f.name}</span>
+                <small>
+                  {c?.error ? c.error
+                    : c?.preview ? `${num(c.preview.total)} movimientos${c.preview.known ? ` · ${c.preview.known} ya estaban` : ""}${c.preview.day_from ? ` · ${fmtDay(c.preview.day_from)} a ${fmtDay(c.preview.day_to)}` : ""}`
+                    : busy ? "En fila…" : "Sin revisar"}
+                </small>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-      {preview && (
+      {error && <div style={{ marginTop: 12 }}><Note kind="bad">{error}</Note></div>}
+      {one && checks?.[0]?.error && <div style={{ marginTop: 12 }}><Note kind="bad">{checks[0].error}</Note></div>}
+
+      {ok.length > 0 && (
         <div className="stack" style={{ marginTop: 14 }}>
           <div className="kpis kpis-3">
-            <div className="kpi"><small>Movimientos</small><b>{num(preview.total)}</b><span>{preview.known ? `${preview.known} ya estaban` : "Todos nuevos"}</span></div>
-            <div className="kpi"><small>Periodo</small><b style={{ fontSize: 16 }}>{fmtDay(preview.day_from)} a {fmtDay(preview.day_to)}</b><span>Según las fechas</span></div>
-            <div className="kpi"><small>Entró / salió</small><b style={{ fontSize: 16 }}><span className="up">{money(preview.inflow)}</span> / <span className="down">{money(preview.outflow)}</span></b><span>En este archivo</span></div>
+            <div className="kpi"><small>Movimientos</small><b>{num(sum.total)}</b><span>{sum.known ? `${sum.known} ya estaban` : "Todos nuevos"}</span></div>
+            <div className="kpi"><small>Periodo</small><b style={{ fontSize: 16 }}>{days.length ? `${fmtDay(days[0])} a ${fmtDay(days[days.length - 1])}` : "—"}</b><span>{ok.length > 1 ? `${ok.length} archivos` : "Según las fechas"}</span></div>
+            <div className="kpi"><small>Entró / salió</small><b style={{ fontSize: 16 }}><span className="up">{money(sum.inflow)}</span> / <span className="down">{money(sum.outflow)}</span></b><span>{ok.length > 1 ? "En estos archivos" : "En este archivo"}</span></div>
           </div>
-          {preview.warnings.map((w, i) => <Note key={i} kind="warn">{w}</Note>)}
-          {preview.total > 0 && (
+          {ok.flatMap((c) => c.preview!.warnings.map((w, i) => <Note key={`${c.file.name}-${i}`} kind="warn">{ok.length > 1 ? `${c.file.name}: ` : ""}{w}</Note>))}
+          {rows.length > 0 && (
             <div className="table-wrap preview-table">
               <table className="t">
                 <thead><tr><th>Fecha</th><th>Descripción</th><th className="r">Valor</th><th className="r">Saldo</th></tr></thead>
                 <tbody>
-                  {preview.rows.slice(0, 15).map((r, i) => (
+                  {rows.slice(0, 15).map((r, i) => (
                     <tr key={i}><td className="nowrap">{fmtDay(r.day)}</td><td>{r.description}</td><td className={`r ${tone(r.amount)}`}>{signedMoney(r.amount)}</td><td className="r">{r.balance != null ? money(r.balance) : "—"}</td></tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
-          {preview.total > 15 && <small className="muted">Y {preview.total - 15} más.</small>}
+          {sum.total > 15 && <small className="muted">Y {num(sum.total - 15)} más.</small>}
         </div>
       )}
 
       <div className="form-actions">
-        <button className="btn" onClick={onClose}>Cancelar</button>
-        {!preview ? (
-          <button className="btn btn-primary" disabled={!file || busy} onClick={check}>{busy ? "Leyendo…" : "Revisar"}</button>
+        <button className="btn" onClick={onClose} disabled={!!busy}>Cancelar</button>
+        {!checks || checks.length < files.length ? (
+          <button className="btn btn-primary" disabled={!files.length || !!busy} onClick={() => void check()}>{busy || (files.length > 1 ? `Revisar ${files.length} archivos` : "Revisar")}</button>
         ) : (
-          <button className="btn btn-primary" disabled={busy || preview.total - preview.known <= 0} onClick={upload}>
-            {busy ? "Importando…" : preview.total - preview.known <= 0 ? "Ya estaban todos" : `Importar ${num(preview.total - preview.known)} movimientos`}
+          <button className="btn btn-primary" disabled={!!busy || fresh <= 0} onClick={() => void upload()}>
+            {busy || (fresh <= 0 ? "Ya estaban todos" : `Importar ${num(fresh)} movimientos`)}
           </button>
         )}
       </div>
