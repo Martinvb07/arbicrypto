@@ -232,7 +232,8 @@ function CoinHistory({ w, hist, gmf, others, onMove }: { w: Watch; hist: WatchMo
   const won = sales.reduce((a, m) => a + (gainOf(m) ?? 0), 0);
   const soldQty = sales.reduce((a, m) => a + (m.moved ?? m.qty ?? 0), 0);
   const startQty = w.start?.qty ?? (hist[0] && hist[0].kind !== "editaste" ? hist[0].left + (hist[0].kind === "vendiste" ? 1 : -1) * (hist[0].moved ?? 0) : null);
-  const soldPct = startQty ? Math.min(100, (soldQty / (startQty + hist.filter((m) => m.kind === "compraste").reduce((a, m) => a + (m.moved ?? 0), 0))) * 100) : 0;
+  const base = startQty != null ? startQty + hist.filter((m) => m.kind === "compraste").reduce((a, m) => a + (m.moved ?? 0), 0) : 0;
+  const soldPct = base > 0 ? Math.min(100, (soldQty / base) * 100) : 0;
   return (
     <div className="chist">
       <div className="chist-head">
@@ -264,7 +265,7 @@ function CoinHistory({ w, hist, gmf, others, onMove }: { w: Watch; hist: WatchMo
             </li>
           );
         })}
-        {w.start && (
+        {w.start && w.start.qty > 0 && (
           <li className="chist-item start" style={{ animationDelay: `${Math.min(hist.length, 10) * 40}ms` }}>
             <span className="chist-dot"><Icon name="plus" size={12} /></span>
             <div className="chist-txt">
@@ -339,7 +340,7 @@ function CoinRow({ w, i, onEdit, others }: { w: Watch; i: number; onEdit: () => 
           <span className="wcard-coin"><Coin s={w.asset} size={28} /></span>
           <div className="crow-coin-txt">
             <b>{amount(w.asset, w.qty)}</b>
-            <small>{COIN_NAMES[w.asset] ?? w.asset}</small>
+            <small>{COIN_NAMES[w.asset] ?? w.asset}{w.auto && <span className="dim"> · anotada sola con tu compra</span>}</small>
             {(w.synced || hist.length > 0) && (
               <button className={`crow-synced ${last?.kind ?? w.synced?.kind ?? ""} as-btn ${showHist ? "on" : ""}`} onClick={() => setShowHist(!showHist)}
                 aria-expanded={showHist} title="Ver el historial de esta moneda">

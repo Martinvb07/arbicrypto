@@ -47,6 +47,7 @@ SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 PREFS_FILE = os.path.join(DATA_DIR, "prefs.json")  # capital de cada usuario
 HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 WATCH_FILE = os.path.join(DATA_DIR, "watches.json")
+WATCH_AUTO_FILE = os.path.join(DATA_DIR, "watch_auto.json")  # desde cuándo y qué compras ya crearon su moneda sola
 PRICE_FILE = os.path.join(DATA_DIR, "price_alerts.json")  # alertas de precio de cada usuario
 _ENV0 = storage.read_env_file(ENV_FILE)
 _flag = lambda k: (os.environ.get(k) or _ENV0.get(k, "")).strip().lower() in ("1", "true", "si", "yes")
@@ -640,6 +641,7 @@ def p2p_step():
 # ---------------------------------------------------------------- vigilancia de ventas
 
 watches = []
+watch_auto = {}  # por usuario: {"since": desde cuándo una compra crea su moneda sola, "done": órdenes ya usadas}
 watch_lock = threading.Lock()
 
 
@@ -771,25 +773,61 @@ def apply_order(w, o):
         w.update(status="vigilando", last=None, full_t=0)  # con lo que te queda se calcula de nuevo
 
 
+def watch_from_buy(user, o):
+    """Moneda nueva en la lista a partir de una compra P2P: lo que te llegó (sin la comisión) y lo que pagaste."""
+    fee = float(o.get("commission") or 0)
+    t = (o.get("time") or 0) / 1000 or time.time()
+    got = max(o["amount"] - fee, 0)
+    return {"id": secrets.token_hex(6), "asset": o["asset"], "qty": got, "cost": o["total"], "target": 0,
+            "user": user, "created": t, "expires": None, "status": "vigilando", "alerts": 0, "last": None,
+            "alert": True, "auto": True, "start": {"t": t, "qty": 0, "cost": 0}, "orders": [o["id"]],
+            "moves": [{"id": o["id"], "t": t, "kind": "compraste", "qty": o["amount"], "fee": fee, "price": o["price"],
+                       "total": o["total"], "moved": got, "cost": o["total"], "left": got, "cost_left": o["total"]}]}
+
+
 def sync_watches(user, orders):
     """Mis monedas se ajustan solas con las órdenes P2P de Binance hechas DESPUÉS de anotar la moneda: si vendes una
     parte, queda lo que te quedó con su costo proporcional (costo promedio); si compras más, se suma con lo que pagaste.
     Cada orden se cuenta una sola vez. Si vendiste todo, la moneda pasa a Terminadas. Con varias filas de la misma
-    cripto va a la más reciente; si no era de esa, 'No era de esta' la pasa a otra (api_watch_move_sync)."""
+    cripto va a la más reciente; si no era de esa, 'No era de esta' la pasa a otra (api_watch_move_sync).
+    Si compras una cripto que no está en la lista, se agrega sola con lo que te llegó y lo que pagaste (solo compras
+    hechas desde que esto empezó a funcionar, y cada compra una sola vez: si quitas esa moneda no vuelve a salir)."""
     changed = False
     with watch_lock:
+        fresh = user not in watch_auto
+        auto = watch_auto.setdefault(user, {"since": time.time(), "done": []})
+        done = set(auto["done"])
         live = [w for w in watches if w["user"] == user and w["status"] in ("vigilando", "lista")]
         mine = [w for w in watches if w["user"] == user]
-        for asset in {w["asset"] for w in live}:
-            w = max((x for x in live if x["asset"] == asset), key=lambda x: x["created"])  # la más reciente de esa cripto
-            seen = {i for x in mine if x["asset"] == asset for i in (x.get("orders") or [])}  # ya contada en cualquier fila
-            new = sorted((o for o in orders if o.get("status") == "COMPLETED" and o.get("asset") == asset
-                          and (o.get("fiat") or FIAT) == FIAT and o.get("id") and o["id"] not in seen
-                          and (o.get("time") or 0) / 1000 > w["created"]), key=lambda o: o["time"])
+        ok = [o for o in orders if o.get("status") == "COMPLETED" and o.get("asset") and o.get("id")
+              and (o.get("fiat") or FIAT) == FIAT]
+        for asset in {w["asset"] for w in live} | {o["asset"] for o in ok if o.get("side") == "BUY"}:
+            seen = {i for x in mine if x["asset"] == asset for i in (x.get("orders") or [])} | done  # ya contada
+            rows = [x for x in live if x["asset"] == asset]
+            if rows:
+                w = max(rows, key=lambda x: x["created"])  # la más reciente de esa cripto
+            else:  # compraste una que no tenías anotada: se crea sola con la primera compra nueva
+                first = min((o for o in ok if o["asset"] == asset and o.get("side") == "BUY" and o["id"] not in seen
+                             and (o.get("time") or 0) / 1000 > auto["since"]), key=lambda o: o["time"], default=None)
+                if not first or len(live) >= WATCH_MAX:
+                    continue
+                w = watch_from_buy(user, first)
+                watches.append(w)
+                del watches[:-100]
+                live.append(w)
+                seen.add(first["id"])
+                auto["done"].append(first["id"])
+                changed = True
+            new = sorted((o for o in ok if o["asset"] == asset and o["id"] not in seen
+                          and (o.get("time") or 0) / 1000 >= w["created"]), key=lambda o: o["time"])
             for o in new:
                 if w["status"] in ("vigilando", "lista"):
                     apply_order(w, o)
+                    auto["done"].append(o["id"])
                     changed = True
+        auto["done"] = auto["done"][-500:]
+        if changed or fresh:
+            save_json(WATCH_AUTO_FILE, watch_auto)
         if changed:
             save_json(WATCH_FILE, watches)
     if changed:
@@ -2321,6 +2359,7 @@ def main():
     if sql.mysql or redis.on:
         print(f"  Datos en {'MySQL' if sql.mysql else 'SQLite'}{' + Redis' if redis.on else ''}")
     watches.extend(load_json(WATCH_FILE, []))
+    watch_auto.update(load_json(WATCH_AUTO_FILE, {}))
     price_alerts.extend(load_json(PRICE_FILE, []))
     prefs.update(load_json(PREFS_FILE, {}))
     for name, step, interval in (("spot", spot_step, SPOT_INTERVAL), ("p2p", p2p_step, P2P_INTERVAL),

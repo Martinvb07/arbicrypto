@@ -239,6 +239,8 @@ export interface Watch {
   /** Switch "Avisarme cuando gane": si está apagado solo se muestra en la lista, sin sonido ni Telegram. */
   alert?: boolean;
   alerts: number;
+  /** Se agregó sola con una compra P2P de Binance (no la anotaste a mano). */
+  auto?: boolean;
   /** Último ajuste automático con una orden P2P de Binance (vendiste una parte o compraste más). */
   synced?: { t: number; kind: "compraste" | "vendiste"; qty: number; price: number; total: number; before?: { qty: number; cost: number } };
   /** Cómo empezó la moneda y cada orden de Binance que la movió (o que la editaste a mano). */
