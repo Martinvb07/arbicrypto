@@ -339,57 +339,94 @@ function flows(e: JournalEntry) {
 /** Libro diario: en pantalla, cada comprobante en palabras simples (de dónde salió y a dónde fue); al imprimir, débitos y créditos completos. */
 export function JournalView({ entries, lock, onDeleteNote }: { entries: JournalEntry[]; lock: number; onDeleteNote?: (id: number) => void }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const toggle = (n: string) => setOpen((s) => { const x = new Set(s); if (x.has(n)) x.delete(n); else x.add(n); return x; });
+  // los que ya se abrieron quedan montados: así también se animan al cerrar
+  const [seen, setSeen] = useState<Set<string>>(new Set());
+  const toggle = (n: string) => {
+    setSeen((s) => (s.has(n) ? s : new Set(s).add(n)));
+    setOpen((s) => { const x = new Set(s); if (x.has(n)) x.delete(n); else x.add(n); return x; });
+  };
   return (
     <>
       <div className="card no-print">
         <div className="jr-list">
           {entries.map((e) => {
             const f = flows(e);
-            const total = e.lines.reduce((a, l) => a + (l.debit || 0), 0);
             const isOpen = open.has(e.number);
+            // lo que de verdad te dejó: ingresos (cuentas 4) menos costos y gastos (5, 6 y 7)
+            const hasResult = f.gain.length > 0 || f.cost.length > 0;
+            const net = f.gain.reduce((a, x) => a + x.v, 0) - f.cost.reduce((a, x) => a + x.v, 0);
+            const moved = f.to.reduce((a, x) => a + x.v, 0) || f.from.reduce((a, x) => a + x.v, 0);
+            const debit = e.lines.reduce((a, l) => a + (l.debit || 0), 0);
+            const credit = e.lines.reduce((a, l) => a + (l.credit || 0), 0);
             return (
               <div key={e.number} className={`jr ${isOpen ? "open" : ""}`}>
-                <div className="jr-row">
+                <div className="jr-row" role="button" tabIndex={0} aria-expanded={isOpen} onClick={() => toggle(e.number)}
+                  onKeyDown={(k) => { if (k.key === "Enter" || k.key === " ") { k.preventDefault(); toggle(e.number); } }}>
                   <div className="jr-when">
                     <b>{date(e.t)}</b>
-                    <small>{hour(e.t)} · {e.number}{e.t <= lock && <span title="Periodo cerrado" className="lock-ic"><Icon name="lock" size={11} /></span>}</small>
+                    <small>{hour(e.t)}{e.t <= lock && <span title="Periodo cerrado" className="lock-ic"><Icon name="lock" size={11} /></span>}</small>
                   </div>
                   <div className="jr-main">
                     <b>{e.kind === "nota" && <Badge kind="info">Nota</Badge>} {e.text}</b>
-                    <div className="jr-flow">
-                      {f.from.length > 0 && <span className="jr-side"><small>Sale de</small>{f.from.map((x) => <span key={x.name} className="jr-chip out">{x.name} <b>{money(x.v)}</b></span>)}</span>}
-                      {f.from.length > 0 && f.to.length > 0 && <Icon name="arrowRight" size={14} className="jr-arrow" />}
-                      {f.to.length > 0 && <span className="jr-side"><small>Va a</small>{f.to.map((x) => <span key={x.name} className="jr-chip in">{x.name} <b>{money(x.v)}</b></span>)}</span>}
-                      {f.gain.map((x) => <span key={x.name} className={`jr-chip ${x.v >= 0 ? "gain" : "cost"}`} title={x.name}>{x.v >= 0 ? "Ganancia" : "Pérdida"} <b>{money(Math.abs(x.v))}</b></span>)}
-                      {f.cost.map((x) => <span key={x.name} className={`jr-chip ${x.v >= 0 ? "cost" : "gain"}`} title={x.name}>{x.v >= 0 ? "Gasto" : "Menos gasto"}: {x.name} <b>{money(Math.abs(x.v))}</b></span>)}
-                    </div>
-                    {e.support && <span className="cell-sub">Soporte: {e.support}</span>}
+                    {(f.from.length > 0 || f.to.length > 0) && (
+                      <span className="jr-flow">
+                        {f.from.map((x) => x.name).join(" + ") || "—"}
+                        <Icon name="arrowRight" size={13} className="jr-arrow" />
+                        {f.to.map((x) => x.name).join(" + ") || "—"}
+                      </span>
+                    )}
+                    {e.support && <span className="jr-flow">Soporte: {e.support}</span>}
                   </div>
                   <div className="jr-side-r">
-                    <b className="num">{money(total)}</b>
-                    <button className="btn btn-sm btn-ghost" onClick={() => toggle(e.number)} aria-expanded={isOpen}>
-                      {isOpen ? "Ocultar" : "Ver asiento"} <Icon name="chevronDown" size={14} className="jr-caret" />
-                    </button>
-                    {e.kind === "nota" && e.ref != null && e.t > lock && onDeleteNote && (
-                      <button className="btn btn-sm btn-ghost" title="Borrar nota" aria-label="Borrar nota" onClick={() => onDeleteNote(e.ref!)}><Icon name="trash" size={13} /></button>
+                    {hasResult ? (
+                      <>
+                        <b className={`num ${tone(net)}`}>{signedMoney(net)}</b>
+                        <small>{f.gain.length ? (net >= 0 ? "ganaste" : "perdiste") : f.cost.length === 1 ? f.cost[0].name : "gastos"}</small>
+                      </>
+                    ) : (
+                      <>
+                        <b className="num">{money(moved || debit)}</b>
+                        <small>movido</small>
+                      </>
+                    )}
+                  </div>
+                  <span className="jr-caret-wrap">
+                    <Icon name="chevronDown" size={16} className="jr-caret" />
+                  </span>
+                </div>
+                <div className="jr-more" aria-hidden={!isOpen}>
+                  <div>
+                    {seen.has(e.number) && (
+                      <div className="jr-detail">
+                        <div className="jr-detail-head">
+                          <span className="mono">Comprobante {e.number}</span>
+                          {e.kind === "nota" && e.ref != null && e.t > lock && onDeleteNote && (
+                            <button className="btn btn-sm btn-ghost" onClick={() => onDeleteNote(e.ref!)}><Icon name="trash" size={13} /> Borrar nota</button>
+                          )}
+                        </div>
+                        <table className="jr-lines">
+                          <thead><tr><th>Cuenta</th><th className="r">Débito</th><th className="r">Crédito</th></tr></thead>
+                          <tbody>
+                            {e.lines.map((l, i) => (
+                              <tr key={i}>
+                                <td><span className="acc">{l.account}</span>{l.name}</td>
+                                <td className="r">{l.debit ? money(l.debit) : ""}</td>
+                                <td className="r">{l.credit ? money(l.credit) : ""}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr>
+                              <td>{Math.abs(debit - credit) < 1 ? <span className="up"><Icon name="check" size={13} /> Cuadra</span> : <span className="warn">No cuadra</span>}</td>
+                              <td className="r">{money(debit)}</td>
+                              <td className="r">{money(credit)}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
                     )}
                   </div>
                 </div>
-                {isOpen && (
-                  <table className="jr-lines">
-                    <thead><tr><th>Cuenta</th><th className="r">Débito</th><th className="r">Crédito</th></tr></thead>
-                    <tbody>
-                      {e.lines.map((l, i) => (
-                        <tr key={i}>
-                          <td><span className="acc">{l.account}</span>{l.name}</td>
-                          <td className="r">{l.debit ? money(l.debit) : ""}</td>
-                          <td className="r">{l.credit ? money(l.credit) : ""}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
               </div>
             );
           })}

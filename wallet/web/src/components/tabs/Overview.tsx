@@ -64,8 +64,8 @@ interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; r
   manual?: boolean;
   /** compra: pagaste `cost` y te llegó `qty` (no tiene ganancia; su 4x1000 se reparte en las ventas que salgan de ella) */
   buy?: boolean; method?: string; counterpart?: string;
-  /** compra: cuánto queda sin vender, a cuánto vender para no perder y cuánto ganas si lo vendes ya en P2P */
-  left?: number; even?: number | null; now?: { profit: number; price: number; nick: string } | null }
+  /** compra: cuánto queda sin vender y a cuánto vender para no perder */
+  left?: number; even?: number | null }
 
 type Show = "todas" | "compras" | "gana" | "pierde" | "ocultas";
 const PAGE = 50;
@@ -247,13 +247,8 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
     const feeQty = (x: number) => Math.min(x, Math.max((p2p?.fee ?? 0) * x, ["USDT", "USDC", "FDUSD"].includes(asset) ? p2p?.min_usd ?? 0 : 0));
     const left = Math.max(q - (usedOf.get(m.id) ?? 0), 0);
     const even = q > 0 ? (cost + g) / (q - feeQty(q)) : null;
-    let now: Op["now"] = null;
-    if (left > 1e-6 && p2p) {
-      const ad = (p2p.buyers[asset] ?? []).find((b) => b.min <= left * b.price && left * b.price <= b.max && (!b.available || b.available >= left));
-      if (ad) now = { profit: (left - feeQty(left)) * ad.price - (cost + g) * (left / q), price: ad.price, nick: ad.nick };
-    }
     return { key: `b${m.id}`, id: m.id, t: m.t, kind: m.kind, asset, qty: q, received: null, cost, gross: 0, fee: 0, gain: 0, missing: false,
-      gmf: g, net: 0, sources: [], buy: true, method: m.pay_method, counterpart: m.counterpart, left, even, now };
+      gmf: g, net: 0, sources: [], buy: true, method: m.pay_method, counterpart: m.counterpart, left, even };
   }), [buys, usedOf, market]);
   const listed = show === "ocultas" ? thirdOps : show === "compras" ? buyOps
     : show === "todas" ? [...inPeriod, ...buyOps].sort((p, q) => q.t - p.t)
@@ -267,9 +262,23 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   }, [listed, group]);
 
   /* ---------- ahorita ---------- */
+  // igual que Mis monedas en el panel: lo que te paga hoy el mejor comprador de P2P que acepta lo que tienes, ya sin tu
+  // comisión, contra lo que te costó + el 4x1000 de lo que te queda de cada compra
+  const gmfLeft = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const b of allBuys) {
+      const a = b.in_asset ?? "", q = b.in_qty ?? 0;
+      if (q > 0 && b.gmf_cop) m.set(a, (m.get(a) ?? 0) + b.gmf_cop * Math.max(q - (usedOf.get(b.id) ?? 0), 0) / q);
+    }
+    return m;
+  }, [allBuys, usedOf]);
   const holdings = (report?.holdings ?? []).filter((h) => h.qty > 1e-12).map((h) => {
     const v = market?.values[h.asset];
-    return { ...h, value: v ? v.cop : null, price: v ? v.cop / h.qty : null };
+    const p2p = live ? market?.p2p : null;
+    const fee = p2p ? Math.min(h.qty, Math.max(p2p.fee * h.qty, ["USDT", "USDC", "FDUSD"].includes(h.asset) ? p2p.min_usd : 0)) : 0;
+    const ad = p2p && (p2p.buyers[h.asset] ?? []).find((b) => b.min <= h.qty * b.price && h.qty * b.price <= b.max && (!b.available || b.available >= h.qty));
+    const value = ad ? (h.qty - fee) * ad.price : v ? v.cop : null;
+    return { ...h, cost: h.cost + (gmfLeft.get(h.asset) ?? 0), value, price: ad ? ad.price : v ? v.cop / h.qty : null, nick: ad ? ad.nick : null };
   }).sort((p, q) => (q.value ?? q.cost) - (p.value ?? p.cost));
   const holdCost = holdings.reduce((s, h) => s + h.cost, 0);
   const valued = holdings.filter((h) => h.value != null);
@@ -379,7 +388,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
           <div className="card-head">
             <div>
               <h2>{live ? "Cómo vas ahorita" : `Cómo cerraste ${year}`}</h2>
-              <span className="sub">{live ? "Lo que tienes, a precio de hoy" : "Lo que tenías al 31 de diciembre"}</span>
+              <span className="sub">{live ? "Lo que tienes y lo que te pagan hoy en P2P, ya sin comisión ni 4x1000" : "Lo que tenías al 31 de diciembre"}</span>
             </div>
           </div>
           {!holdings.length ? (
@@ -388,7 +397,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
             <>
               <div className="now-head">
                 <div><small>Te costó</small><b>{money(holdCost)}</b></div>
-                <div><small>Vale {live ? "hoy" : "al cierre"}</small><b>{market ? money(holdValue) : marketErr ? "—" : "…"}</b></div>
+                <div><small>{live ? "Recibes hoy" : "Valía al cierre"}</small><b>{market ? money(holdValue) : marketErr ? "—" : "…"}</b></div>
                 <div><small>Si vendieras {live ? "ya" : "ese día"}</small><b className={market ? tone(holdDiff) : ""}>{market ? signedMoney(holdDiff) : marketErr ? "—" : "…"}</b></div>
               </div>
               {market && valued.length < holdings.length && (
@@ -403,7 +412,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                       <Coin asset={h.asset} size={28} />
                       <div className="now-main">
                         <b>{qty(h.qty)} {h.asset}</b>
-                        <small>Te costó {money(h.cost)}{h.price != null ? ` · 1 ${h.asset} = ${money(h.price)}` : ""}</small>
+                        <small>Te costó {money(h.cost)}{h.price != null ? ` · ${h.nick ? `${h.nick} paga` : `1 ${h.asset} =`} ${money(h.price)}` : ""}</small>
                       </div>
                       <div className="now-val">
                         <b>{h.value != null ? money(h.value) : market || marketErr ? <span className="muted">Sin precio</span> : "…"}</b>
@@ -522,11 +531,6 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                             {o.gmf >= 1 ? <><span className="muted">4x1000 −{money(o.gmf)}</span>
                               <span className="cell-sub" title="No se resta aquí: se resta en cada venta que sale de esta compra, en proporción a lo que vendes">se resta al vender</span></>
                               : <span className="muted">—</span>}
-                            {o.now && (
-                              <span className="cell-sub" title={`Al mejor comprador de P2P que acepta lo que te queda: ${o.now.nick}. Ya con este 4x1000.`}>
-                                si vendes ya a {money(o.now.price)}: <span className={tone(o.now.profit)}>{signedMoney(o.now.profit)}</span>
-                              </span>
-                            )}
                           </td>
                           <td className="r hide-sm muted">—</td>
                         </tr>
