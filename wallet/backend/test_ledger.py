@@ -182,5 +182,17 @@ class GastosYRondas(unittest.TestCase):
         self.assertEqual(rs[0]["assets"], ["USDT", "BTC"])
 
 
+class ResultadoEnElLibro(unittest.TestCase):
+    def test_venta_deja_lo_mismo_que_en_resultados(self):
+        """Tu venta de 10,65 USDT: en el libro el resultado ya trae la comisión y el 4x1000 de la compra."""
+        ms = [buy(D(2026, 10, 15), "USDT", 158.25, 500_000, gmf=2_000),
+              sell(D(2026, 10, 15) + 3600, "USDT", 10.65, 33_924, fee=223)]
+        e = [x for x in ledger.journal(ms) if x["kind"] == "venta"][0]
+        d = tax.compute(ms, 2026)["disposals"][0]
+        self.assertAlmostEqual(e["result"]["gmf"], d["gmf"])
+        self.assertAlmostEqual(e["result"]["net"], d["net"])
+        self.assertAlmostEqual(e["result"]["gmf"], 2_000 * 10.65 / 158.25)
+
+
 if __name__ == "__main__":
     unittest.main()

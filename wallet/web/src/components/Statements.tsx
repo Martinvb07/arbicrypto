@@ -352,10 +352,13 @@ export function JournalView({ entries, lock, onDeleteNote }: { entries: JournalE
           {entries.map((e) => {
             const f = flows(e);
             const isOpen = open.has(e.number);
-            // lo que de verdad te dejó: ingresos (cuentas 4) menos costos y gastos (5, 6 y 7)
-            const hasResult = f.gain.length > 0 || f.cost.length > 0;
-            const net = f.gain.reduce((a, x) => a + x.v, 0) - f.cost.reduce((a, x) => a + x.v, 0);
-            const moved = f.to.reduce((a, x) => a + x.v, 0) || f.from.reduce((a, x) => a + x.v, 0);
+            // lo que de verdad te dejó: en ventas, igual que Resultados (con el 4x1000 de la compra); en compras no hay
+            // resultado (su 4x1000 se resta al vender); en lo demás, ingresos (cuentas 4) menos costos y gastos (5, 6 y 7)
+            const r = e.result;
+            const hasResult = !!r || (e.kind !== "compra" && (f.gain.length > 0 || f.cost.length > 0));
+            const net = r ? r.net : f.gain.reduce((a, x) => a + x.v, 0) - f.cost.reduce((a, x) => a + x.v, 0);
+            const sum = (xs: Flow[]) => xs.reduce((a, x) => a + x.v, 0);
+            const moved = e.kind === "compra" ? sum(f.from) || sum(f.to) : sum(f.to) || sum(f.from);  // compra: lo que salió del banco, con 4x1000
             const debit = e.lines.reduce((a, l) => a + (l.debit || 0), 0);
             const credit = e.lines.reduce((a, l) => a + (l.credit || 0), 0);
             return (
@@ -381,12 +384,12 @@ export function JournalView({ entries, lock, onDeleteNote }: { entries: JournalE
                     {hasResult ? (
                       <>
                         <b className={`num ${tone(net)}`}>{signedMoney(net)}</b>
-                        <small>{f.gain.length ? (net >= 0 ? "ganaste" : "perdiste") : f.cost.length === 1 ? f.cost[0].name : "gastos"}</small>
+                        <small>{r || f.gain.length ? (Math.round(net) >= 0 ? "ganaste" : "perdiste") : f.cost.length === 1 ? f.cost[0].name : "gastos"}</small>
                       </>
                     ) : (
                       <>
                         <b className="num">{money(moved || debit)}</b>
-                        <small>movido</small>
+                        <small>{e.kind === "compra" ? "compra · 4x1000 se resta al vender" : "movido"}</small>
                       </>
                     )}
                   </div>
@@ -404,6 +407,17 @@ export function JournalView({ entries, lock, onDeleteNote }: { entries: JournalE
                             <button className="btn btn-sm btn-ghost" onClick={() => onDeleteNote(e.ref!)}><Icon name="trash" size={13} /> Borrar nota</button>
                           )}
                         </div>
+                        {r && (
+                          <div className="jr-sum">
+                            <span><small>Te llegó</small><b>{money(r.received)}</b>{r.fee >= 1 && <em>ya sin comisión {money(r.fee)}</em>}</span>
+                            <i>−</i>
+                            <span><small>Te costó</small><b>{money(r.cost)}</b></span>
+                            <i>−</i>
+                            <span><small>4x1000 de la compra</small><b>{money(r.gmf)}</b></span>
+                            <i>=</i>
+                            <span className="jr-sum-total"><small>{Math.round(r.net) >= 0 ? "Ganaste" : "Perdiste"}</small><b className={tone(r.net)}>{signedMoney(r.net)}</b></span>
+                          </div>
+                        )}
                         <table className="jr-lines">
                           <thead><tr><th>Cuenta</th><th className="r">Débito</th><th className="r">Crédito</th></tr></thead>
                           <tbody>

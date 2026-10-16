@@ -94,14 +94,19 @@ def journal(movements, closings=(), habitual=True, method="fifo", notes=()):
         v = float(m.get("cop_value") or 0)
         fee = float(m.get("fee_cop") or 0) if k in ("compra", "venta", "permuta") else 0.0
         gmf = float(m.get("gmf_cop") or 0)
-        cost = 0.0
+        cost, gmf_share = 0.0, 0.0
         if k in OUTFLOW and m.get("out_asset") and m["out_asset"] != COP:
             parts, _missing = led.take(m["out_asset"], float(m["out_qty"]), m.get("lot_from"))
             cost = sum(p[1] for p in parts)
+            # el 4x1000 que pagaste al comprar lo que sale, en proporción (igual que Resultados)
+            gmf_share = sum(src["gmf"] * q / src["qty"] for q, _c, _t, src, _r in parts if src and src.get("qty"))
             if manual_cost(m) is not None:
                 cost = manual_cost(m)
+                gmf_share = float(m["gmf_manual"]) if m.get("gmf_manual") is not None else gmf_share
         if k in INFLOW and m.get("in_asset") and m["in_asset"] != COP:
-            led.add(m["in_asset"], float(m["in_qty"]), v + fee if k == "compra" else v, m["t"], {"id": m.get("id")})
+            q_in = float(m["in_qty"])
+            led.add(m["in_asset"], q_in, v + fee if k == "compra" else v, m["t"],
+                    {"id": m.get("id"), "qty": q_in, "gmf": gmf if k == "compra" else 0.0})
 
         L = []
 
@@ -154,7 +159,11 @@ def journal(movements, closings=(), habitual=True, method="fifo", notes=()):
             line("5115", d=gmf)
             line("1110", c=gmf)
         if L:
-            raw.append({"t": m["t"], "kind": k, "ref": m.get("id"), "text": _describe(m), "lines": L})
+            e = {"t": m["t"], "kind": k, "ref": m.get("id"), "text": _describe(m), "lines": L}
+            if k in ("venta", "permuta"):
+                # lo que de verdad te dejó, como en Resultados: lo que llegó − comisión − costo − 4x1000 de la compra
+                e["result"] = {"received": v - fee, "fee": fee, "cost": cost, "gmf": gmf_share, "net": v - fee - cost - gmf_share}
+            raw.append(e)
 
     for c in closings:
         adj = float(c.get("adjustment") or 0)

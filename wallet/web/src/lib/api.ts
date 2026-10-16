@@ -227,7 +227,11 @@ export interface Cuadre {
 }
 
 export interface JournalLine { account: string; name: string; debit: number; credit: number }
-export interface JournalEntry { t: number; number: string; kind: string; ref: number | null; text: string; support?: string; lines: JournalLine[] }
+export interface JournalEntry {
+  t: number; number: string; kind: string; ref: number | null; text: string; support?: string; lines: JournalLine[];
+  /** venta o cambio: lo que te dejó, igual que en Resultados (llegó − costo − 4x1000 de la compra) */
+  result?: { received: number; fee: number; cost: number; gmf: number; net: number };
+}
 /** Caja diaria (cuenta 1110): cada día con movimiento se cierra solo. */
 export interface CashDay {
   day: string;
