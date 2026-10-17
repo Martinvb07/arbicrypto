@@ -1632,12 +1632,12 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
 .area-chart { position: relative; color: var(--brand); margin-top: 6px; }
 .area-chart.up { color: var(--up); }
 .area-chart.down { color: var(--down); }
-.area-chart svg { position: absolute; inset: 0 0 26px 0; width: 100%; height: calc(100% - 26px); overflow: visible; touch-action: none; }
+.area-chart svg { position: absolute; inset: 0 72px 26px 0; width: calc(100% - 72px); height: calc(100% - 26px); overflow: visible; touch-action: none; }
 .area-chart .grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 4; }
 .area-chart .cross { stroke: var(--border-2); stroke-width: 1; }
 .area-y { position: absolute; right: 0; top: 0; bottom: 26px; width: 0; }
 .area-y span { position: absolute; right: 0; transform: translateY(-50%); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.area-x { position: absolute; left: 0; right: 64px; bottom: 0; display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.area-x { position: absolute; left: 0; right: 72px; bottom: 0; display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
 .area-dot { position: absolute; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; border-radius: 50%; background: currentColor;
   box-shadow: 0 0 0 3px var(--surface), 0 0 14px currentColor; pointer-events: none; }
 .area-tip { position: absolute; top: 0; transform: translateX(-50%); display: grid; gap: 1px; padding: 7px 11px; border-radius: 10px; pointer-events: none;
@@ -1836,3 +1836,6 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
 .topbar { min-height: 76px; padding-top: 10px; padding-bottom: 10px; }
 .side-logo { height: 76px; }
 @media (max-width: 1024px) { .topbar { min-height: 0; padding-top: 12px; padding-bottom: 12px; } }
+
+/* en celular el sidebar se esconde: se abre con el botón ☰ */
+@media (max-width: 1024px) { .shell > .side { display: none; } }

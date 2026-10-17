@@ -963,6 +963,41 @@ def price_alert_view(name):
         return sorted([a for a in price_alerts if a["user"] == name], key=lambda a: -a["created"])
 
 
+BALANCE_EVERY = 15 * 60       # un punto del historial de tu capital cada 15 minutos
+BALANCE_DAYS = 90             # y se guardan los últimos 90 días
+balances = {}                 # {uid: [{"t", "fiat", "usdt"}]} (se carga de a uno al pedirlo)
+
+
+def balance_points(uid):
+    if uid not in balances:
+        balances[uid] = store.load(f"balhist_{uid}", None) or []
+    return balances[uid]
+
+
+def record_balance(user):
+    """Guarda cuánto vale tu Binance (en pesos y USDT) para la gráfica de Inicio: ¿va de subida lo que tienes?"""
+    uid = (auth.users.get(user) or {}).get("uid")
+    view = account_view(user) if uid else None
+    if not view or not view.get("total_fiat"):
+        return
+    now = time.time()
+    with lock:
+        pts = balance_points(uid)
+        if pts and now - pts[-1]["t"] < BALANCE_EVERY:
+            return
+        pts.append({"t": now, "fiat": round(view["total_fiat"], 2), "usdt": round(view["total_usdt"], 4)})
+        del pts[:-int(BALANCE_DAYS * 86400 / BALANCE_EVERY)]
+        store.save(f"balhist_{uid}", pts)
+
+
+@app.get("/api/balance-history")
+def api_balance_history():
+    uid = g.user.get("uid")
+    with lock:
+        pts = list(balance_points(uid)) if uid else []
+    return jsonify(points=pts)
+
+
 def account_step():
     """Lee la cuenta de Binance de cada usuario conectado. Si una falla, las demas siguen."""
     for user, acc in list(accounts.items()):
@@ -979,6 +1014,10 @@ def account_step():
                 acc_state[user] = dict(snap, t=time.time())
                 acc_errors.pop(user, None)
         sync_watches(user, snap["orders"])
+        try:
+            record_balance(user)
+        except Exception as e:  # la gráfica no puede tumbar la lectura de la cuenta
+            print(f"  historial de capital ({user}): {e}")
     publish("account")
 
 

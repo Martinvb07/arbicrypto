@@ -9,6 +9,7 @@ import { Chat, ChatDock } from "@/components/tabs/Chat";
 import { History } from "@/components/tabs/History";
 import { Home } from "@/components/tabs/Home";
 import { Market } from "@/components/tabs/Market";
+import { Dashboard } from "@/components/tabs/Dashboard";
 import { Sell } from "@/components/tabs/Sell";
 import { Team } from "@/components/tabs/Team";
 import { LiveProvider, useLive } from "@/lib/live";
@@ -35,14 +36,14 @@ function Banners() {
 }
 
 function App() {
-  const [tab, setTab] = useState<TabId>("mercado");
+  const [tab, setTab] = useState<TabId>("dashboard");
   const [noWallet, setNoWallet] = useState(false);
 
   useEffect(() => {
     const read = () => {
       if (window.location.hash === "#sin-wallet") setNoWallet(true);
       const h = window.location.hash.slice(1) as TabId;
-      setTab(TABS.some((t) => t.id === h) ? h : "mercado");  // Precios P2P es la principal
+      setTab(TABS.some((t) => t.id === h) ? h : "dashboard");  // Inicio es la principal
     };
     read();
     window.addEventListener("hashchange", read);
@@ -72,6 +73,7 @@ function App() {
             <span>Tu usuario no tiene acceso a la wallet. Pídele a un administrador que te lo active en Equipo.</span>
           </div>
         )}
+        {tab === "dashboard" && <Dashboard onTab={go} />}
         {tab === "inicio" && <Home onTab={go} />}
         {tab === "vender" && <Sell />}
         {tab === "mercado" && <Market />}

@@ -41,6 +41,7 @@ export const api = {
   logout: () => post<{ login?: string }>("/api/auth/logout"),
   changePassword: (current: string, next: string) => post("/api/auth/password", { current, new: next }),
   team: () => getJson<{ users: TeamUser[]; invites: Invite[]; teams: TeamInfo[] }>("/api/team"),
+  balanceHistory: () => getJson<{ points: { t: number; fiat: number; usdt: number }[] }>("/api/balance-history"),
   myTeams: () => getJson<MyTeams>("/api/teams"),
   teamCreate: (name: string) => post("/api/teams/create", { name }),
   teamRename: (name: string) => post("/api/teams/rename", { name }),

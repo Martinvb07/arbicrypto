@@ -1514,3 +1514,6 @@ tr:hover .op-adjust, .op-adjust:focus-visible { opacity: 1; }
 .drawer-side .side-nav { padding: 6px 0; overflow: visible; }
 .drawer-side .side-pill { left: 0; right: 0; }
 .drawer-side .side-foot { padding: 12px 0 0; }
+
+/* en celular el sidebar se esconde: se abre con el botón ☰ */
+@media (max-width: 1024px) { .shell > .side { display: none; } }
