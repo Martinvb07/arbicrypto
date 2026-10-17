@@ -126,10 +126,14 @@ function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
   const shown = (pts ?? []).filter((p) => p.t >= now - range);
   // el punto de ahora, en vivo, al final de la gráfica
   const real = acc?.total_fiat ? [...shown, { t: now, fiat: acc.total_fiat, usdt: acc.total_usdt }] : shown;
-  // mientras se juntan puntos: tus saldos de hoy con el precio de cada momento de las últimas 24 h (estimado)
-  // el estimado solo existe para 24 h (los precios guardados cubren un día); 7 y 30 días usan tu historial real
-  const estimated = real.length < 3 && range === DAY ? estimate : null;
-  const live = estimated && estimated.length > 2 ? estimated : real;
+  // antes de tu primer punto guardado va el estimado (tus saldos con el precio de cada momento de las últimas 24 h),
+  // ajustado para que empalme justo con tu valor real; desde ahí, tu historial real
+  const anchor = real[0];
+  const before = (estimate ?? []).filter((p) => p.t < (anchor?.t ?? now) - 60 && p.t >= now - range);
+  const near = anchor && before.length ? (estimate ?? []).reduce((b, x) => (Math.abs(x.t - anchor.t) < Math.abs(b.t - anchor.t) ? x : b)) : null;
+  const k = anchor && near?.fiat ? anchor.fiat / near.fiat : 1;
+  const estimated = before.length > 1 ? before.map((p) => ({ ...p, fiat: p.fiat * k })) : null;
+  const live = estimated ? [...estimated, ...real] : real;
   const first = pts?.[0]?.t;
   const ch = change(live.map((p) => p.fiat));
   const diff = live.length > 1 ? live[live.length - 1].fiat - live[0].fiat : null;
@@ -143,21 +147,21 @@ function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
           <div className="dash-meta">
             <span className="dim">≈ {num(acc?.total_usdt, 2)} USDT</span>
             <Delta v={ch} money={diff} />
-            <span className="dim">{estimated && live === estimated ? "en 24 h (estimado)" : range === DAY ? "en 24 h" : range === 7 * DAY ? "en 7 días" : "en 30 días"}</span>
+            <span className="dim">{estimated && range !== DAY && (live[0]?.t ?? now) > now - range + 3600 ? "desde que hay datos" : range === DAY ? "en 24 h" : range === 7 * DAY ? "en 7 días" : "en 30 días"}</span>
           </div>
         </div>
         <Segmented label="Rango" value={range} onChange={setRange} options={[[DAY, "24 h"], [7 * DAY, "7 d"], [30 * DAY, "30 d"]] as const} />
       </div>
       <AreaChart points={live.map((p) => ({ t: p.t, v: p.fiat }))} tone={t === "down" ? "down" : t === "up" ? "up" : "brand"}
-        fmt={(v) => money(v, 0)} fmtT={(x) => (range === DAY || live === estimated ? hhmm(x) : `${shortDay(x)} ${hhmm(x)}`)}
+        fmt={(v) => money(v, 0)} fmtT={(x) => (range === DAY ? hhmm(x) : `${shortDay(x)} ${hhmm(x)}`)}
         empty={<span className="cap-empty">
           <Icon name="clock" size={20} />
           <b>{range === DAY ? "La gráfica se arma sola" : `Todavía no hay ${range === 7 * DAY ? "7" : "30"} días guardados`}</b>
           <span>{first ? `Tu historial empezó el ${shortDay(first)} a las ${hhmm(first)}: guardamos tu capital cada 15 minutos.` : "Guardamos tu capital cada 15 minutos desde que conectas tu Binance."}</span>
           {range !== DAY && <button className="btn btn-sm" onClick={() => setRange(DAY)}>Ver 24 h</button>}
         </span>} />
-      {estimated && live === estimated && (
-        <p className="dash-note"><Icon name="info" size={13} /> Estimado con tus saldos de hoy y el precio de cada momento. Tu historial real se va guardando cada 15 minutos.</p>
+      {estimated && (
+        <p className="dash-note"><Icon name="info" size={13} /> {first ? `Antes del ${shortDay(first)} ${hhmm(first)}` : "Hasta ahora"}: estimado con tus saldos y el precio de cada momento. Desde ahí, tu historial real (se guarda cada 15 minutos).</p>
       )}
     </section>
   );

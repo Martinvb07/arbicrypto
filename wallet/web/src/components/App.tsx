@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { flushSync } from "react-dom";
 import { api } from "@/lib/api";
 import { yearLabel } from "@/lib/format";
 import { BrandMark, Icon } from "./ui";
@@ -99,7 +98,7 @@ function SideProfile() {
 
 /** Abajo: volver al panel, tema, cerrar sesión y contraer. */
 function SideFoot({ light, onTheme, onLogout, mini, onToggle }: {
-  light: boolean; onTheme: (light: boolean, from?: { x: number; y: number }) => void; onLogout: () => void; mini?: boolean; onToggle?: () => void;
+  light: boolean; onTheme: (light: boolean) => void; onLogout: () => void; mini?: boolean; onToggle?: () => void;
 }) {
   const { me } = useWallet();
   return (
@@ -107,7 +106,7 @@ function SideFoot({ light, onTheme, onLogout, mini, onToggle }: {
       <button className="side-link" data-tip="Volver al panel" onClick={() => goWithSplash(me.panel, "Volviendo al panel")}>
         <Icon name="back" size={18} /><span>Volver al panel</span>
       </button>
-      <button className="side-link" data-tip={light ? "Tema oscuro" : "Tema claro"} onClick={(e) => onTheme(!light, { x: e.clientX, y: e.clientY })}>
+      <button className="side-link" data-tip={light ? "Tema oscuro" : "Tema claro"} onClick={() => onTheme(!light)}>
         <span className="side-theme" key={String(light)}><Icon name={light ? "moon" : "sun"} size={18} /></span>
         <span className="side-theme-lbl" key={`l${light}`}>{light ? "Tema oscuro" : "Tema claro"}</span>
       </button>
@@ -267,19 +266,14 @@ export function App() {
     try { localStorage.setItem("acw-side", next ? "mini" : "full"); } catch { /* sin almacenamiento */ }
   };
 
-  const setTheme = (next: boolean, from?: { x: number; y: number }) => {
+  const setTheme = (next: boolean) => {
     const apply = () => {
       setLight(next);
       if (next) document.documentElement.dataset.theme = "light";
       else delete document.documentElement.dataset.theme;
       try { localStorage.setItem("acw-theme", next ? "light" : "dark"); } catch { /* sin almacenamiento */ }
     };
-    // el tema nuevo se abre en círculo desde el botón (donde el navegador lo permite)
-    const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
-    if (!doc.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return apply();
-    document.documentElement.style.setProperty("--vt-x", `${from?.x ?? innerWidth / 2}px`);
-    document.documentElement.style.setProperty("--vt-y", `${from?.y ?? innerHeight / 2}px`);
-    doc.startViewTransition(() => flushSync(apply));
+    apply(); // la animación va en el ícono de la opción (gira y cambia sol ↔ luna)
   };
 
   // cierra la sesión de la wallet y la del panel (es la misma persona y la misma sesión)

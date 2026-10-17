@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { api } from "@/lib/api";
 import { perUsd } from "@/lib/format";
 import { goWithSplash } from "./splash";
@@ -164,13 +163,13 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
 // ---------------------------------------------------------------- tema
 
 type Theme = "light" | "dark";
-function useTheme(): [Theme, (t: Theme, from?: { x: number; y: number }) => void] {
+function useTheme(): [Theme, (t: Theme) => void] {
   const [theme, setThemeState] = useState<Theme>("dark");
   useEffect(() => {
     const root = document.documentElement;
     setThemeState(root.dataset.theme ? (root.dataset.theme as Theme) : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   }, []);
-  const setTheme = (t: Theme, from?: { x: number; y: number }) => {
+  const setTheme = (t: Theme) => {
     const apply = () => {
       document.documentElement.dataset.theme = t;
       setThemeState(t);
@@ -180,13 +179,7 @@ function useTheme(): [Theme, (t: Theme, from?: { x: number; y: number }) => void
         /* sin almacenamiento */
       }
     };
-    // el tema nuevo se abre en círculo desde el botón (donde el navegador lo permite)
-    const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
-    if (!doc.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return apply();
-    const root = document.documentElement;
-    root.style.setProperty("--vt-x", `${from?.x ?? innerWidth / 2}px`);
-    root.style.setProperty("--vt-y", `${from?.y ?? innerHeight / 2}px`);
-    doc.startViewTransition(() => flushSync(apply));
+    apply(); // la animación va en el ícono de la opción (gira y cambia sol ↔ luna)
   };
   return [theme, setTheme];
 }
@@ -314,7 +307,7 @@ function SideFoot({ mini, onToggle }: { mini?: boolean; onToggle?: () => void })
         </button>
       )}
       <button className="side-link" data-tip={dark ? "Tema claro" : "Tema oscuro"}
-        onClick={(e) => setTheme(dark ? "light" : "dark", { x: e.clientX, y: e.clientY })}>
+        onClick={() => setTheme(dark ? "light" : "dark")}>
         <span className="side-theme" key={theme}><Icon name={dark ? "sun" : "moon"} size={18} /></span>
         <span className="side-theme-lbl" key={`l${theme}`}>{dark ? "Tema claro" : "Tema oscuro"}</span>
       </button>

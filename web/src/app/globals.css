@@ -1523,7 +1523,7 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
 .shell { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); min-height: 100vh; }
 .shell-main { min-width: 0; display: flex; flex-direction: column; }
 .shell-main > main { flex: 1; width: 100%; }
-.shell .wrap { max-width: 1440px; padding-left: 32px; padding-right: 32px; margin: 0; }
+.shell .wrap { max-width: 1760px; padding-left: 32px; padding-right: 32px; margin: 0 auto; }
 .shell-main > main { padding-top: 26px; }
 
 /* barra superior */
@@ -1843,12 +1843,6 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
 .dash-dollar .area-chart { margin-top: 14px; }
 
 /* ---------- cambio de tema animado ---------- */
-::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
-::view-transition-new(root) { animation: theme-reveal .6s cubic-bezier(.4, 0, .2, 1); }
-@keyframes theme-reveal {
-  from { clip-path: circle(0 at var(--vt-x, 50%) var(--vt-y, 50%)); }
-  to { clip-path: circle(150vmax at var(--vt-x, 50%) var(--vt-y, 50%)); }
-}
 .side-theme { display: inline-grid; place-items: center; flex: none; animation: theme-icon .5s cubic-bezier(.34, 1.56, .64, 1) both; }
 .side-theme-lbl { animation: theme-lbl .3s ease both; }
 @keyframes theme-icon { from { opacity: 0; transform: rotate(-120deg) scale(.4); } to { opacity: 1; transform: none; } }
@@ -1858,6 +1852,13 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
 .cap-empty b { color: var(--text); font-size: 14px; }
 .cap-empty svg { color: var(--brand-text); }
 @media (prefers-reduced-motion: reduce) {
-  ::view-transition-new(root) { animation: none; }
   .side-theme, .side-theme-lbl { animation: none; }
+}
+
+/* ícono de tema: el sol y la luna giran al cambiar */
+.side-theme { animation: theme-swap .55s cubic-bezier(.34, 1.56, .64, 1) both; }
+@keyframes theme-swap {
+  0% { opacity: 0; transform: rotate(-180deg) scale(.2); }
+  60% { opacity: 1; }
+  100% { opacity: 1; transform: none; }
 }
