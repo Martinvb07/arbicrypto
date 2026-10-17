@@ -17,7 +17,7 @@ export const viewport: Viewport = {
 };
 
 // Aplica el tema guardado antes de pintar, para que no parpadee.
-const THEME = `try{var t=localStorage.getItem("acw-theme");if(t==="light")document.documentElement.dataset.theme="light"}catch(e){}`;
+const THEME = `try{var t=localStorage.getItem("acw-theme");if(t==="light")document.documentElement.dataset.theme="light";if(localStorage.getItem("acw-side")==="mini")document.documentElement.dataset.side="mini"}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

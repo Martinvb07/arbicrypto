@@ -20,14 +20,14 @@ export type TabId = "inicio" | "movimientos" | "cuentas" | "resultados" | "libro
   | "resumen" | "ganancias" | "patrimonio" | "cierres" | "rondas" | "caja";
 type Main = "inicio" | "movimientos" | "cuentas" | "resultados" | "libros" | "declaracion" | "ajustes";
 
-const TABS: { id: Main; label: string; icon: string }[] = [
-  { id: "inicio", label: "Inicio", icon: "home" },
-  { id: "movimientos", label: "Movimientos", icon: "list" },
-  { id: "cuentas", label: "Cuentas", icon: "bank" },
-  { id: "resultados", label: "Resultados", icon: "trend" },
-  { id: "libros", label: "Libros", icon: "book" },
-  { id: "declaracion", label: "Declaración", icon: "file" },
-  { id: "ajustes", label: "Ajustes", icon: "settings" },
+const TABS: { id: Main; label: string; icon: string; sub: string; group: string }[] = [
+  { id: "inicio", label: "Inicio", icon: "home", sub: "Tus saldos en Binance y bancos, y cómo vas este año", group: "Tu dinero" },
+  { id: "movimientos", label: "Movimientos", icon: "list", sub: "Compras, ventas, gastos y aportes", group: "Tu dinero" },
+  { id: "cuentas", label: "Cuentas", icon: "bank", sub: "Tus bancos y sus extractos", group: "Tu dinero" },
+  { id: "resultados", label: "Resultados", icon: "trend", sub: "Cuánto ganaste o perdiste en cada operación", group: "Tu dinero" },
+  { id: "libros", label: "Libros", icon: "book", sub: "Libro diario, mayor, caja y estados financieros", group: "Contabilidad" },
+  { id: "declaracion", label: "Declaración", icon: "file", sub: "Tu formulario 210 ante la DIAN", group: "Contabilidad" },
+  { id: "ajustes", label: "Ajustes", icon: "settings", sub: "Tu perfil fiscal y preferencias", group: "Cuenta" },
 ];
 
 const ROUTES: Record<TabId, [Main, string?]> = {
@@ -36,23 +36,77 @@ const ROUTES: Record<TabId, [Main, string?]> = {
   libros: ["libros", "diario"], cierres: ["libros", "cierres"], caja: ["libros", "caja"], declaracion: ["declaracion"], ajustes: ["ajustes"],
 };
 
-/** Fondo que se desliza detrás de la pestaña activa (como en el panel). */
-function useThumb(nav: React.RefObject<HTMLElement | null>, index: number): CSSProperties | undefined {
-  const [box, setBox] = useState<{ x: number; w: number } | null>(null);
+/** Resaltado que se desliza (en vertical) hasta la sección activa del sidebar, como en el panel. */
+function usePill(nav: React.RefObject<HTMLElement | null>, key: string): CSSProperties | null {
+  const [box, setBox] = useState<{ y: number; h: number } | null>(null);
   useLayoutEffect(() => {
     const el = nav.current;
     if (!el) return;
     const measure = () => {
-      const b = el.querySelectorAll<HTMLButtonElement>(":scope > button")[index];
-      setBox(b ? { x: b.offsetLeft, w: b.offsetWidth } : null);
+      const b = el.querySelector<HTMLElement>("button.on");
+      setBox(b ? { y: b.offsetTop, h: b.offsetHeight } : null);
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    el.querySelectorAll(":scope > button").forEach((b) => ro.observe(b));
     return () => ro.disconnect();
-  }, [nav, index]);
-  return box ? { transform: `translateX(${box.x}px)`, width: box.w } : undefined;
+  }, [nav, key]);
+  return box ? { transform: `translateY(${box.y}px)`, height: box.h } : null;
+}
+
+/** Las secciones del sidebar por grupos, con el resaltado deslizante. */
+function SideNav({ tab, onTab, onPick }: { tab: Main; onTab: (t: TabId) => void; onPick?: () => void }) {
+  const { me } = useWallet();
+  const ref = useRef<HTMLElement>(null);
+  const pill = usePill(ref, tab);
+  const [moved, setMoved] = useState(false); // el primer pintado no se anima
+  useEffect(() => { const t = setTimeout(() => setMoved(true), 50); return () => clearTimeout(t); }, []);
+  const groups = [...new Set(TABS.map((t) => t.group))];
+  return (
+    <nav className="side-nav" ref={ref} aria-label="Secciones">
+      {pill && <span className={`side-pill ${moved ? "" : "still"}`} style={pill} aria-hidden="true" />}
+      {groups.map((g) => (
+        <div key={g} className="side-sec">
+          <small className="side-group">{g}</small>
+          {TABS.filter((t) => t.group === g).map((t) => (
+            <button key={t.id} className={tab === t.id ? "on" : ""} aria-current={tab === t.id ? "page" : undefined} data-tip={t.label}
+              onClick={() => { onTab(t.id); onPick?.(); }}>
+              <span className="side-ico"><Icon name={t.icon} size={18} /></span>
+              <span className="side-lbl">{t.label}</span>
+            </button>
+          ))}
+          {g === "Cuenta" && (
+            <button data-tip="Volver al panel" onClick={() => goWithSplash(me.panel, "Volviendo al panel")}>
+              <span className="side-ico"><Icon name="back" size={18} /></span>
+              <span className="side-lbl">Volver al panel</span>
+            </button>
+          )}
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+function ThemeSwitch({ light, onChange }: { light: boolean; onChange: (light: boolean) => void }) {
+  return (
+    <div className={`theme-sw ${light ? "light" : "dark"}`} role="radiogroup" aria-label="Tema">
+      <span className="theme-thumb" aria-hidden="true" />
+      <button role="radio" aria-checked={light} className={light ? "on" : ""} onClick={() => onChange(true)} title="Claro"><Icon name="sun" size={15} /> <span>Claro</span></button>
+      <button role="radio" aria-checked={!light} className={light ? "" : "on"} onClick={() => onChange(false)} title="Oscuro"><Icon name="moon" size={15} /> <span>Oscuro</span></button>
+    </div>
+  );
+}
+
+function Brand() {
+  return (
+    <div className="brand">
+      <BrandMark />
+      <span>
+        <span className="brand-name">Arbi<span>Crypto</span></span>
+        <span className="brand-sub">Wallet · Contabilidad DIAN</span>
+      </span>
+    </div>
+  );
 }
 
 function ago(t: number | null | undefined): string {
@@ -160,11 +214,12 @@ export function App() {
   const [tab, setTabState] = useState<Main>("inicio");
   const [sub, setSub] = useState<string | undefined>(undefined);
   const [light, setLight] = useState(false);
-  const navRef = useRef<HTMLElement>(null);
-  const thumb = useThumb(navRef, TABS.findIndex((t) => t.id === tab));
+  const [mini, setMini] = useState(false);
+  const [drawer, setDrawer] = useState(false);
 
   useEffect(() => {
     setLight(document.documentElement.dataset.theme === "light");
+    setMini(document.documentElement.dataset.side === "mini");
     const saved = sessionStorage.getItem("acw-tab") as TabId | null;
     if (saved && saved in ROUTES) {
       const [m, s] = ROUTES[saved];
@@ -181,8 +236,15 @@ export function App() {
     window.scrollTo({ top: 0 });
   };
 
-  const toggleTheme = () => {
-    const next = !light;
+  const toggleMini = () => {
+    const next = !mini;
+    setMini(next);
+    if (next) document.documentElement.dataset.side = "mini";
+    else delete document.documentElement.dataset.side;
+    try { localStorage.setItem("acw-side", next ? "mini" : "full"); } catch { /* sin almacenamiento */ }
+  };
+
+  const setTheme = (next: boolean) => {
     setLight(next);
     if (next) document.documentElement.dataset.theme = "light";
     else delete document.documentElement.dataset.theme;
@@ -195,45 +257,57 @@ export function App() {
     goWithSplash(`${r.panel}/salir`, "Cerrando sesión");
   };
 
+  const cur = TABS.find((t) => t.id === tab) ?? TABS[0];
+  const foot = (
+    <div className="side-foot">
+      <ThemeSwitch light={light} onChange={setTheme} />
+      <button className="side-out" onClick={() => void logout()} data-tip="Cerrar sesión"><Icon name="logout" size={17} /> <span>Cerrar sesión</span></button>
+    </div>
+  );
+
   return (
     <div className="shell">
-      <header className="top">
-        <div className="wrap top-in">
-          <div className="brand">
-            <BrandMark />
-            <span>
-              <span className="brand-name">Arbi<span>Crypto</span></span>
-              <span className="brand-sub">Wallet · Contabilidad DIAN</span>
-            </span>
-          </div>
+      <aside className="side">
+        <div className="side-top">
+          <div className="side-brand"><Brand /></div>
+          <button className="side-fold" onClick={toggleMini} title={mini ? "Expandir menú" : "Contraer menú"} aria-label={mini ? "Expandir menú" : "Contraer menú"} aria-expanded={!mini}>
+            <Icon name="chevronLeft" size={16} />
+          </button>
+        </div>
+        <SideNav tab={tab} onTab={setTab} />
+        {foot}
+      </aside>
+      {drawer && (
+        <div className="drawer" role="dialog" aria-label="Secciones" onClick={() => setDrawer(false)}>
+          <aside className="side drawer-side" onClick={(e) => e.stopPropagation()}>
+            <div className="side-top">
+              <div className="side-brand"><Brand /></div>
+              <button className="icon-btn" onClick={() => setDrawer(false)} aria-label="Cerrar menú"><Icon name="x" /></button>
+            </div>
+            <LivePill onClick={() => { setTab("inicio"); setDrawer(false); }} />
+            <SideNav tab={tab} onTab={setTab} onPick={() => setDrawer(false)} />
+            {foot}
+          </aside>
+        </div>
+      )}
+      <div className="shell-main">
+      <header className="topbar">
+        <button className="icon-btn topbar-burger" onClick={() => setDrawer(true)} aria-label="Abrir menú de secciones"><Icon name="menu" size={20} /></button>
+        <div className="topbar-title" key={tab}>
+          <h1>{cur.label}</h1>
+          <p>{cur.sub}</p>
+        </div>
+        <div className="top-actions">
           <LivePill onClick={() => setTab("inicio")} />
           <SyncButton />
-          <div className="top-actions">
-            <div className="year-select">
-              <Select label="Año gravable" value={String(year)} searchable={false} onChange={(v) => setYear(Number(v))}
-                options={me.years.map((y) => ({ value: String(y), label: yearLabel(y), icon: <Icon name="calendar" size={16} /> }))} />
-            </div>
-            <button className="icon-btn hide-sm" onClick={toggleTheme} title={light ? "Tema oscuro" : "Tema claro"} aria-label="Cambiar tema">
-              <Icon name={light ? "moon" : "sun"} />
-            </button>
-            <UserMenu onTab={setTab} onLogout={logout} />
+          <div className="year-select">
+            <Select label="Año gravable" value={String(year)} searchable={false} onChange={(v) => setYear(Number(v))}
+              options={me.years.map((y) => ({ value: String(y), label: yearLabel(y), icon: <Icon name="calendar" size={16} /> }))} />
           </div>
+          <UserMenu onTab={setTab} onLogout={logout} />
         </div>
       </header>
-      <div className="nav-wrap">
-        <div className="wrap">
-          <nav className="nav" ref={navRef} aria-label="Secciones">
-            <span className="nav-thumb" style={thumb} aria-hidden="true" />
-            {TABS.map((t) => (
-              <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} aria-current={tab === t.id ? "page" : undefined}>
-                <Icon name={t.icon} size={17} />
-                {t.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-      </div>
-      <main className="wrap">
+      <main className="wrap page-in" key={tab}>
         {tab === "inicio" && <Home onTab={setTab} />}
         {tab === "movimientos" && <Movements />}
         {tab === "cuentas" && <Banks />}
@@ -246,6 +320,7 @@ export function App() {
         <BrandMark size={22} />
         Cálculo informativo según el Estatuto Tributario y el Concepto DIAN 1621 de 2023. Revísalo con un contador antes de declarar.
       </footer>
+      </div>
     </div>
   );
 }

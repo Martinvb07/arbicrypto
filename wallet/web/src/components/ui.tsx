@@ -35,6 +35,8 @@ const ICONS: Record<string, ReactNode> = {
   copy: <><rect x="8" y="8" width="13" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></>,
   chevron: <path d="m9 6 6 6-6 6" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
+  chevronLeft: <path d="m15 6-6 6 6 6" />,
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   filter: <path d="M3 5h18l-7 8.5V19l-4 2v-7.5Z" />,
   sort: <><path d="M7 4v16M3 16l4 4 4-4" /><path d="M17 20V4M13 8l4-4 4 4" /></>,
   arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
