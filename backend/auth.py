@@ -25,6 +25,7 @@ USERNAME_RE = re.compile(r"^[a-z0-9._-]{3,30}$")
 
 
 ACCESS = ("ambos", "panel", "wallet")  # a qué puede entrar cada usuario
+TEAM_NAME_MAX = 40
 
 class AuthError(Exception):
     pass
@@ -53,6 +54,10 @@ class Auth:
         self.users = store.load("users", {})
         self.invites = store.load("invites", {})
         self.sessions = store.load("sessions", {})
+        # equipos: {id: {id, name, owner, created, chat}}; de qué equipo es cada quien va en users[nombre]["team"].
+        # None = todavía no se han creado (el panel arma el primero con los usuarios de siempre).
+        self.teams = store.load("teams", None)
+        self.team_requests = store.load("team_requests", {})  # {id: {id, team, user, kind: pide|invita, by, t}}
         self.lock = threading.RLock()
         self.fails = {}
         # id fijo de cada usuario (no cambia al renombrarlo): con él se guardan su foto y sus datos
@@ -142,7 +147,16 @@ class Auth:
                     inv["by"] = new
                 if inv.get("used_by") == old:
                     inv["used_by"] = new
-            self._persist("users", "sessions", "invites")
+            for t in (self.teams or {}).values():
+                if t.get("owner") == old:
+                    t["owner"] = new
+            for r in self.team_requests.values():
+                for k in ("user", "by"):
+                    if r.get(k) == old:
+                        r[k] = new
+            self._persist("users", "sessions", "invites", "team_requests")
+            if self.teams is not None:
+                self._persist("teams")
         return new
 
     def set_avatar(self, username, version):
@@ -201,13 +215,227 @@ class Auth:
                 raise AuthError("No puedes borrar tu propio usuario.")
             if user["role"] == "admin" and sum(u["role"] == "admin" for u in self.users.values()) <= 1:
                 raise AuthError("Debe quedar al menos un administrador.")
+            team = user.get("team")
             del self.users[username]
             self.sessions = {k: v for k, v in self.sessions.items() if v["user"] != username}
             self._persist("users", "sessions")
+            self._after_leaving(username, team)
 
     def list_users(self):
         return [{"username": n, "role": u["role"], "access": u.get("access", "ambos"), "created": u["created"], "last_login": u.get("last_login"),
-                 "invited_by": u.get("invited_by")} for n, u in sorted(self.users.items())]
+                 "invited_by": u.get("invited_by"), "team": u.get("team")} for n, u in sorted(self.users.items())]
+
+    # ------------------------------------------------------------ equipos
+    # Cada usuario está en un equipo o en ninguno (los nuevos empiezan sin equipo). Solo ve y le escribe a los de su
+    # equipo. Puede crear uno (queda de dueño) o pedir unirse a otro; el dueño acepta o invita. Los administradores
+    # crean equipos y mueven a cualquiera.
+
+    @staticmethod
+    def clean_team_name(name):
+        name = re.sub(r"\s+", " ", str(name or "")).strip()
+        if not name or len(name) > TEAM_NAME_MAX:
+            raise AuthError(f"Ponle un nombre al equipo (máximo {TEAM_NAME_MAX} letras).")
+        return name
+
+    def team_of(self, username):
+        u = self.users.get(username)
+        t = u and u.get("team")
+        return t if t and self.teams and t in self.teams else None
+
+    def team_members(self, tid):
+        return sorted(n for n, u in self.users.items() if u.get("team") == tid)
+
+    def same_team(self, a, b):
+        t = self.team_of(a)
+        return bool(t) and t == self.team_of(b)
+
+    def can_talk(self, a, b):
+        """Se ven y se escriben: los del mismo equipo, y cualquiera con un administrador."""
+        ua, ub = self.users.get(a), self.users.get(b)
+        if not ua or not ub:
+            return False
+        return self.same_team(a, b) or ua["role"] == "admin" or ub["role"] == "admin"
+
+    def _check_name_free(self, name, skip=None):
+        if any(t["name"].lower() == name.lower() and t["id"] != skip for t in self.teams.values()):
+            raise AuthError("Ya hay un equipo con ese nombre. Elige otro.")
+
+    def create_team(self, name, owner=None, chat=None):
+        """Equipo nuevo. Con `owner`, esa persona (sin equipo) queda dentro y de dueña."""
+        name = self.clean_team_name(name)
+        with self.lock:
+            if self.teams is None:
+                self.teams = {}
+            self._check_name_free(name)
+            if owner is not None:
+                if owner not in self.users:
+                    raise AuthError("Ese usuario no existe.")
+                if self.team_of(owner):
+                    raise AuthError("Ya estás en un equipo: sal de él para crear otro.")
+            tid = secrets.token_hex(6)
+            # by_user: lo armó un usuario (se borra solo si queda vacío); los de un administrador se quedan
+            self.teams[tid] = {"id": tid, "name": name, "owner": owner, "created": time.time(), "chat": chat, "by_user": owner is not None}
+            if owner is not None:
+                self._join(owner, tid)
+                self.users[owner]["team_since"] = time.time()
+            self._persist("teams", "users", "team_requests")
+        return tid
+
+    def set_team_chat(self, tid, chat):
+        with self.lock:
+            if tid in (self.teams or {}):
+                self.teams[tid]["chat"] = chat
+                self._persist("teams")
+
+    def rename_team(self, tid, name, by=None):
+        """Lo cambia el dueño (by) o un administrador (by=None)."""
+        name = self.clean_team_name(name)
+        with self.lock:
+            t = (self.teams or {}).get(tid)
+            if not t:
+                raise AuthError("Ese equipo no existe.")
+            if by is not None and t.get("owner") != by:
+                raise AuthError("Solo el dueño del equipo puede cambiarle el nombre.")
+            self._check_name_free(name, skip=tid)
+            t["name"] = name
+            self._persist("teams")
+
+    def delete_team(self, tid):
+        """Lo borra un administrador: todos quedan sin equipo. Devuelve el equipo borrado."""
+        with self.lock:
+            t = (self.teams or {}).pop(tid, None)
+            if not t:
+                raise AuthError("Ese equipo no existe.")
+            for u in self.users.values():
+                if u.get("team") == tid:
+                    u["team"] = None
+            self.team_requests = {k: r for k, r in self.team_requests.items() if r["team"] != tid}
+            self._persist("teams", "users", "team_requests")
+        return t
+
+    def _join(self, username, tid):
+        """Entra al equipo y se borran sus otras solicitudes e invitaciones (ya no hacen falta)."""
+        self.users[username]["team"] = tid
+        self.team_requests = {k: r for k, r in self.team_requests.items() if r["user"] != username}
+
+    def _after_leaving(self, username, tid):
+        """Alguien salió del equipo `tid`: si era el dueño, queda el que lleva más tiempo; si no queda nadie, el
+        equipo se borra (salvo los que creó un administrador, que siguen vacíos)."""
+        t = (self.teams or {}).get(tid) if tid else None
+        if not t:
+            return
+        if t.get("owner") == username:
+            rest = sorted(self.team_members(tid), key=lambda n: self.users[n].get("team_since") or self.users[n]["created"])
+            t["owner"] = rest[0] if rest else None
+        if not self.team_members(tid) and t.get("by_user"):
+            del self.teams[tid]
+            self.team_requests = {k: r for k, r in self.team_requests.items() if r["team"] != tid}
+        self._persist("teams", "users", "team_requests")
+
+    def set_team(self, username, tid):
+        """Un administrador pone a alguien en un equipo (o lo saca con tid=None)."""
+        with self.lock:
+            u = self.users.get(username)
+            if not u:
+                raise AuthError("Ese usuario no existe.")
+            if tid is not None and tid not in (self.teams or {}):
+                raise AuthError("Ese equipo no existe.")
+            old = self.team_of(username)
+            if old == tid:
+                return old
+            u["team"] = None
+            self._after_leaving(username, old)
+            if tid is not None:
+                self._join(username, tid)
+                u["team_since"] = time.time()
+                if not self.teams[tid].get("owner"):
+                    self.teams[tid]["owner"] = username
+            self._persist("users", "team_requests", "teams")
+            return old
+
+    def leave_team(self, username):
+        with self.lock:
+            tid = self.team_of(username)
+            if not tid:
+                raise AuthError("No estás en ningún equipo.")
+            self.users[username]["team"] = None
+            self._after_leaving(username, tid)
+            self._persist("users")
+            return tid
+
+    def kick(self, owner, username):
+        with self.lock:
+            tid = self.team_of(owner)
+            if not tid or self.teams[tid].get("owner") != owner:
+                raise AuthError("Solo el dueño del equipo puede sacar a alguien.")
+            if username == owner or self.team_of(username) != tid:
+                raise AuthError("Esa persona no está en tu equipo.")
+            self.users[username]["team"] = None
+            self._persist("users")
+            return tid
+
+    def _new_request(self, tid, username, kind, by):
+        if any(r["team"] == tid and r["user"] == username for r in self.team_requests.values()):
+            raise AuthError("Ya hay una solicitud pendiente con ese equipo." if kind == "pide" else "Ya la invitaste: falta que acepte.")
+        rid = secrets.token_hex(6)
+        self.team_requests[rid] = {"id": rid, "team": tid, "user": username, "kind": kind, "by": by, "t": time.time()}
+        self._persist("team_requests")
+        return self.team_requests[rid]
+
+    def request_join(self, username, tid):
+        """Alguien sin equipo le pide al dueño entrar."""
+        with self.lock:
+            if self.team_of(username):
+                raise AuthError("Ya estás en un equipo: sal de él para unirte a otro.")
+            if tid not in (self.teams or {}):
+                raise AuthError("Ese equipo no existe.")
+            return self._new_request(tid, username, "pide", username)
+
+    def invite_to_team(self, owner, username):
+        """El dueño invita a alguien que todavía no tiene equipo."""
+        with self.lock:
+            tid = self.team_of(owner)
+            if not tid or self.teams[tid].get("owner") != owner:
+                raise AuthError("Solo el dueño del equipo puede invitar.")
+            if username not in self.users:
+                raise AuthError("Ese usuario no existe.")
+            if self.team_of(username):
+                raise AuthError("Esa persona ya está en un equipo.")
+            return self._new_request(tid, username, "invita", owner)
+
+    def answer_request(self, rid, by, accept, admin=False):
+        """Una solicitud la responde el dueño (o un administrador); una invitación, la persona invitada."""
+        with self.lock:
+            r = self.team_requests.get(rid)
+            if not r or r["team"] not in (self.teams or {}):
+                raise AuthError("Esa solicitud ya no existe.")
+            t = self.teams[r["team"]]
+            ok = by == r["user"] if r["kind"] == "invita" else (admin or t.get("owner") == by)
+            if not ok:
+                raise AuthError("Esa solicitud no te toca responderla.")
+            del self.team_requests[rid]
+            if accept:
+                if self.team_of(r["user"]):
+                    self._persist("team_requests")
+                    raise AuthError("Esa persona ya entró a otro equipo.")
+                self._join(r["user"], r["team"])
+                self.users[r["user"]]["team_since"] = time.time()
+                if not t.get("owner"):
+                    t["owner"] = r["user"]
+                self._persist("users", "teams")
+            self._persist("team_requests")
+            return r
+
+    def cancel_request(self, rid, by):
+        with self.lock:
+            r = self.team_requests.get(rid)
+            if not r or r["by"] != by:
+                raise AuthError("Esa solicitud ya no existe.")
+            del self.team_requests[rid]
+            self._persist("team_requests")
+
+    def list_teams(self):
+        return [{**t, "members": self.team_members(tid)} for tid, t in sorted((self.teams or {}).items(), key=lambda kv: kv[1]["created"])]
 
     # ------------------------------------------------------------ sesiones
 

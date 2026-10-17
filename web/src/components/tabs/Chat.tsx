@@ -68,7 +68,7 @@ function Channels({ s, peer, onPick, onNewGroup }: { s: ChatSummary; peer: strin
   return (
     <aside className="chat-list" aria-label="Conversaciones">
       <div className="chat-list-head"><h2>Chat del equipo</h2><span className="sub">{online} {online === 1 ? "conectado" : "conectados"}</span></div>
-      {row("", "General", general ? preview(general.last, s.me, true) : "Todo el equipo", general?.unread ?? 0, <Avatar name="General" general />)}
+      {row("", s.team ? `General · ${s.team}` : "General", general ? preview(general.last, s.me, true) : s.team ? "Todo tu equipo" : "Únete a un equipo para usarlo", general?.unread ?? 0, <Avatar name="General" general />)}
       <div className="chat-sep chat-sep-row">
         <span>Grupos</span>
         {onNewGroup && s.users.length > 0 && <button type="button" className="chat-new" onClick={onNewGroup}><Icon name="plus" size={13} /> Nuevo</button>}
@@ -301,11 +301,11 @@ function Conversation({ s, peer, rev, onBack, onEditGroup }: { s: ChatSummary; p
     }
   };
 
-  const title = grp ? grp.name : peer ? peer : "General";
+  const title = grp ? grp.name : peer ? peer : s.team ? `General · ${s.team}` : "General";
   const online = s.users.filter((u) => u.online).length;
   const status = grp ? `${grp.members.length} miembros · ${grp.members.filter((n) => n !== me).slice(0, 4).join(", ")}${grp.members.length > 5 ? "…" : ""}`
     : peer ? (user ? (user.online ? "Conectado" : "Desconectado") + " · privado, solo lo ven ustedes dos" : "Ya no está en el equipo")
-    : `Todo el equipo · ${online + 1} ${online ? "conectados" : "conectado"}`;
+    : s.team ? `Todo ${s.team} · ${online + 1} ${online ? "conectados" : "conectado"}` : "Sin equipo: únete o crea uno en la pestaña Equipo";
 
   return (
     <section className="chat-conv" aria-label={`Conversación: ${title}`}>
@@ -537,8 +537,12 @@ export function Chat() {
 
   return (
     <div className="stack">
-      {summary.users.length === 0 && !summary.channels[""] && (
-        <EmptyBox icon="chat" title="El chat está listo">Cuando invites a alguien al equipo, podrán escribirse aquí: en el canal General lo ve todo el equipo y los privados solo las dos personas.</EmptyBox>
+      {!summary.team ? (
+        <EmptyBox icon="users" title="Todavía no estás en un equipo">
+          En la pestaña <a href="#equipo">Equipo</a> creas el tuyo o pides unirte a uno. Con equipo tienes el canal General con ellos y privados con cada uno.
+        </EmptyBox>
+      ) : summary.users.length === 0 && !summary.channels[""] && (
+        <EmptyBox icon="chat" title="El chat está listo">Cuando alguien entre a tu equipo, podrán escribirse aquí: en el canal General lo ve todo el equipo y los privados solo las dos personas.</EmptyBox>
       )}
       <div className={`card chat ${open ? "open" : ""}`}>
         <Channels s={summary} peer={cur} onPick={pick} onNewGroup={() => setGroupEdit("new")} />

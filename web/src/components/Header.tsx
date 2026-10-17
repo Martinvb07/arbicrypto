@@ -19,7 +19,7 @@ export const TABS: { id: TabId; label: string; icon: IconName; admin?: boolean }
   { id: "historial", label: "Historial", icon: "clock" },
   { id: "chat", label: "Chat", icon: "chat" },
   { id: "cuenta", label: "Mi Binance", icon: "wallet" },
-  { id: "equipo", label: "Equipo", icon: "users", admin: true },
+  { id: "equipo", label: "Equipo", icon: "users" },
 ];
 
 // ---------------------------------------------------------------- avisos (en la barra)
@@ -226,7 +226,7 @@ export function Header({ onTab }: { onTab: (t: TabId) => void }) {
                     <UserAvatar name={state.user.name} src={myPhoto} size={42} />
                     <div>
                       <b>{state.user.name}</b>
-                      <span className="sub">{state.user.role === "admin" ? "Administrador" : "Miembro del equipo"}</span>
+                      <span className="sub">{state.user.role === "admin" ? "Administrador" : "Miembro"}{state.my_team?.name ? ` · ${state.my_team.name}` : " · sin equipo"}</span>
                     </div>
                   </div>
                   {/* su propia wallet (wallet.arbicrypto.org), con esta misma sesión */}
@@ -260,7 +260,9 @@ export function Nav({ tab, onTab }: { tab: TabId; onTab: (t: TabId) => void }) {
   const cur = tabs.find((t) => t.id === tab) ?? tabs[0];
   const thumb = useThumb(nav, tabs.findIndex((t) => t.id === tab));
   const unread = chatUnread(useChat().summary);
-  const count = (t: TabId) => (t === "chat" && unread > 0 ? <span className="count" aria-label={`${unread} sin leer`}>{unread > 99 ? "99+" : unread}</span> : null);
+  const waiting = state?.my_team?.waiting ?? 0;
+  const count = (t: TabId) => (t === "chat" && unread > 0 ? <span className="count" aria-label={`${unread} sin leer`}>{unread > 99 ? "99+" : unread}</span>
+    : t === "equipo" && waiting > 0 ? <span className="count" aria-label={`${waiting} por responder`}>{waiting}</span> : null);
   useEffect(() => {
     nav.current?.querySelector<HTMLElement>("button.on")?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
   }, [tab]);

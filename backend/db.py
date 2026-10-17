@@ -233,6 +233,11 @@ class DB:
     def update_group(self, gid, name, members):
         self._run("UPDATE chat_groups SET name = ?, members = ? WHERE id = ?", (name, json.dumps(sorted(set(members))), gid))
 
+    def move_general(self, key):
+        """El canal general de siempre pasa a ser el chat de un equipo (`key` = "#<id>")."""
+        self.sql.transaction([("UPDATE messages SET recipient = ? WHERE recipient IS NULL", (key,)),
+                              ("UPDATE chat_reads SET peer = ? WHERE peer = ''", (key,))])
+
     def delete_group(self, gid):
         """El grupo y todos sus mensajes. Devuelve las imágenes que quedaron sueltas (para borrarlas del disco)."""
         key = f"#{gid}"

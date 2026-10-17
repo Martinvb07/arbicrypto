@@ -40,7 +40,8 @@ Cada `git push` a `main` se **despliega solo en el VPS** (GitHub Actions: revisa
 ## Usuarios
 
 - Administrador: **jesuscrypto**. Cambia la contraseña en el menú de tu usuario (arriba a la derecha) → *Cambiar contraseña*.
-- Invitar a alguien: pestaña **Equipo → Generar código** (sirve una sola vez y vence en 7 días). La persona toca *“Tengo un código de invitación”* y crea su usuario.
+- Invitar a alguien: pestaña **Equipo → Códigos de acceso → Generar código** (sirve una sola vez y vence en 7 días). La persona toca *“Tengo un código de invitación”* y crea su usuario. **Entra sin equipo.**
+- **Equipos**: cada quien está en un equipo o en ninguno, y solo ve y le escribe (chat General y privados) a los de su equipo; los administradores le pueden escribir a cualquiera. En la pestaña **Equipo**, quien no tiene equipo **crea uno** (queda de dueño) o **pide unirse** a otro; el dueño acepta o rechaza las solicitudes, invita a gente sin equipo, cambia el nombre y saca miembros. Los administradores, en *Equipo → Administración*, crean equipos, ponen a cualquiera en uno (o lo dejan sin equipo) y los borran. La primera vez, todos los usuarios que ya existían quedan en *Equipo principal* con el chat General de siempre.
 - **Cada usuario pone su propio capital** (Arbitraje → Capital) y ve las rutas y avisos para su monto.
 - **Cada usuario conecta SU cuenta de Binance** en *Mi Binance* (llave de solo lectura). Solo esa persona ve sus saldos y órdenes; ni los administradores las ven, y nadie puede desconectar la cuenta de otro. Si un administrador borra un usuario, su llave se borra con él.
 - **Wallet**: menú de tu usuario (arriba a la derecha) → *Wallet*. Abre TU contabilidad e impuestos (wallet.arbicrypto.org) con la misma sesión, sin otro login. Cada usuario tiene la suya; nadie más la ve, ni los administradores.

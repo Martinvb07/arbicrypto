@@ -300,6 +300,8 @@ export interface State {
   local: boolean;
   team: boolean;
   user: User;
+  /** tu equipo y cuántas solicitudes o invitaciones esperan tu respuesta */
+  my_team?: { id: string | null; name: string | null; owner: boolean; waiting: number };
   telegram: { bot: string | null; chat: string | null; ready: boolean };
   usd_ref: number | null;
   alerts_at_boot: number;
@@ -329,6 +331,22 @@ export interface TeamUser {
   created: number;
   last_login: number | null;
   invited_by: string | null;
+  /** id del equipo en el que está (null = sin equipo) */
+  team: string | null;
+}
+
+/** Un equipo: cada quien está en uno o en ninguno, y solo ve y le escribe a los suyos. */
+export interface TeamInfo { id: string; name: string; owner: string | null; created: number; members: string[]; by_user?: boolean }
+export interface TeamMember { name: string; role: "admin" | "user"; online: boolean }
+export interface TeamRequest { id: string; team: string; team_name?: string; user: string; kind: "pide" | "invita"; by: string; t: number }
+export interface MyTeams {
+  team: { id: string; name: string; owner: string | null; created: number; mine: boolean; members: TeamMember[] } | null;
+  teams: { id: string; name: string; owner: string | null; size: number; asked: boolean }[];
+  invites: TeamRequest[];
+  asked: TeamRequest[];
+  requests: TeamRequest[];
+  invited: TeamRequest[];
+  free: string[];
 }
 
 export interface Invite {
@@ -401,4 +419,6 @@ export interface ChatSummary {
   users: ChatUser[];
   channels: Record<string, { last: ChatMessage; unread: number }>;
   groups: ChatGroup[];
+  /** nombre de tu equipo: el canal General es su chat (null = sin equipo) */
+  team?: string | null;
 }

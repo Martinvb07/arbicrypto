@@ -1268,7 +1268,7 @@ def api_avatar(uid):
 @app.get("/api/team")
 @admin_only
 def api_team():
-    return jsonify(users=auth.list_users(), invites=auth.list_invites())
+    return jsonify(users=auth.list_users(), invites=auth.list_invites(), teams=auth.list_teams())
 
 
 @app.post("/api/team/invite")
@@ -1296,6 +1296,7 @@ def api_team_delete():
     except AuthError as e:
         return jsonify(error=str(e)), 400
     forget_account(name)  # su llave de Binance se borra con el usuario
+    sync_teams()
     with price_lock:
         price_alerts[:] = [x for x in price_alerts if x["user"] != name]
         save_json(PRICE_FILE, price_alerts)
@@ -1375,6 +1376,175 @@ def api_team_reset():
         auth.set_password(str(body().get("username", "")), str(body().get("password") or ""))
     except AuthError as e:
         return jsonify(error=str(e)), 400
+    return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------- equipos
+# Cada quien está en un equipo o en ninguno. Los nuevos empiezan sin equipo: crean uno o piden unirse a otro.
+
+
+def team_view(tid, me=None):
+    t = auth.teams[tid]
+    with lock:
+        now_online = set(online)
+    return {"id": tid, "name": t["name"], "owner": t.get("owner"), "created": t["created"], "mine": me is not None and t.get("owner") == me,
+            "members": [{"name": n, "role": auth.users[n]["role"], "online": n in now_online} for n in auth.team_members(tid)]}
+
+
+def my_team_brief(name):
+    """Lo que la barra necesita: tu equipo y cuántas solicitudes o invitaciones esperan tu respuesta."""
+    tid = auth.team_of(name)
+    t = auth.teams[tid] if tid else None
+    waiting = sum(1 for r in auth.team_requests.values()
+                  if (r["kind"] == "invita" and r["user"] == name) or (r["kind"] == "pide" and t and r["team"] == tid and t.get("owner") == name))
+    return {"id": tid, "name": t["name"] if t else None, "owner": bool(t) and t.get("owner") == name, "waiting": waiting}
+
+
+def team_notify(user, title, body):
+    raise_alert(f"team:{user}:{time.time()}", "team", title, body, user=user, telegram_too=False)
+
+
+def team_error(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            out = fn(*args, **kwargs)
+        except AuthError as e:
+            return jsonify(error=str(e)), 400
+        sync_teams()
+        return out
+    return wrapper
+
+
+@app.get("/api/teams")
+def api_teams():
+    me = g.user["name"]
+    tid = auth.team_of(me)
+    owner = bool(tid) and auth.teams[tid].get("owner") == me
+    reqs = list(auth.team_requests.values())
+    name_of = lambda t: auth.teams[t]["name"] if t in (auth.teams or {}) else "?"
+    return jsonify(
+        team=team_view(tid, me) if tid else None,
+        # para unirse: los demás equipos (sin ver quiénes están, solo cuántos)
+        teams=[{"id": t["id"], "name": t["name"], "owner": t.get("owner"), "size": len(t["members"]),
+                "asked": any(r["team"] == t["id"] and r["user"] == me for r in reqs)}
+               for t in auth.list_teams() if t["id"] != tid],
+        invites=[{**r, "team_name": name_of(r["team"])} for r in reqs if r["kind"] == "invita" and r["user"] == me],
+        asked=[{**r, "team_name": name_of(r["team"])} for r in reqs if r["kind"] == "pide" and r["user"] == me],
+        requests=[r for r in reqs if owner and r["team"] == tid and r["kind"] == "pide"],
+        invited=[r for r in reqs if owner and r["team"] == tid and r["kind"] == "invita"],
+        free=[n for n in sorted(auth.users) if owner and n != me and not auth.team_of(n)],
+    )
+
+
+@app.post("/api/teams/create")
+@team_error
+def api_teams_create():
+    auth.create_team(body().get("name"), owner=g.user["name"])
+    return jsonify(ok=True)
+
+
+@app.post("/api/teams/rename")
+@team_error
+def api_teams_rename():
+    tid = auth.team_of(g.user["name"])
+    if not tid:
+        raise AuthError("No estás en ningún equipo.")
+    auth.rename_team(tid, body().get("name"), by=g.user["name"])
+    return jsonify(ok=True)
+
+
+@app.post("/api/teams/request")
+@team_error
+def api_teams_request():
+    r = auth.request_join(g.user["name"], str(body().get("team") or ""))
+    owner = auth.teams[r["team"]].get("owner")
+    if owner:
+        team_notify(owner, f"{g.user['name']} quiere unirse a {auth.teams[r['team']]['name']}", "Acéptalo o recházalo en la pestaña Equipo.")
+    return jsonify(ok=True)
+
+
+@app.post("/api/teams/invite")
+@team_error
+def api_teams_invite():
+    r = auth.invite_to_team(g.user["name"], str(body().get("username") or ""))
+    team_notify(r["user"], f"{g.user['name']} te invita a {auth.teams[r['team']]['name']}", "Acepta o rechaza en la pestaña Equipo.")
+    return jsonify(ok=True)
+
+
+@app.post("/api/teams/answer")
+@team_error
+def api_teams_answer():
+    b = body()
+    accept = bool(b.get("accept"))
+    r = auth.answer_request(str(b.get("id") or ""), g.user["name"], accept, admin=g.user["role"] == "admin")
+    team = auth.teams[r["team"]]["name"]
+    if r["kind"] == "pide":
+        team_notify(r["user"], f"{'Ya estás en' if accept else 'No te aceptaron en'} {team}",
+                    "Ya puedes escribirle a tu equipo en el chat." if accept else "Puedes pedir unirte a otro equipo o crear el tuyo.")
+    elif r["by"] in auth.users:
+        team_notify(r["by"], f"{r['user']} {'aceptó' if accept else 'no aceptó'} tu invitación", f"Equipo {team}.")
+    return jsonify(ok=True)
+
+
+@app.post("/api/teams/cancel")
+@team_error
+def api_teams_cancel():
+    auth.cancel_request(str(body().get("id") or ""), g.user["name"])
+    return jsonify(ok=True)
+
+
+@app.post("/api/teams/leave")
+@team_error
+def api_teams_leave():
+    auth.leave_team(g.user["name"])
+    return jsonify(ok=True)
+
+
+@app.post("/api/teams/kick")
+@team_error
+def api_teams_kick():
+    name = str(body().get("username") or "")
+    auth.kick(g.user["name"], name)
+    team_notify(name, "Saliste del equipo", f"{g.user['name']} te sacó del equipo.")
+    return jsonify(ok=True)
+
+
+# administradores: crean equipos, ponen y sacan a cualquiera, y los borran
+
+@app.post("/api/team/teams/create")
+@admin_only
+@team_error
+def api_admin_team_create():
+    return jsonify(ok=True, id=auth.create_team(body().get("name")))
+
+
+@app.post("/api/team/teams/rename")
+@admin_only
+@team_error
+def api_admin_team_rename():
+    b = body()
+    auth.rename_team(str(b.get("id") or ""), b.get("name"))
+    return jsonify(ok=True)
+
+
+@app.post("/api/team/teams/assign")
+@admin_only
+@team_error
+def api_admin_team_assign():
+    b = body()
+    name, tid = str(b.get("username") or ""), b.get("team") or None
+    auth.set_team(name, str(tid) if tid else None)
+    if tid and name != g.user["name"]:
+        team_notify(name, f"Ahora estás en {auth.teams[str(tid)]['name']}", f"{g.user['name']} te puso en ese equipo.")
+    return jsonify(ok=True)
+
+
+@app.post("/api/team/teams/delete")
+@admin_only
+@team_error
+def api_admin_team_delete():
+    auth.delete_team(str(body().get("id") or ""))
     return jsonify(ok=True)
 
 
@@ -1693,7 +1863,7 @@ def api_state():
             "opps": sorted([o for o in (mine or {}).get("found", []) + opps["spot"] if o["per_usd"] >= me["min_per_usd"]],
                            key=lambda o: -o["per_usd"]),
             "connected": name in accounts, "key_hint": accounts[name].hint() if name in accounts else None,
-            "can_connect": can_connect(), "local": is_local(), "team": TEAM, "user": g.user, "avatars": auth.avatars(), "telegram": telegram.info(), "usd_ref": usd_ref(),
+            "can_connect": can_connect(), "local": is_local(), "team": TEAM, "user": g.user, "my_team": my_team_brief(name), "avatars": auth.avatars(), "telegram": telegram.info(), "usd_ref": usd_ref(),
             "alerts_at_boot": alerts_at_boot,
             "alerts": [a for a in state["alerts"] if alert_visible(a, g.user)][:100], "watches": watch_view(g.user),
             "errors": {**state["errors"], **({"account": acc_errors[name]} if name in acc_errors else {})},
@@ -1869,15 +2039,76 @@ CHAT_EMOJIS = ("👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "💰")
 CHAT_BURST = (12, 20)     # maximo 12 mensajes cada 20 s por usuario
 
 
+def team_chat_key(name):
+    """El chat General de tu equipo ("#<id>"), o None si no estás en ninguno."""
+    tid = auth.team_of(name)
+    gid = tid and auth.teams[tid].get("chat")
+    return f"#{gid}" if gid else None
+
+
+def team_chat_keys():
+    return {f"#{t['chat']}" for t in (auth.teams or {}).values() if t.get("chat")}
+
+
+def sync_team_chat(tid):
+    """El chat de cada equipo tiene exactamente a sus miembros (se crea si falta)."""
+    t = (auth.teams or {}).get(tid)
+    if not t:
+        return None
+    members = auth.team_members(tid)
+    grp = db.chat_group(t["chat"]) if t.get("chat") else None
+    if grp:
+        if grp["name"] != t["name"] or sorted(grp["members"]) != members:
+            db.update_group(grp["id"], t["name"], members)
+        return grp["id"]
+    gid = db.add_group(t["name"], members, "")
+    auth.set_team_chat(tid, gid)
+    return gid
+
+
+def sync_teams():
+    for tid in list(auth.teams or {}):
+        sync_team_chat(tid)
+    alive = {t.get("chat") for t in (auth.teams or {}).values()}
+    for grp in db.chat_groups():  # equipos borrados: su chat se va con ellos
+        if grp["created_by"] == "" and grp["id"] not in alive:
+            for name in db.delete_group(grp["id"]):
+                try:
+                    os.remove(os.path.join(CHAT_IMG_DIR, name))
+                except OSError:
+                    pass
+    publish("chat")
+    publish("team")
+
+
+def ensure_teams():
+    """La primera vez que corre con equipos: todos los usuarios de siempre quedan en "Equipo principal" y el canal
+    General de siempre pasa a ser el chat de ese equipo. De ahí en adelante, quien entra empieza sin equipo."""
+    if auth.teams is None and auth.users:
+        tid = auth.create_team("Equipo principal")
+        for name in list(auth.users):
+            auth.set_team(name, tid)
+        with auth.lock:
+            auth.teams[tid]["owner"] = main_user()
+            auth._persist("teams")
+        gid = sync_team_chat(tid)
+        db.move_general(f"#{gid}")
+    for tid in list(auth.teams or {}):
+        sync_team_chat(tid)
+
+
 def chat_peer(raw, must_exist=True):
-    """"" = general, "#<id>" = un subgrupo en el que está quien pregunta, o el nombre del otro en un privado."""
+    """"" = el General de tu equipo (None si no tienes), "#<id>" = un subgrupo en el que está quien pregunta, o el
+    nombre del otro en un privado (solo con quien puedes hablar: los de tu equipo y los administradores)."""
     peer = str(raw or "")
+    if not peer:
+        return team_chat_key(g.user["name"])
     if peer.startswith("#"):
         grp = db.chat_group(int(peer[1:])) if re.fullmatch(r"#\d{1,9}", peer) else None
         if not grp or g.user["name"] not in grp["members"]:
             abort(404 if must_exist else 403)
         return peer
-    if peer and (peer == g.user["name"] or (must_exist and peer not in auth.users)):
+    if peer == g.user["name"] or (must_exist and not auth.can_talk(g.user["name"], peer)):
         abort(400)
     return peer
 
@@ -1891,7 +2122,7 @@ def group_input(b):
     if not name or len(name) > GROUP_NAME_MAX:
         raise ValueError(f"Ponle un nombre al grupo (máximo {GROUP_NAME_MAX} letras).")
     raw = b.get("members") if isinstance(b.get("members"), list) else []
-    members = {str(m) for m in raw if str(m) in auth.users}
+    members = {str(m) for m in raw if auth.can_talk(g.user["name"], str(m))}
     if not members - {g.user["name"]}:
         raise ValueError("Elige al menos una persona más para el grupo.")
     return name, members
@@ -1905,6 +2136,8 @@ def group_for_edit(b):
         abort(400)
     if not grp:
         abort(404)
+    if grp["key"] in team_chat_keys():
+        abort(403)  # el chat del equipo se arma solo con sus miembros (pestaña Equipo)
     if grp["created_by"] != g.user["name"] and g.user["role"] != "admin":
         abort(403)
     return grp
@@ -1916,9 +2149,17 @@ def api_chat():
     with lock:
         now_online = set(online)
     users = [{"name": u["username"], "role": u["role"], "online": u["username"] in now_online}
-             for u in auth.list_users() if u["username"] != me]
-    groups = [{**x, "can_edit": x["created_by"] == me or g.user["role"] == "admin"} for x in db.chat_groups(me)]
-    return jsonify(me=me, users=users, channels=db.chat_summary(me), groups=groups)
+             for u in auth.list_users() if u["username"] != me and auth.can_talk(me, u["username"])]
+    teams, mine = team_chat_keys(), team_chat_key(me)
+    groups = [{**x, "can_edit": x["created_by"] == me or g.user["role"] == "admin"} for x in db.chat_groups(me) if x["key"] not in teams]
+    channels = {}
+    for k, v in db.chat_summary(me).items():
+        if k == mine:
+            channels[""] = v  # el General es el chat de tu equipo
+        elif k and k not in teams:
+            channels[k] = v
+    tid = auth.team_of(me)
+    return jsonify(me=me, users=users, channels=channels, groups=groups, team=auth.teams[tid]["name"] if tid else None)
 
 
 @app.post("/api/chat/groups")
@@ -1957,6 +2198,8 @@ def api_chat_group_leave():
     me = g.user["name"]
     if not grp or me not in grp["members"]:
         abort(404)
+    if grp["key"] in team_chat_keys():
+        return jsonify(error="Es el chat de tu equipo: para salir, sal del equipo."), 400
     if grp["created_by"] == me:
         return jsonify(error="Creaste este grupo: bórralo o pídele a un administrador que lo maneje."), 400
     db.update_group(grp["id"], grp["name"], [m for m in grp["members"] if m != me])
@@ -1980,11 +2223,13 @@ def api_chat_group_delete():
 def api_chat_messages():
     peer = chat_peer(request.args.get("peer"), must_exist=False)
     before = request.args.get("before", 0, type=int)
+    if peer is None:
+        return jsonify(messages=[])  # sin equipo todavía: el General está vacío
     return jsonify(messages=db.messages(g.user["name"], peer, before or None))
 
 
 def can_see(msg, user):
-    """El canal general lo ven todos; un subgrupo, sus miembros; un privado, solo sus dos personas."""
+    """El general de antes lo ven todos; un equipo o subgrupo, sus miembros; un privado, solo sus dos personas."""
     if not msg:
         return False
     to = msg["to"]
@@ -2050,6 +2295,8 @@ def api_chat_send():
     b = body()
     me = g.user["name"]
     peer = chat_peer(b.get("peer"))
+    if peer is None:
+        return jsonify(error="Todavía no estás en un equipo: únete o crea uno en la pestaña Equipo."), 400
     text = str(b.get("body") or "").strip()
     reply_to = None
     if b.get("reply_to"):
@@ -2058,8 +2305,7 @@ def api_chat_send():
         except (TypeError, ValueError):
             abort(400)
         # solo se responde a un mensaje de la misma conversacion
-        same = quoted and (quoted["to"] is None if not peer else quoted["to"] == peer if peer.startswith("#")
-                           else {quoted["from"], quoted["to"]} == {me, peer})
+        same = quoted and (quoted["to"] == peer if peer.startswith("#") else {quoted["from"], quoted["to"]} == {me, peer})
         if not same:
             return jsonify(error="Ese mensaje ya no existe."), 400
         reply_to = quoted["id"]
@@ -2093,7 +2339,7 @@ def api_chat_read():
         last_id = int(b.get("id") or 0)
     except (TypeError, ValueError):
         abort(400)
-    if last_id > 0:
+    if last_id > 0 and peer is not None:
         db.mark_read(g.user["name"], peer, last_id)
     return jsonify(ok=True)
 
@@ -2358,6 +2604,7 @@ def main():
     redis.listen(lambda kind: publish(kind, remote=False))  # eventos de otras copias del panel
     if sql.mysql or redis.on:
         print(f"  Datos en {'MySQL' if sql.mysql else 'SQLite'}{' + Redis' if redis.on else ''}")
+    ensure_teams()  # la primera vez, los usuarios de siempre quedan en "Equipo principal" con su chat General
     watches.extend(load_json(WATCH_FILE, []))
     watch_auto.update(load_json(WATCH_AUTO_FILE, {}))
     price_alerts.extend(load_json(PRICE_FILE, []))

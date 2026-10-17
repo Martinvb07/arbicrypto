@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { dateTime } from "@/lib/format";
 import { useLive } from "@/lib/live";
-import type { Access, Invite, TeamUser } from "@/lib/types";
+import type { Access, Invite, TeamInfo, TeamUser } from "@/lib/types";
 import { ask, Modal, Select } from "../overlay";
-import { Badge, EmptyBox, Icon, PasswordInput, Skeleton, UserAvatar } from "../ui";
+import { TeamMark, TeamSpace } from "../TeamSpace";
+import { Badge, Icon, PasswordInput, Skeleton, UserAvatar } from "../ui";
 
 const ACCESS_TEXT: Record<Access, string> = { ambos: "al panel y a la wallet", panel: "solo al panel", wallet: "solo a la wallet" };
 
@@ -89,18 +90,95 @@ function ResetModal({ username, onClose }: { username: string; onClose: () => vo
   );
 }
 
+/** Pestaña Equipo: tu equipo (todos) y, para administradores, equipos, usuarios y códigos de acceso. */
 export function Team() {
-  const { state, toast } = useLive();
-  const [data, setData] = useState<{ users: TeamUser[]; invites: Invite[] } | null>(null);
+  const { state } = useLive();
+  if (!state) return null;
+  return (
+    <div className="stack">
+      <TeamSpace />
+      {state.user.role === "admin" && (
+        <>
+          <div className="tadmin-sep"><span><Icon name="shield" size={14} /> Administración</span></div>
+          <AdminTeam />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Nombre nuevo para un equipo (lo usan crear y renombrar). */
+function TeamNameModal({ team, onClose, onDone }: { team: TeamInfo | null; onClose: () => void; onDone: () => void }) {
+  const { toast } = useLive();
+  const [name, setName] = useState(team?.name ?? "");
+  const [busy, setBusy] = useState(false);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      if (team) await api.adminTeamRename(team.id, name.trim());
+      else await api.adminTeamCreate(name.trim());
+      toast(team ? "Nombre cambiado" : "Equipo creado", name.trim(), "good", 2500);
+      onDone();
+      onClose();
+    } catch (err) {
+      toast("No se pudo guardar", (err as Error).message, "bad");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={team ? `Cambiar nombre de ${team.name}` : "Crear equipo"} onClose={onClose}>
+      <form className="form" onSubmit={(e) => void save(e)} style={{ background: "none", padding: 0 }}>
+        <label>Nombre del equipo
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} placeholder="Ej: Equipo Bogotá" autoFocus required />
+        </label>
+        {!team && <p className="sub" style={{ margin: "-6px 0 0" }}>Queda vacío: después pones a la gente desde la lista de usuarios.</p>}
+        <button className="btn btn-brand" type="submit" disabled={busy || !name.trim()}>{busy ? "Guardando…" : team ? "Guardar" : "Crear equipo"}</button>
+      </form>
+    </Modal>
+  );
+}
+
+function AdminTeam() {
+  const { state, toast, refresh } = useLive();
+  const [data, setData] = useState<{ users: TeamUser[]; invites: Invite[]; teams: TeamInfo[] } | null>(null);
+  const [naming, setNaming] = useState<{ team: TeamInfo | null } | null>(null);
   const [fresh, setFresh] = useState<string | null>(null);
   const [resetting, setResetting] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const load = useCallback(() => api.team().then(setData).catch((e: Error) => toast("No se pudo cargar el equipo", e.message, "bad")), [toast]);
+  const rev = `${state?.my_team?.id}|${state?.my_team?.waiting}|${state?.alerts?.[0]?.id ?? ""}`;
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, rev]);
 
-  if (!state || state.user.role !== "admin") return <EmptyBox icon="lock" title="Solo el administrador ve esta sección" />;
+  if (!state) return null;
+  const teamName = (id: string | null) => data?.teams.find((t) => t.id === id)?.name;
+  const assign = async (u: string, team: string) => {
+    try {
+      await api.adminTeamAssign(u, team || null);
+      toast(team ? `${u} ahora está en ${teamName(team)}` : `${u} quedó sin equipo`, undefined, "good", 2500);
+    } catch (e) {
+      toast("No se pudo cambiar el equipo", (e as Error).message, "bad");
+    }
+    void load();
+    refresh();
+  };
+  const dropTeam = async (t: TeamInfo) => {
+    if (!(await ask({
+      title: `¿Borrar ${t.name}?`,
+      body: <>{t.members.length ? <>Sus {t.members.length} miembros quedan <b>sin equipo</b> y </> : "Se "}borra el chat del equipo. Esto no se puede deshacer.</>,
+      confirm: "Borrar equipo", tone: "danger", icon: "trash",
+    }))) return;
+    await api.adminTeamDelete(t.id).then(() => toast("Equipo borrado", t.name, "info")).catch((e: Error) => toast("Error", e.message, "bad"));
+    void load();
+    refresh();
+  };
+  const teamOptions = [
+    { value: "", label: <span className="dim">Sin equipo</span>, search: "sin equipo", icon: <Icon name="users" size={15} /> },
+    ...(data?.teams ?? []).map((t) => ({ value: t.id, label: t.name, search: t.name, icon: <TeamMark name={t.name} size={20} />, hint: `${t.members.length}` })),
+  ];
 
   const invite = async () => {
     try {
@@ -161,8 +239,8 @@ export function Team() {
       <div className="card setup">
         <div className="card-head" style={{ marginBottom: 6 }}>
           <div>
-            <h2 style={{ display: "flex", gap: 10, alignItems: "center" }}><span className="sec-ico"><Icon name="ticket" /></span>Invitar a alguien del equipo</h2>
-            <p className="sub">Código de un solo uso para crear usuario. Vence en 7 días.</p>
+            <h2 style={{ display: "flex", gap: 10, alignItems: "center" }}><span className="sec-ico"><Icon name="ticket" /></span>Códigos de acceso</h2>
+            <p className="sub">Para crear usuario. Sirve una sola vez y vence en 7 días. La persona entra sin equipo.</p>
           </div>
           <button className="btn btn-brand" onClick={() => void invite()}><Icon name="sparkle" size={16} /> Generar código</button>
         </div>
@@ -183,7 +261,47 @@ export function Team() {
         )}
       </div>
 
-      <div className="grid-2">
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <h2 style={{ display: "flex", gap: 10, alignItems: "center" }}><span className="sec-ico"><Icon name="layers" /></span>Equipos</h2>
+            <p className="sub">Cada quien solo ve y le escribe a los de su equipo. La gente nueva entra sin equipo.</p>
+          </div>
+          <button className="btn btn-brand" onClick={() => setNaming({ team: null })}><Icon name="plus" size={16} /> Crear equipo</button>
+        </div>
+        {!data ? <Skeleton rows={2} /> : data.teams.length ? (
+          <div className="tgrid">
+            {data.teams.map((t, i) => (
+              <div key={t.id} className="tcard" style={{ animationDelay: `${i * 50}ms` }}>
+                <div className="tcard-head">
+                  <TeamMark name={t.name} size={40} />
+                  <div className="tcard-txt">
+                    <b>{t.name}</b>
+                    <small>{t.members.length} {t.members.length === 1 ? "miembro" : "miembros"}{t.owner ? ` · dueño ${t.owner}` : ""}</small>
+                  </div>
+                  <div className="tcard-act">
+                    <button className="icon-btn" onClick={() => setNaming({ team: t })} title="Cambiar nombre" aria-label={`Cambiar nombre de ${t.name}`}><Icon name="pencil" size={15} /></button>
+                    <button className="icon-btn danger" onClick={() => void dropTeam(t)} title="Borrar equipo" aria-label={`Borrar ${t.name}`}><Icon name="trash" size={15} /></button>
+                  </div>
+                </div>
+                {t.members.length ? (
+                  <div className="tcard-people">
+                    {t.members.slice(0, 8).map((n) => (
+                      <span key={n} className="tchip" title={n}><UserAvatar name={n} src={state.avatars?.[n]} size={20} />{n}</span>
+                    ))}
+                    {t.members.length > 8 && <span className="tchip more">+{t.members.length - 8}</span>}
+                  </div>
+                ) : <p className="sub tquiet">Vacío · pon gente desde Usuarios</p>}
+              </div>
+            ))}
+          </div>
+        ) : <p className="sub tquiet">Aún no hay equipos.</p>}
+        {data && data.users.some((u) => !u.team) && (
+          <p className="tfree"><Icon name="info" size={14} /> Sin equipo: {data.users.filter((u) => !u.team).map((u) => u.username).join(", ")}</p>
+        )}
+      </div>
+
+      <div className="stack">
         <div className="card">
           <div className="card-head"><h2>Usuarios</h2></div>
           {!data ? <Skeleton rows={4} /> : (
@@ -197,6 +315,7 @@ export function Team() {
                       <div className="user-txt">
                         <b>{u.username}</b>
                         <span className="sub">
+                          {u.team ? <span className="tuser-team">{teamName(u.team)}</span> : <span className="tuser-team none">Sin equipo</span>}
                           {u.last_login ? `entró ${dateTime(u.last_login * 1000)}` : "nunca ha entrado"}
                           {u.invited_by ? ` · invitado por ${u.invited_by}` : ""}
                         </span>
@@ -204,6 +323,9 @@ export function Team() {
                     </div>
                     <div className="user-side">
                       {me && <Badge tone="brand">Administrador · tú</Badge>}
+                      <div className="role-select team-select">
+                        <Select label={`Equipo de ${u.username}`} value={u.team ?? ""} onChange={(v) => void assign(u.username, v)} options={teamOptions} />
+                      </div>
                       <button className="icon-btn" onClick={() => setRenaming(u.username)} title="Cambiar nombre de usuario" aria-label={`Cambiar el usuario de ${u.username}`}><Icon name="pencil" size={16} /></button>
                       {!me && (
                         <>
@@ -263,6 +385,7 @@ export function Team() {
         </div>
       </div>
       {resetting && <ResetModal username={resetting} onClose={() => setResetting(null)} />}
+      {naming && <TeamNameModal team={naming.team} onClose={() => setNaming(null)} onDone={() => { void load(); refresh(); }} />}
       {renaming && <RenameModal username={renaming} onClose={() => setRenaming(null)} onDone={() => void load()} />}
     </div>
   );

@@ -1,4 +1,4 @@
-import type { Access, ChatMessage, ChatSummary, ExitResult, HistPoint, HourBest, Invite, Order, PastOpp, PriceAlert, Settings, State, TeamUser } from "./types";
+import type { Access, ChatMessage, ChatSummary, ExitResult, HistPoint, HourBest, Invite, MyTeams, Order, PastOpp, PriceAlert, Settings, State, TeamInfo, TeamUser } from "./types";
 
 async function getJson<T>(url: string): Promise<T> {
   const r = await fetch(url, { cache: "no-store" });
@@ -40,7 +40,20 @@ export const api = {
   register: (code: string, username: string, password: string) => post("/api/auth/register", { code, username, password }),
   logout: () => post<{ login?: string }>("/api/auth/logout"),
   changePassword: (current: string, next: string) => post("/api/auth/password", { current, new: next }),
-  team: () => getJson<{ users: TeamUser[]; invites: Invite[] }>("/api/team"),
+  team: () => getJson<{ users: TeamUser[]; invites: Invite[]; teams: TeamInfo[] }>("/api/team"),
+  myTeams: () => getJson<MyTeams>("/api/teams"),
+  teamCreate: (name: string) => post("/api/teams/create", { name }),
+  teamRename: (name: string) => post("/api/teams/rename", { name }),
+  teamRequest: (team: string) => post("/api/teams/request", { team }),
+  teamInvite: (username: string) => post("/api/teams/invite", { username }),
+  teamAnswer: (id: string, accept: boolean) => post("/api/teams/answer", { id, accept }),
+  teamCancel: (id: string) => post("/api/teams/cancel", { id }),
+  teamLeave: () => post("/api/teams/leave", {}),
+  teamKick: (username: string) => post("/api/teams/kick", { username }),
+  adminTeamCreate: (name: string) => post<{ ok: boolean; id: string }>("/api/team/teams/create", { name }),
+  adminTeamRename: (id: string, name: string) => post("/api/team/teams/rename", { id, name }),
+  adminTeamAssign: (username: string, team: string | null) => post("/api/team/teams/assign", { username, team }),
+  adminTeamDelete: (id: string) => post("/api/team/teams/delete", { id }),
   invite: () => post<{ code: string }>("/api/team/invite"),
   revokeInvite: (code: string) => post("/api/team/revoke", { code }),
   deleteUser: (username: string) => post("/api/team/delete-user", { username }),
