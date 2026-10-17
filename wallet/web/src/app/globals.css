@@ -1461,7 +1461,6 @@ tr:hover .op-adjust, .op-adjust:focus-visible { opacity: 1; }
 .side-link.danger { color: var(--down); }
 .side-link.danger:hover { background: var(--down-soft); color: var(--down); }
 .side-link.danger:hover > svg { transform: translateX(2px); }
-.side-link:hover .side-theme { transform: rotate(-20deg); }
 .side-link.side-fold-btn { color: var(--muted); }
 .side-link.side-fold-btn:hover > svg { transform: translateX(-2px); }
 
@@ -1517,3 +1516,20 @@ tr:hover .op-adjust, .op-adjust:focus-visible { opacity: 1; }
 
 /* en celular el sidebar se esconde: se abre con el botón ☰ */
 @media (max-width: 1024px) { .shell > .side { display: none; } }
+
+/* ---------- cambio de tema animado ---------- */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-new(root) { animation: theme-reveal .6s cubic-bezier(.4, 0, .2, 1); }
+@keyframes theme-reveal {
+  from { clip-path: circle(0 at var(--vt-x, 50%) var(--vt-y, 50%)); }
+  to { clip-path: circle(150vmax at var(--vt-x, 50%) var(--vt-y, 50%)); }
+}
+.side-theme { display: inline-grid; place-items: center; flex: none; animation: theme-icon .5s cubic-bezier(.34, 1.56, .64, 1) both; }
+.side-theme-lbl { animation: theme-lbl .3s ease both; }
+@keyframes theme-icon { from { opacity: 0; transform: rotate(-120deg) scale(.4); } to { opacity: 1; transform: none; } }
+@keyframes theme-lbl { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.side-link:hover .side-theme svg { transform: rotate(-20deg); transition: transform .2s ease; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-new(root) { animation: none; }
+  .side-theme, .side-theme-lbl { animation: none; }
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { api } from "@/lib/api";
 import { perUsd } from "@/lib/format";
 import { goWithSplash } from "./splash";
@@ -163,20 +164,29 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
 // ---------------------------------------------------------------- tema
 
 type Theme = "light" | "dark";
-function useTheme(): [Theme, (t: Theme) => void] {
+function useTheme(): [Theme, (t: Theme, from?: { x: number; y: number }) => void] {
   const [theme, setThemeState] = useState<Theme>("dark");
   useEffect(() => {
     const root = document.documentElement;
     setThemeState(root.dataset.theme ? (root.dataset.theme as Theme) : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   }, []);
-  const setTheme = (t: Theme) => {
-    document.documentElement.dataset.theme = t;
-    setThemeState(t);
-    try {
-      localStorage.setItem("theme", t);
-    } catch {
-      /* sin almacenamiento */
-    }
+  const setTheme = (t: Theme, from?: { x: number; y: number }) => {
+    const apply = () => {
+      document.documentElement.dataset.theme = t;
+      setThemeState(t);
+      try {
+        localStorage.setItem("theme", t);
+      } catch {
+        /* sin almacenamiento */
+      }
+    };
+    // el tema nuevo se abre en círculo desde el botón (donde el navegador lo permite)
+    const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
+    if (!doc.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return apply();
+    const root = document.documentElement;
+    root.style.setProperty("--vt-x", `${from?.x ?? innerWidth / 2}px`);
+    root.style.setProperty("--vt-y", `${from?.y ?? innerHeight / 2}px`);
+    doc.startViewTransition(() => flushSync(apply));
   };
   return [theme, setTheme];
 }
@@ -303,8 +313,10 @@ function SideFoot({ mini, onToggle }: { mini?: boolean; onToggle?: () => void })
           <Icon name="book" size={18} /><span>Mi wallet</span>
         </button>
       )}
-      <button className="side-link" data-tip={dark ? "Tema claro" : "Tema oscuro"} onClick={() => setTheme(dark ? "light" : "dark")}>
-        <Icon name={dark ? "sun" : "moon"} size={18} className="side-theme" /><span>{dark ? "Tema claro" : "Tema oscuro"}</span>
+      <button className="side-link" data-tip={dark ? "Tema claro" : "Tema oscuro"}
+        onClick={(e) => setTheme(dark ? "light" : "dark", { x: e.clientX, y: e.clientY })}>
+        <span className="side-theme" key={theme}><Icon name={dark ? "sun" : "moon"} size={18} /></span>
+        <span className="side-theme-lbl" key={`l${theme}`}>{dark ? "Tema claro" : "Tema oscuro"}</span>
       </button>
       <button className="side-link danger" data-tip="Cerrar sesión" onClick={() => void logout()}>
         <Icon name="logout" size={18} /><span>Cerrar sesión</span>

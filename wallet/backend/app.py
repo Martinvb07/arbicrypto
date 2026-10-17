@@ -6,6 +6,7 @@ Se enciende con PM2, igual que el panel de ArbiCrypto (ver LEEME.md):
 import base64
 import functools
 import hashlib
+import hmac
 import io
 import json
 import logging
@@ -589,6 +590,30 @@ def panel_account(uid):
         return r.json() if r.status_code == 200 else None
     except (requests.RequestException, ValueError):
         return None
+
+
+@app.get("/internal/resultados")
+def internal_results():
+    """Las ventas de Resultados (ganancia neta: sin comisión, sin el 4x1000 de la compra y con tus ajustes) para la
+    gráfica de rendimiento del panel. Solo responde al panel de este mismo servidor, con firma."""
+    if request.remote_addr not in ("127.0.0.1", "::1") or request.headers.get("x-forwarded-for"):
+        abort(404)
+    puid, ts = request.args.get("uid", ""), request.args.get("ts", 0, type=int)
+    sig = request.headers.get("x-panel-sig", "")
+    if not puid or abs(time.time() - ts) > 30 or not hmac.compare_digest(sig, sso.sign(sso.secret(_env, PANEL_ENV), f"resultados|{puid}|{ts}")):
+        abort(404)
+    u = db.one("SELECT id FROM users WHERE panel_uid=?", (puid,))
+    if not u:
+        return jsonify(sales=None)
+    days = max(1, min(400, request.args.get("days", 30, type=int)))
+    since = time.time() - days * 86400
+    years = sorted({datetime.fromtimestamp(since, tax.CO_TZ).year, datetime.now(tax.CO_TZ).year})
+    sales = []
+    for y in years:
+        _, _, res, _ = run_report(u["id"], y)
+        sales += [{"t": d["t"], "net": d.get("net", d["gain"]), "gross": d["gross"], "asset": d["asset"], "missing": d["missing"] > 1e-9}
+                  for d in res["disposals"] if d["t"] >= since]
+    return jsonify(sales=sales)
 
 
 def live_rows(acc, own):

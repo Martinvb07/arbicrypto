@@ -80,7 +80,7 @@ function useCoins(): [string[], (c: string[]) => void] {
 function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
   const { hist } = useLive();
   const [pts, setPts] = useState<{ t: number; fiat: number; usdt: number }[] | null>(null);
-  const [range, setRange] = useState<number>(7 * DAY);
+  const [range, setRange] = useState<number>(DAY);
   const acc = s.account;
   const estimate = useMemo(() => {
     if (!acc) return null;
@@ -90,7 +90,7 @@ function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
       if (hist.some((h) => h.p[r.asset])) qty.set(r.asset, (qty.get(r.asset) ?? 0) + r.qty);
       else fixed.v += r.fiat; // sin precio guardado: se deja con su valor de hoy
     }
-    const series_ = [...qty.keys()].map((a) => [a, smooth(series(hist, a), s.now - DAY, s.now, 96)] as const);
+    const series_ = [...qty.keys()].map((a) => [a, smooth(series(hist, a), s.now - DAY, s.now, 48)] as const);
     const times = series_.find(([, p]) => p.length)?.[1].map((p) => p.t) ?? [];
     return times.map((t) => {
       let v = fixed.v;
@@ -127,8 +127,10 @@ function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
   // el punto de ahora, en vivo, al final de la gráfica
   const real = acc?.total_fiat ? [...shown, { t: now, fiat: acc.total_fiat, usdt: acc.total_usdt }] : shown;
   // mientras se juntan puntos: tus saldos de hoy con el precio de cada momento de las últimas 24 h (estimado)
-  const estimated = real.length < 3 ? estimate : null;
+  // el estimado solo existe para 24 h (los precios guardados cubren un día); 7 y 30 días usan tu historial real
+  const estimated = real.length < 3 && range === DAY ? estimate : null;
   const live = estimated && estimated.length > 2 ? estimated : real;
+  const first = pts?.[0]?.t;
   const ch = change(live.map((p) => p.fiat));
   const diff = live.length > 1 ? live[live.length - 1].fiat - live[0].fiat : null;
   const t = tone(diff);
@@ -148,7 +150,12 @@ function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
       </div>
       <AreaChart points={live.map((p) => ({ t: p.t, v: p.fiat }))} tone={t === "down" ? "down" : t === "up" ? "up" : "brand"}
         fmt={(v) => money(v, 0)} fmtT={(x) => (range === DAY || live === estimated ? hhmm(x) : `${shortDay(x)} ${hhmm(x)}`)}
-        empty={<><Icon name="clock" size={18} /> La gráfica se arma sola: guardamos tu capital cada 15 minutos.</>} />
+        empty={<span className="cap-empty">
+          <Icon name="clock" size={20} />
+          <b>{range === DAY ? "La gráfica se arma sola" : `Todavía no hay ${range === 7 * DAY ? "7" : "30"} días guardados`}</b>
+          <span>{first ? `Tu historial empezó el ${shortDay(first)} a las ${hhmm(first)}: guardamos tu capital cada 15 minutos.` : "Guardamos tu capital cada 15 minutos desde que conectas tu Binance."}</span>
+          {range !== DAY && <button className="btn btn-sm" onClick={() => setRange(DAY)}>Ver 24 h</button>}
+        </span>} />
       {estimated && live === estimated && (
         <p className="dash-note"><Icon name="info" size={13} /> Estimado con tus saldos de hoy y el precio de cada momento. Tu historial real se va guardando cada 15 minutos.</p>
       )}
@@ -257,53 +264,53 @@ function Coins({ s, span, onSpan }: { s: State; span: number; onSpan: (x: number
 
 // ---------------------------------------------------------------- rendimiento
 
+type Perf = Awaited<ReturnType<typeof api.performance>>;
+
 function Performance({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
   const gmf = s.settings.gmf ?? 0;
-  const days = 30;
-  const { bars, won, sales } = useMemo(() => {
-    const start = Math.floor(s.now / DAY) * DAY - (days - 1) * DAY;
-    const by = new Map<number, { v: number; n: number }>();
-    let won = 0, sales = 0;
-    for (const w of s.watches ?? []) {
-      for (const m of w.moves ?? []) {
-        if (m.kind !== "vendiste" || m.t < start || m.cost == null || m.total == null) continue;
-        const g = m.total - m.cost * (1 + gmf);
-        const k = Math.floor(m.t / DAY) * DAY;
-        const x = by.get(k) ?? { v: 0, n: 0 };
-        x.v += g;
-        x.n += 1;
-        by.set(k, x);
-        won += g;
-        sales += 1;
-      }
-    }
-    const bars = Array.from({ length: days }, (_, i) => {
-      const k = start + i * DAY;
-      const x = by.get(k) ?? { v: 0, n: 0 };
-      return { k: String(k), label: shortDay(k + DAY / 2), v: x.v, n: x.n };
-    });
-    return { bars, won, sales };
-  }, [s.watches, s.now, gmf]);
+  const [days, setDays] = useState(30);
+  const [perf, setPerf] = useState<Perf | null>(null);
+  const lastOrder = s.account?.orders?.[0]?.id;
+  useEffect(() => {
+    let alive = true;
+    api.performance(days).then((p) => alive && setPerf(p), () => alive && setPerf(null));
+    return () => { alive = false; };
+  }, [days, lastOrder]);
+  const bars = (perf?.days ?? []).map((d) => ({ k: String(d.t), label: shortDay(d.t + DAY / 2), v: d.gain, n: d.n }));
   const live = (s.watches ?? []).filter((w) => w.status === "vigilando" || w.status === "lista");
   const open = live.reduce((a, w) => a + (w.last?.best?.profit ?? 0), 0);
   const cost = live.reduce((a, w) => a + w.cost * (1 + gmf), 0);
+  const won = perf?.won ?? 0;
   return (
     <section className="card dash-perf">
       <div className="dash-head">
         <div>
           <small className="dash-label"><Icon name="trend" size={14} /> Mi rendimiento</small>
-          <h2>Ganancia de tus ventas · últimos 30 días</h2>
+          <h2>Ganancia de tus ventas P2P</h2>
         </div>
-        <button className="btn btn-sm btn-ghost" onClick={() => onTab("vender")}>Mis monedas <Icon name="arrowRight" size={14} /></button>
+        <Segmented label="Días" value={days} onChange={setDays} options={[[7, "7 d"], [30, "30 d"], [90, "90 d"]] as const} />
       </div>
       <div className="perf-tiles">
-        <div className="perf-tile"><small>Ganado en ventas</small><b className={tone(won)}>{signedMoney(won)}</b><span>{sales} venta{sales === 1 ? "" : "s"} en 30 días</span></div>
+        <div className="perf-tile"><small>Ganado en ventas</small><b className={tone(won)}>{perf ? signedMoney(won) : "…"}</b>
+          <span>{perf ? `${perf.sales} venta${perf.sales === 1 ? "" : "s"} en ${days} días` : "calculando"}</span></div>
+        <div className="perf-tile"><small>Vendiste</small><b>{perf ? money(perf.sold, 0) : "…"}</b>
+          <span>{perf && perf.sold > 0 ? `rinde ${pct(won / perf.sold)} sobre lo vendido` : "en pesos, en P2P"}</span></div>
         <div className="perf-tile"><small>Si vendes todo ahora</small><b className={tone(open)}>{live.length ? signedMoney(open) : "—"}</b>
-          <span>{live.length ? `${live.length} moneda${live.length === 1 ? "" : "s"} · te costaron ${money(cost, 0)}` : "Sin monedas anotadas"}</span></div>
-        <div className="perf-tile"><small>Rendimiento abierto</small><b className={tone(open)}>{cost > 0 ? pct(open / cost) : "—"}</b><span>sobre lo que te costó</span></div>
+          <span>{live.length ? `${cost > 0 ? pct(open / cost) : ""} · ${live.length} moneda${live.length === 1 ? "" : "s"}` : <button className="link-btn" onClick={() => onTab("vender")}>Anota tus monedas</button>}</span></div>
       </div>
-      <GainBars items={bars} fmt={signedMoney} height={230} />
-      <div className="gbars-axis"><span>{bars[0]?.label}</span><span>hoy</span></div>
+      {perf && perf.sales === 0 ? (
+        <div className="chart-empty" style={{ height: 230 }}>{s.connected ? `Sin ventas en los últimos ${days} días.` : "Conecta tu Binance para ver tu rendimiento."}</div>
+      ) : (
+        <>
+          <GainBars items={bars} fmt={signedMoney} height={230} />
+          <div className="gbars-axis"><span>{bars[0]?.label}</span><span>hoy</span></div>
+        </>
+      )}
+      <p className="dash-note"><Icon name="info" size={13} />
+        {perf?.source === "wallet" ? "Igual que Resultados en tu wallet: lo que te quedó libre de comisión y 4x1000, con tus ajustes."
+          : "Con tus órdenes P2P de Binance: cada venta contra lo primero que compraste, libre de comisión y 4x1000."}
+        {perf?.unknown ? ` ${perf.unknown} venta${perf.unknown === 1 ? "" : "s"} sin compra registrada.` : ""}
+      </p>
     </section>
   );
 }

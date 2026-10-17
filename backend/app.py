@@ -990,6 +990,89 @@ def record_balance(user):
         store.save(f"balhist_{uid}", pts)
 
 
+CO_OFFSET = 5 * 3600  # Colombia es UTC-5: los días de la gráfica cortan a la medianoche de aquí
+
+
+WALLET_INTERNAL = (os.environ.get("WALLET_INTERNAL_URL") or _ENV0.get("WALLET_INTERNAL_URL") or "http://127.0.0.1:8788").rstrip("/")
+
+
+def wallet_sales(user, days):
+    """Las ventas tal cual las muestra Resultados en la wallet (ganancia neta, con tus ajustes). None si no responde."""
+    uid = (auth.users.get(user) or {}).get("uid")
+    if not uid or not sso_secret:
+        return None
+    ts = int(time.time())
+    try:
+        r = requests.get(f"{WALLET_INTERNAL}/internal/resultados", params={"uid": uid, "ts": ts, "days": days},
+                         headers={"X-Panel-Sig": sso.sign(sso_secret, f"resultados|{uid}|{ts}")}, timeout=6)
+        sales = r.json().get("sales") if r.status_code == 200 else None
+    except (requests.RequestException, ValueError):
+        return None
+    return [{"t": float(x["t"]), "gain": float(x["net"]), "total": float(x.get("gross") or 0), "known": 0 if x.get("missing") else 1}
+            for x in sales] if isinstance(sales, list) else None
+
+
+def performance(user, days=30):
+    """Rendimiento real con TODAS tus órdenes P2P guardadas: cada venta contra lo que costó lo primero que compraste de
+    esa cripto (FIFO), con la comisión de Binance y el 4x1000 de la compra (como Resultados en la wallet).
+    Lo que vendiste sin compra registrada aquí (vino de otro lado) cuenta con ganancia 0."""
+    wallet = wallet_sales(user, days)
+    if wallet is not None:
+        return summarize_sales(wallet, days, "wallet")
+    gmf = profile(user)["gmf"]
+    rows = sorted((o for o in db.orders(user) if o.get("status") == "COMPLETED" and (o.get("fiat") or FIAT) == FIAT
+                   and o.get("amount")), key=lambda o: o["time"] or 0)
+    lots, sales = {}, []
+    for o in rows:
+        fee, amount, total = float(o.get("commission") or 0), float(o["amount"]), float(o["total"] or 0)
+        q = lots.setdefault(o["asset"], [])
+        if o["side"] == "BUY":
+            got = max(amount - fee, 0)
+            if got > 0:
+                q.append([got, total / got])
+            continue
+        need, cost, known = amount + fee, 0.0, 0.0
+        while need > 1e-12 and q:
+            take = min(need, q[0][0])
+            cost += take * q[0][1]
+            known += take
+            need -= take
+            q[0][0] -= take
+            if q[0][0] <= 1e-12:
+                q.pop(0)
+        share = known / (amount + fee) if amount + fee else 0  # parte de la venta con compra registrada
+        gain = (total * share - cost * (1 + gmf)) if share else 0.0
+        sales.append({"t": (o["time"] or 0) / 1000, "gain": gain, "total": total, "asset": o["asset"], "known": share})
+    return summarize_sales(sales, days, "binance")
+
+
+def summarize_sales(sales, days, source):
+    """Ganancia por día (Colombia) de los últimos `days` días y los totales."""
+    sales = sorted(sales, key=lambda x: x["t"])
+    now = time.time()
+    today = (now - CO_OFFSET) // 86400
+    start = today - days + 1
+    by = {}
+    for s_ in sales:
+        d = (s_["t"] - CO_OFFSET) // 86400
+        if d >= start:
+            x = by.setdefault(d, {"gain": 0.0, "n": 0, "sold": 0.0})
+            x["gain"] += s_["gain"]
+            x["n"] += 1
+            x["sold"] += s_["total"]
+    out = [{"t": (start + i) * 86400 + CO_OFFSET, **by.get(start + i, {"gain": 0.0, "n": 0, "sold": 0.0})} for i in range(days)]
+    period = [x for x in sales if x["t"] >= start * 86400 + CO_OFFSET]
+    return {"days": out, "won": sum(x["gain"] for x in period), "sales": len(period), "sold": sum(x["total"] for x in period),
+            "unknown": sum(1 for x in period if x["known"] < 0.999), "all_won": sum(x["gain"] for x in sales), "all_sales": len(sales),
+            "since": sales[0]["t"] if sales else None, "source": source}
+
+
+@app.get("/api/performance")
+def api_performance():
+    days = max(7, min(365, request.args.get("days", 30, type=int)))
+    return jsonify(performance(g.user["name"], days))
+
+
 @app.get("/api/balance-history")
 def api_balance_history():
     uid = g.user.get("uid")

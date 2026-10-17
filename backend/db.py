@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS chat_reads (
 """
 
 # Columnas que se agregaron despues de crear la tabla: una base vieja (por ejemplo, la del VPS) las recibe sola
-ADDED_COLUMNS = (("p2p_orders", "user", "{keytext}"), ("alerts", "audience", "TEXT"),
+ADDED_COLUMNS = (("p2p_orders", "user", "{keytext}"), ("p2p_orders", "commission", "REAL"), ("alerts", "audience", "TEXT"),
                  ("messages", "reply_to", "{bigint}"), ("messages", "image", "{keytext}"))
 
 KEEP_DAYS = 120  # historial de oportunidades y horas
@@ -198,8 +198,8 @@ class DB:
     # ------------------------------------------------------------ ordenes P2P de Binance
 
     def save_orders(self, user, orders):
-        cols = ("id", "side", "asset", "fiat", "amount", "price", "total", "status", "time", "counterpart")
-        self.sql.many(self.sql.upsert("p2p_orders", cols + ('"user"',), ("id",), {"status": "new"}),
+        cols = ("id", "side", "asset", "fiat", "amount", "price", "total", "status", "time", "counterpart", "commission")
+        self.sql.many(self.sql.upsert("p2p_orders", cols + ('"user"',), ("id",), {"status": "new", "commission": "new"}),
                       [tuple(o.get(c) for c in cols) + (user,) for o in orders if o.get("id")])
 
     def orders(self, user):
