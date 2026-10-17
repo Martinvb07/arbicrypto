@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { perUsd } from "@/lib/format";
 import { goWithSplash } from "./splash";
@@ -217,8 +217,23 @@ function SideNav({ tab, onTab, onPick }: { tab: TabId; onTab: (t: TabId) => void
   const count = useCounts();
   const main = tabs.filter((t) => t.group !== "cuenta");
   const more = tabs.filter((t) => t.group === "cuenta");
+  // un solo resaltado que se desliza hasta la sección elegida (en vez de saltar de una a otra)
+  const box = useRef<HTMLElement>(null);
+  const [pill, setPill] = useState<{ y: number; h: number; ready: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => {
+      const on = el.querySelector<HTMLElement>("button.on");
+      setPill((p) => (on ? { y: on.offsetTop, h: on.offsetHeight, ready: !!p } : null));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tab, tabs.length]);
   const item = (t: (typeof TABS)[number]) => (
-    <button key={t.id} className={tab === t.id ? "on" : ""} aria-current={tab === t.id ? "page" : undefined}
+    <button key={t.id} className={tab === t.id ? "on" : ""} aria-current={tab === t.id ? "page" : undefined} data-tip={t.label}
       onClick={() => { onTab(t.id); onPick?.(); }}>
       <span className="side-ico"><Icon name={t.icon} size={18} /></span>
       <span className="side-lbl">{t.label}</span>
@@ -226,13 +241,14 @@ function SideNav({ tab, onTab, onPick }: { tab: TabId; onTab: (t: TabId) => void
     </button>
   );
   return (
-    <nav className="side-nav" aria-label="Secciones">
+    <nav className="side-nav" aria-label="Secciones" ref={box}>
+      {pill && <span className={`side-pill ${pill.ready ? "" : "still"}`} style={{ transform: `translateY(${pill.y}px)`, height: pill.h }} aria-hidden="true" />}
       <small className="side-group">Mercado</small>
       {main.map(item)}
       <small className="side-group">Tu cuenta</small>
       {more.map(item)}
       {state?.user && state.user.access !== "panel" && (
-        <button onClick={() => goWithSplash("/wallet", "Abriendo tu wallet", "Contabilidad y declaración")}>
+        <button data-tip="Wallet" onClick={() => goWithSplash("/wallet", "Abriendo tu wallet", "Contabilidad y declaración")}>
           <span className="side-ico"><Icon name="book" size={18} /></span>
           <span className="side-lbl">Wallet</span>
           <Icon name="external" size={13} className="side-ext" />
@@ -242,13 +258,31 @@ function SideNav({ tab, onTab, onPick }: { tab: TabId; onTab: (t: TabId) => void
   );
 }
 
+/** Sidebar contraído (solo íconos): se recuerda en este navegador. */
+function useMini(): [boolean, () => void] {
+  const [mini, setMini] = useState(false);
+  useEffect(() => setMini(document.documentElement.dataset.side === "mini"), []);
+  const toggle = () => {
+    const next = !mini;
+    if (next) document.documentElement.dataset.side = "mini";
+    else delete document.documentElement.dataset.side;
+    setMini(next);
+    try {
+      localStorage.setItem("side", next ? "mini" : "full");
+    } catch {
+      /* sin almacenamiento */
+    }
+  };
+  return [mini, toggle];
+}
+
 function ThemeSwitch() {
   const [theme, setTheme] = useTheme();
   return (
-    <div className="theme-sw" role="radiogroup" aria-label="Tema">
+    <div className={`theme-sw ${theme}`} role="radiogroup" aria-label="Tema">
       <span className="theme-thumb" style={{ transform: theme === "dark" ? "translateX(100%)" : "none" }} aria-hidden="true" />
-      <button role="radio" aria-checked={theme === "light"} className={theme === "light" ? "on" : ""} onClick={() => setTheme("light")}><Icon name="sun" size={15} /> Claro</button>
-      <button role="radio" aria-checked={theme === "dark"} className={theme === "dark" ? "on" : ""} onClick={() => setTheme("dark")}><Icon name="moon" size={15} /> Oscuro</button>
+      <button role="radio" aria-checked={theme === "light"} className={theme === "light" ? "on" : ""} onClick={() => setTheme("light")} title="Claro"><Icon name="sun" size={15} /> <span>Claro</span></button>
+      <button role="radio" aria-checked={theme === "dark"} className={theme === "dark" ? "on" : ""} onClick={() => setTheme("dark")} title="Oscuro"><Icon name="moon" size={15} /> <span>Oscuro</span></button>
     </div>
   );
 }
@@ -256,13 +290,19 @@ function ThemeSwitch() {
 // ---------------------------------------------------------------- sidebar (escritorio)
 
 export function Sidebar({ tab, onTab }: { tab: TabId; onTab: (t: TabId) => void }) {
+  const [mini, toggle] = useMini();
   return (
     <aside className="side">
-      <a href="#mercado" className="side-brand" onClick={() => onTab("mercado")}><Brand /></a>
+      <div className="side-top">
+        <a href="#mercado" className="side-brand" onClick={() => onTab("mercado")}><Brand /></a>
+        <button className="side-fold" onClick={toggle} title={mini ? "Expandir menú" : "Contraer menú"} aria-label={mini ? "Expandir menú" : "Contraer menú"} aria-expanded={!mini}>
+          <Icon name="chevronLeft" size={16} />
+        </button>
+      </div>
       <SideNav tab={tab} onTab={onTab} />
       <div className="side-foot">
         <ThemeSwitch />
-        <button className="side-out" onClick={() => void logout()}><Icon name="logout" size={17} /> Cerrar sesión</button>
+        <button className="side-out" onClick={() => void logout()} data-tip="Cerrar sesión"><Icon name="logout" size={17} /> <span>Cerrar sesión</span></button>
       </div>
     </aside>
   );

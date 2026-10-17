@@ -1627,3 +1627,59 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
   .page-in, .topbar-title, .theme-thumb { animation: none; transition: none; }
 }
 .mkt-kpi > * { position: relative; }
+
+/* ---------- sidebar contraído (solo íconos) ---------- */
+.shell { transition: grid-template-columns .32s cubic-bezier(.3, .8, .25, 1); }
+.side-top { position: relative; display: flex; align-items: center; }
+.side-top .side-brand { flex: 1; min-width: 0; overflow: hidden; }
+.side-fold { position: absolute; right: -29px; top: 8px; z-index: 2; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%;
+  border: 1px solid var(--border-2); background: var(--surface); color: var(--muted); cursor: pointer; box-shadow: var(--shadow);
+  transition: color .2s, border-color .2s, transform .32s cubic-bezier(.3, .8, .25, 1); }
+.side-fold:hover { color: var(--brand-text); border-color: var(--brand); }
+.side { overflow: visible; z-index: 35; }
+.side .brand-name, .side .brand-sub, .side-lbl, .side-group, .side-out span, .theme-sw button span { transition: opacity .2s ease; }
+:root[data-side="mini"] { --side-w: 84px; }
+:root[data-side="mini"] .side { padding-left: 14px; padding-right: 14px; }
+:root[data-side="mini"] .side-fold { transform: rotate(180deg); }
+:root[data-side="mini"] .side .brand { gap: 0; }
+:root[data-side="mini"] .side .brand > span:last-child,
+:root[data-side="mini"] .side-lbl, :root[data-side="mini"] .side-ext,
+:root[data-side="mini"] .side-out span, :root[data-side="mini"] .theme-sw button span { opacity: 0; width: 0; overflow: hidden; pointer-events: none; }
+:root[data-side="mini"] .side-brand { padding: 2px 4px 10px; }
+:root[data-side="mini"] .side-group { height: 1px; padding: 0; margin: 10px 8px; background: var(--border); color: transparent; overflow: hidden; }
+:root[data-side="mini"] .side-nav button { justify-content: center; padding: 0; gap: 0; }
+:root[data-side="mini"] .side-nav button.on::before { left: -14px; }
+:root[data-side="mini"] .side-nav .count { position: absolute; top: 2px; right: 4px; min-width: 17px; height: 17px; font-size: 10px; padding: 0 4px; }
+:root[data-side="mini"] .theme-sw { grid-template-columns: 1fr; }
+:root[data-side="mini"] .theme-sw button { gap: 0; height: 30px; }
+:root[data-side="mini"] .theme-thumb { width: calc(100% - 8px); height: calc(50% - 4px); bottom: auto;
+  transform: none !important; }
+:root[data-side="mini"] .theme-sw.dark .theme-thumb { transform: translateY(100%) !important; }
+:root[data-side="mini"] .side-out { justify-content: center; padding: 0; gap: 0; }
+/* nombre de la sección al pasar el mouse con el menú contraído */
+:root[data-side="mini"] .side [data-tip] { position: relative; }
+:root[data-side="mini"] .side [data-tip]:hover::after { content: attr(data-tip); position: absolute; left: calc(100% + 12px); top: 50%; transform: translateY(-50%);
+  z-index: 40; padding: 6px 10px; border-radius: 8px; background: var(--text); color: var(--page); font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  box-shadow: var(--shadow-lg); pointer-events: none; animation: t-up .15s ease both; }
+@media (max-width: 1024px) { .side-fold { display: none; } }
+
+/* ---------- resaltado deslizante del menú ---------- */
+.side-nav { position: relative; isolation: isolate; }
+.side-nav button { z-index: 1; }
+.side-nav button.on, .side-nav button.on:hover { background: none; }
+.side-nav button.on::before { display: none; }
+.side-pill { position: absolute; left: 0; right: 0; top: 0; z-index: 0; border-radius: 12px; pointer-events: none;
+  background: linear-gradient(90deg, var(--brand-soft), color-mix(in srgb, var(--brand) 3%, transparent));
+  transition: transform .45s cubic-bezier(.22, 1, .36, 1), height .45s cubic-bezier(.22, 1, .36, 1); will-change: transform; }
+.side-pill::before { content: ""; position: absolute; left: -16px; top: 9px; bottom: 9px; width: 4px; border-radius: 0 4px 4px 0;
+  background: var(--brand); box-shadow: 0 0 14px var(--brand); }
+:root[data-side="mini"] .side-pill::before { left: -14px; }
+.side-pill.still { transition: none; }
+/* el ícono y el texto se encienden suave, un poco después de que llega el resaltado */
+.side-nav button, .side-nav button .side-ico { transition: background-color .3s ease, color .3s ease, box-shadow .3s ease; }
+.side-nav button.on { transition-delay: .08s; }
+.side-nav button.on .side-ico { transition-delay: .12s; }
+.side-nav button:not(.on):hover { background: var(--hover); }
+.side-nav button:active .side-ico { transform: scale(.94); }
+.side-ico { transition: transform .15s ease, background-color .3s ease, color .3s ease, box-shadow .3s ease; }
+@media (prefers-reduced-motion: reduce) { .side-pill { transition: none; } }
