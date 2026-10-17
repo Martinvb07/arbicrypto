@@ -56,55 +56,76 @@ function usePill(nav: React.RefObject<HTMLElement | null>, key: string): CSSProp
 
 /** Las secciones del sidebar por grupos, con el resaltado deslizante. */
 function SideNav({ tab, onTab, onPick }: { tab: Main; onTab: (t: TabId) => void; onPick?: () => void }) {
-  const { me } = useWallet();
   const ref = useRef<HTMLElement>(null);
   const pill = usePill(ref, tab);
   const [moved, setMoved] = useState(false); // el primer pintado no se anima
   useEffect(() => { const t = setTimeout(() => setMoved(true), 50); return () => clearTimeout(t); }, []);
   const groups = [...new Set(TABS.map((t) => t.group))];
+  let k = 0;
   return (
     <nav className="side-nav" ref={ref} aria-label="Secciones">
       {pill && <span className={`side-pill ${moved ? "" : "still"}`} style={pill} aria-hidden="true" />}
-      {groups.map((g) => (
+      {groups.map((g, gi) => (
         <div key={g} className="side-sec">
-          <small className="side-group">{g}</small>
+          {gi > 0 && <small className="side-group"><span>{g}</span></small>}
           {TABS.filter((t) => t.group === g).map((t) => (
             <button key={t.id} className={tab === t.id ? "on" : ""} aria-current={tab === t.id ? "page" : undefined} data-tip={t.label}
-              onClick={() => { onTab(t.id); onPick?.(); }}>
-              <span className="side-ico"><Icon name={t.icon} size={18} /></span>
+              style={{ ["--i" as string]: k++ } as CSSProperties} onClick={() => { onTab(t.id); onPick?.(); }}>
+              <Icon name={t.icon} size={19} className="side-ico" />
               <span className="side-lbl">{t.label}</span>
             </button>
           ))}
-          {g === "Cuenta" && (
-            <button data-tip="Volver al panel" onClick={() => goWithSplash(me.panel, "Volviendo al panel")}>
-              <span className="side-ico"><Icon name="back" size={18} /></span>
-              <span className="side-lbl">Volver al panel</span>
-            </button>
-          )}
         </div>
       ))}
     </nav>
   );
 }
 
-function ThemeSwitch({ light, onChange }: { light: boolean; onChange: (light: boolean) => void }) {
+/** Tu foto (o inicial), tu nombre y tu rol, arriba del menú. */
+function SideProfile() {
+  const { me } = useWallet();
+  const name = me.user.username;
   return (
-    <div className={`theme-sw ${light ? "light" : "dark"}`} role="radiogroup" aria-label="Tema">
-      <span className="theme-thumb" aria-hidden="true" />
-      <button role="radio" aria-checked={light} className={light ? "on" : ""} onClick={() => onChange(true)} title="Claro"><Icon name="sun" size={15} /> <span>Claro</span></button>
-      <button role="radio" aria-checked={!light} className={light ? "" : "on"} onClick={() => onChange(false)} title="Oscuro"><Icon name="moon" size={15} /> <span>Oscuro</span></button>
+    <div className="side-profile" title={name}>
+      <span className="side-av"><Avatar name={name} size={38} /></span>
+      <div className="side-who">
+        <b>{me.profile.name || name}</b>
+        <small>{me.user.role === "admin" ? "Administrador" : "Usuario"}{me.profile.nit ? <span> · CC {me.profile.nit}</span> : null}</small>
+      </div>
     </div>
   );
 }
 
-function Brand() {
+/** Abajo: volver al panel, tema, cerrar sesión y contraer. */
+function SideFoot({ light, onTheme, onLogout, mini, onToggle }: {
+  light: boolean; onTheme: (light: boolean) => void; onLogout: () => void; mini?: boolean; onToggle?: () => void;
+}) {
+  const { me } = useWallet();
   return (
-    <div className="brand">
-      <BrandMark />
-      <span>
-        <span className="brand-name">Arbi<span>Crypto</span></span>
-        <span className="brand-sub">Wallet · Contabilidad DIAN</span>
-      </span>
+    <div className="side-foot">
+      <button className="side-link" data-tip="Volver al panel" onClick={() => goWithSplash(me.panel, "Volviendo al panel")}>
+        <Icon name="back" size={18} /><span>Volver al panel</span>
+      </button>
+      <button className="side-link" data-tip={light ? "Tema oscuro" : "Tema claro"} onClick={() => onTheme(!light)}>
+        <Icon name={light ? "moon" : "sun"} size={18} className="side-theme" /><span>{light ? "Tema oscuro" : "Tema claro"}</span>
+      </button>
+      <button className="side-link danger" data-tip="Cerrar sesión" onClick={onLogout}>
+        <Icon name="logout" size={18} /><span>Cerrar sesión</span>
+      </button>
+      {onToggle && (
+        <button className="side-link side-fold-btn" data-tip="Expandir" onClick={onToggle} aria-expanded={!mini}>
+          <Icon name={mini ? "chevron" : "chevronLeft"} size={18} /><span>Contraer</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Logo() {
+  return (
+    <div className="side-logo">
+      <BrandMark size={36} />
+      <span className="side-name">Arbi<span>Crypto</span> <small>Wallet</small></span>
     </div>
   );
 }
@@ -258,35 +279,25 @@ export function App() {
   };
 
   const cur = TABS.find((t) => t.id === tab) ?? TABS[0];
-  const foot = (
-    <div className="side-foot">
-      <ThemeSwitch light={light} onChange={setTheme} />
-      <button className="side-out" onClick={() => void logout()} data-tip="Cerrar sesión"><Icon name="logout" size={17} /> <span>Cerrar sesión</span></button>
-    </div>
-  );
-
   return (
     <div className="shell">
       <aside className="side">
-        <div className="side-top">
-          <div className="side-brand"><Brand /></div>
-          <button className="side-fold" onClick={toggleMini} title={mini ? "Expandir menú" : "Contraer menú"} aria-label={mini ? "Expandir menú" : "Contraer menú"} aria-expanded={!mini}>
-            <Icon name="chevronLeft" size={16} />
-          </button>
-        </div>
+        <Logo />
+        <SideProfile />
         <SideNav tab={tab} onTab={setTab} />
-        {foot}
+        <SideFoot light={light} onTheme={setTheme} onLogout={() => void logout()} mini={mini} onToggle={toggleMini} />
       </aside>
       {drawer && (
         <div className="drawer" role="dialog" aria-label="Secciones" onClick={() => setDrawer(false)}>
           <aside className="side drawer-side" onClick={(e) => e.stopPropagation()}>
-            <div className="side-top">
-              <div className="side-brand"><Brand /></div>
+            <div className="drawer-top">
+              <Logo />
               <button className="icon-btn" onClick={() => setDrawer(false)} aria-label="Cerrar menú"><Icon name="x" /></button>
             </div>
-            <LivePill onClick={() => { setTab("inicio"); setDrawer(false); }} />
+            <SideProfile />
+            <div className="drawer-live"><LivePill onClick={() => { setTab("inicio"); setDrawer(false); }} /></div>
             <SideNav tab={tab} onTab={setTab} onPick={() => setDrawer(false)} />
-            {foot}
+            <SideFoot light={light} onTheme={setTheme} onLogout={() => void logout()} />
           </aside>
         </div>
       )}

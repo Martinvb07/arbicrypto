@@ -7,12 +7,13 @@ import { goWithSplash } from "./splash";
 import { avatarImage, chatUnread, useChat } from "@/lib/chat";
 import { useLive } from "@/lib/live";
 import { Menu, Modal, Sheet } from "./overlay";
-import { Ago, Brand, Icon, PasswordInput, UserAvatar, type IconName } from "./ui";
+import { Ago, Brand, Icon, Logo, PasswordInput, UserAvatar, type IconName } from "./ui";
 
-export type TabId = "inicio" | "vender" | "mercado" | "anuncios" | "historial" | "chat" | "cuenta" | "equipo";
+export type TabId = "dashboard" | "inicio" | "vender" | "mercado" | "anuncios" | "historial" | "chat" | "cuenta" | "equipo";
 
 export const TABS: { id: TabId; label: string; icon: IconName; sub: string; group?: "cuenta"; admin?: boolean }[] = [
-  { id: "mercado", label: "Precios P2P", icon: "chart", sub: "Compradores y vendedores de Binance P2P en pesos, en vivo" },  // la principal: abre aquí
+  { id: "dashboard", label: "Inicio", icon: "home", sub: "Tu capital, el dólar, tus monedas y tu rendimiento de un vistazo" },  // la principal: abre aquí
+  { id: "mercado", label: "Precios P2P", icon: "chart", sub: "Compradores y vendedores de Binance P2P en pesos, en vivo" },
   { id: "vender", label: "¿Dónde vendo?", icon: "target", sub: "Tus monedas, cuánto te costaron y cuánto ganas si vendes ya" },
   { id: "inicio", label: "Arbitraje", icon: "bolt", sub: "Comprar barato y vender más caro, con todos los costos" },
   { id: "anuncios", label: "Simular anuncios", icon: "megaphone", sub: "Cuánto ganas publicando tus propios anuncios" },
@@ -215,9 +216,12 @@ function SideNav({ tab, onTab, onPick }: { tab: TabId; onTab: (t: TabId) => void
   const admin = state?.user?.role === "admin";
   const tabs = TABS.filter((t) => !t.admin || admin);
   const count = useCounts();
-  const main = tabs.filter((t) => t.group !== "cuenta");
-  const more = tabs.filter((t) => t.group === "cuenta");
-  // un solo resaltado que se desliza hasta la sección elegida (en vez de saltar de una a otra)
+  const groups: [string | null, typeof tabs][] = [
+    [null, tabs.filter((t) => t.id === "dashboard")],
+    ["Mercado", tabs.filter((t) => !t.group && t.id !== "dashboard")],
+    ["Tu cuenta", tabs.filter((t) => t.group === "cuenta")],
+  ];
+  // un solo resaltado (fondo + barrita) que se desliza hasta la sección elegida
   const box = useRef<HTMLElement>(null);
   const [pill, setPill] = useState<{ y: number; h: number; ready: boolean } | null>(null);
   useLayoutEffect(() => {
@@ -232,28 +236,23 @@ function SideNav({ tab, onTab, onPick }: { tab: TabId; onTab: (t: TabId) => void
     ro.observe(el);
     return () => ro.disconnect();
   }, [tab, tabs.length]);
-  const item = (t: (typeof TABS)[number]) => (
-    <button key={t.id} className={tab === t.id ? "on" : ""} aria-current={tab === t.id ? "page" : undefined} data-tip={t.label}
-      onClick={() => { onTab(t.id); onPick?.(); }}>
-      <span className="side-ico"><Icon name={t.icon} size={18} /></span>
-      <span className="side-lbl">{t.label}</span>
-      {count(t.id)}
-    </button>
-  );
+  let k = 0;
   return (
     <nav className="side-nav" aria-label="Secciones" ref={box}>
       {pill && <span className={`side-pill ${pill.ready ? "" : "still"}`} style={{ transform: `translateY(${pill.y}px)`, height: pill.h }} aria-hidden="true" />}
-      <small className="side-group">Mercado</small>
-      {main.map(item)}
-      <small className="side-group">Tu cuenta</small>
-      {more.map(item)}
-      {state?.user && state.user.access !== "panel" && (
-        <button data-tip="Wallet" onClick={() => goWithSplash("/wallet", "Abriendo tu wallet", "Contabilidad y declaración")}>
-          <span className="side-ico"><Icon name="book" size={18} /></span>
-          <span className="side-lbl">Wallet</span>
-          <Icon name="external" size={13} className="side-ext" />
-        </button>
-      )}
+      {groups.map(([label, items]) => (
+        <div key={label ?? "-"} className="side-sec">
+          {label && <small className="side-group"><span>{label}</span></small>}
+          {items.map((t) => (
+            <button key={t.id} className={tab === t.id ? "on" : ""} aria-current={tab === t.id ? "page" : undefined} data-tip={t.label}
+              style={{ ["--i" as string]: k++ } as React.CSSProperties} onClick={() => { onTab(t.id); onPick?.(); }}>
+              <Icon name={t.icon} size={19} className="side-ico" />
+              <span className="side-lbl">{t.label}</span>
+              {count(t.id)}
+            </button>
+          ))}
+        </div>
+      ))}
     </nav>
   );
 }
@@ -276,13 +275,45 @@ function useMini(): [boolean, () => void] {
   return [mini, toggle];
 }
 
-function ThemeSwitch() {
-  const [theme, setTheme] = useTheme();
+/** Tu foto (o inicial), tu nombre y tu rol, arriba del menú. */
+function SideProfile() {
+  const { state } = useLive();
+  if (!state?.user) return <div className="side-profile" />;
+  const u = state.user;
   return (
-    <div className={`theme-sw ${theme}`} role="radiogroup" aria-label="Tema">
-      <span className="theme-thumb" style={{ transform: theme === "dark" ? "translateX(100%)" : "none" }} aria-hidden="true" />
-      <button role="radio" aria-checked={theme === "light"} className={theme === "light" ? "on" : ""} onClick={() => setTheme("light")} title="Claro"><Icon name="sun" size={15} /> <span>Claro</span></button>
-      <button role="radio" aria-checked={theme === "dark"} className={theme === "dark" ? "on" : ""} onClick={() => setTheme("dark")} title="Oscuro"><Icon name="moon" size={15} /> <span>Oscuro</span></button>
+    <div className="side-profile" title={u.name}>
+      <span className="side-av"><UserAvatar name={u.name} src={state.avatars?.[u.name]} size={38} /></span>
+      <div className="side-who">
+        <b>{u.name}</b>
+        <small>{u.role === "admin" ? "Administrador" : "Miembro"}{state.my_team?.name ? <span> · {state.my_team.name}</span> : null}</small>
+      </div>
+    </div>
+  );
+}
+
+/** Abajo: wallet, tema, cerrar sesión y contraer. */
+function SideFoot({ mini, onToggle }: { mini?: boolean; onToggle?: () => void }) {
+  const { state } = useLive();
+  const [theme, setTheme] = useTheme();
+  const dark = theme === "dark";
+  return (
+    <div className="side-foot">
+      {state?.user && state.user.access !== "panel" && (
+        <button className="side-link" data-tip="Mi wallet" onClick={() => goWithSplash("/wallet", "Abriendo tu wallet", "Contabilidad y declaración")}>
+          <Icon name="book" size={18} /><span>Mi wallet</span>
+        </button>
+      )}
+      <button className="side-link" data-tip={dark ? "Tema claro" : "Tema oscuro"} onClick={() => setTheme(dark ? "light" : "dark")}>
+        <Icon name={dark ? "sun" : "moon"} size={18} className="side-theme" /><span>{dark ? "Tema claro" : "Tema oscuro"}</span>
+      </button>
+      <button className="side-link danger" data-tip="Cerrar sesión" onClick={() => void logout()}>
+        <Icon name="logout" size={18} /><span>Cerrar sesión</span>
+      </button>
+      {onToggle && (
+        <button className="side-link side-fold-btn" data-tip="Expandir" onClick={onToggle} aria-expanded={!mini}>
+          <Icon name={mini ? "chevronRight" : "chevronLeft"} size={18} /><span>Contraer</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -293,17 +324,13 @@ export function Sidebar({ tab, onTab }: { tab: TabId; onTab: (t: TabId) => void 
   const [mini, toggle] = useMini();
   return (
     <aside className="side">
-      <div className="side-top">
-        <a href="#mercado" className="side-brand" onClick={() => onTab("mercado")}><Brand /></a>
-        <button className="side-fold" onClick={toggle} title={mini ? "Expandir menú" : "Contraer menú"} aria-label={mini ? "Expandir menú" : "Contraer menú"} aria-expanded={!mini}>
-          <Icon name="chevronLeft" size={16} />
-        </button>
-      </div>
+      <a href="#dashboard" className="side-logo" onClick={() => onTab("dashboard")}>
+        <Logo size={36} />
+        <span className="side-name">Arbi<span>Crypto</span></span>
+      </a>
+      <SideProfile />
       <SideNav tab={tab} onTab={onTab} />
-      <div className="side-foot">
-        <ThemeSwitch />
-        <button className="side-out" onClick={() => void logout()} data-tip="Cerrar sesión"><Icon name="logout" size={17} /> <span>Cerrar sesión</span></button>
-      </div>
+      <SideFoot mini={mini} onToggle={toggle} />
     </aside>
   );
 }
@@ -387,12 +414,10 @@ export function Topbar({ tab, onTab }: { tab: TabId; onTab: (t: TabId) => void }
       {menu && (
         <Sheet side="left" title={<span className="drawer-brand"><Brand /></span>} onClose={() => setMenu(false)}>
           <div className="drawer-side">
+            <SideProfile />
             <LiveBadge />
             <SideNav tab={tab} onTab={onTab} onPick={() => setMenu(false)} />
-            <div className="side-foot">
-              <ThemeSwitch />
-              <button className="side-out" onClick={() => void logout()}><Icon name="logout" size={17} /> Cerrar sesión</button>
-            </div>
+            <SideFoot />
           </div>
         </Sheet>
       )}
