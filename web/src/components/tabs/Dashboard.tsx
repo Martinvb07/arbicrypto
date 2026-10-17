@@ -19,6 +19,24 @@ const SLICES = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)"]
 const dayFmt = new Intl.DateTimeFormat("es-CO", { day: "numeric", month: "short" });
 const shortDay = (t: number) => dayFmt.format(t * 1000).replace(".", "");
 
+/** Precio por tramos (mediana de cada tramo): quita los picos de anuncios sueltos que duran segundos. */
+function smooth(pts: { t: number; buy: number; sell: number }[], from: number, to: number, n = 72) {
+  const step = (to - from) / n;
+  const out: { t: number; buy: number; sell: number }[] = [];
+  const med = (xs: number[]) => { const a = [...xs].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+  for (let i = 0; i < n; i++) {
+    const a = from + i * step, b = a + step;
+    const part = pts.filter((p) => p.t >= a && p.t < b);
+    if (part.length) out.push({ t: (a + b) / 2, buy: med(part.map((p) => p.buy)), sell: med(part.map((p) => p.sell)) });
+  }
+  return out;
+}
+
+const SPANS = [[3600, "1 h"], [6 * 3600, "6 h"], [DAY, "24 h"]] as const;
+const spanTxt = (x: number) => (x === 3600 ? "en 1 h" : x === 6 * 3600 ? "en 6 h" : "en 24 h");
+/** El tono (sube / baja / igual) de una variación relativa. */
+const toneOf = (ch: number | null) => tone(ch == null ? null : ch * 100);
+
 /** Variación en el rango: del primer al último punto. */
 function change(vs: number[]) {
   if (vs.length < 2 || !vs[0]) return null;
@@ -60,9 +78,29 @@ function useCoins(): [string[], (c: string[]) => void] {
 // ---------------------------------------------------------------- capital en Binance
 
 function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
+  const { hist } = useLive();
   const [pts, setPts] = useState<{ t: number; fiat: number; usdt: number }[] | null>(null);
   const [range, setRange] = useState<number>(7 * DAY);
   const acc = s.account;
+  const estimate = useMemo(() => {
+    if (!acc) return null;
+    const qty = new Map<string, number>(), fixed = { v: 0 };
+    for (const r of [...acc.spot, ...acc.funding]) {
+      if (!r.fiat) continue;
+      if (hist.some((h) => h.p[r.asset])) qty.set(r.asset, (qty.get(r.asset) ?? 0) + r.qty);
+      else fixed.v += r.fiat; // sin precio guardado: se deja con su valor de hoy
+    }
+    const series_ = [...qty.keys()].map((a) => [a, smooth(series(hist, a), s.now - DAY, s.now, 96)] as const);
+    const times = series_.find(([, p]) => p.length)?.[1].map((p) => p.t) ?? [];
+    return times.map((t) => {
+      let v = fixed.v;
+      for (const [a, p] of series_) {
+        const near = p.reduce((b, x) => (Math.abs(x.t - t) < Math.abs(b.t - t) ? x : b), p[0]);
+        if (near) v += (qty.get(a) ?? 0) * near.sell;
+      }
+      return { t, fiat: v, usdt: acc.total_usdt };
+    });
+  }, [acc, hist, s.now]);
   useEffect(() => {
     if (!s.connected) return;
     let alive = true;
@@ -87,7 +125,10 @@ function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
   const now = s.now;
   const shown = (pts ?? []).filter((p) => p.t >= now - range);
   // el punto de ahora, en vivo, al final de la gráfica
-  const live = acc?.total_fiat ? [...shown, { t: now, fiat: acc.total_fiat, usdt: acc.total_usdt }] : shown;
+  const real = acc?.total_fiat ? [...shown, { t: now, fiat: acc.total_fiat, usdt: acc.total_usdt }] : shown;
+  // mientras se juntan puntos: tus saldos de hoy con el precio de cada momento de las últimas 24 h (estimado)
+  const estimated = real.length < 3 ? estimate : null;
+  const live = estimated && estimated.length > 2 ? estimated : real;
   const ch = change(live.map((p) => p.fiat));
   const diff = live.length > 1 ? live[live.length - 1].fiat - live[0].fiat : null;
   const t = tone(diff);
@@ -100,32 +141,37 @@ function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
           <div className="dash-meta">
             <span className="dim">≈ {num(acc?.total_usdt, 2)} USDT</span>
             <Delta v={ch} money={diff} />
-            <span className="dim">{range === DAY ? "en 24 h" : range === 7 * DAY ? "en 7 días" : "en 30 días"}</span>
+            <span className="dim">{estimated && live === estimated ? "en 24 h (estimado)" : range === DAY ? "en 24 h" : range === 7 * DAY ? "en 7 días" : "en 30 días"}</span>
           </div>
         </div>
         <Segmented label="Rango" value={range} onChange={setRange} options={[[DAY, "24 h"], [7 * DAY, "7 d"], [30 * DAY, "30 d"]] as const} />
       </div>
       <AreaChart points={live.map((p) => ({ t: p.t, v: p.fiat }))} tone={t === "down" ? "down" : t === "up" ? "up" : "brand"}
-        fmt={(v) => money(v, 0)} fmtT={(x) => (range === DAY ? hhmm(x) : `${shortDay(x)} ${hhmm(x)}`)}
+        fmt={(v) => money(v, 0)} fmtT={(x) => (range === DAY || live === estimated ? hhmm(x) : `${shortDay(x)} ${hhmm(x)}`)}
         empty={<><Icon name="clock" size={18} /> La gráfica se arma sola: guardamos tu capital cada 15 minutos.</>} />
+      {estimated && live === estimated && (
+        <p className="dash-note"><Icon name="info" size={13} /> Estimado con tus saldos de hoy y el precio de cada momento. Tu historial real se va guardando cada 15 minutos.</p>
+      )}
     </section>
   );
 }
 
 // ---------------------------------------------------------------- dólar
 
-function Dollar({ s }: { s: State }) {
+function Dollar({ s, span, onSpan }: { s: State; span: number; onSpan: (x: number) => void }) {
   const { hist } = useLive();
-  const pts = useMemo(() => series(hist, "USDT").filter((p) => p.t >= s.now - DAY), [hist, s.now]);
+  const pts = useMemo(() => smooth(series(hist, "USDT"), s.now - span, s.now, span === 3600 ? 30 : 72), [hist, s.now, span]);
   const m = s.p2p?.market.USDT;
   const buy = m?.BUY?.[0]?.price ?? pts[pts.length - 1]?.buy ?? null;
   const sell = m?.SELL?.[0]?.price ?? pts[pts.length - 1]?.sell ?? null;
   const chB = change(pts.map((p) => p.buy));
   const chS = change(pts.map((p) => p.sell));
+  const tb = toneOf(chB);
   return (
     <section className="card dash-dollar">
       <div className="dash-head">
         <small className="dash-label"><Coin s="USDT" size={18} /> Dólar hoy · USDT en P2P</small>
+        <Segmented label="Rango del dólar" value={span} onChange={onSpan} options={SPANS} />
       </div>
       <div className="dollar-sides">
         <div>
@@ -139,10 +185,11 @@ function Dollar({ s }: { s: State }) {
           <Delta v={chS} />
         </div>
       </div>
-      <Sparkline values={pts.map((p) => p.buy)} tone={tone(chB)} height={130} />
+      <AreaChart points={pts.map((p) => ({ t: p.t, v: p.buy }))} tone={tb === "down" ? "down" : tb === "up" ? "up" : "brand"} height={170}
+        fmt={(v) => money(v)} fmtT={hhmm} empty="Juntando precios…" />
       <div className="dollar-foot">
         <span>Diferencia <b>{buy && sell ? perUsd(buy - sell) : "—"}</b></span>
-        <span className="dim">últimas 24 h</span>
+        <span className="dim">precio de compra {spanTxt(span).replace("en ", "· últimas ")}</span>
       </div>
     </section>
   );
@@ -169,7 +216,7 @@ function CoinsPicker({ all, value, onChange, onClose }: { all: string[]; value: 
   );
 }
 
-function Coins({ s }: { s: State }) {
+function Coins({ s, span, onSpan }: { s: State; span: number; onSpan: (x: number) => void }) {
   const { hist } = useLive();
   const [coins, setCoins] = useCoins();
   const [pick, setPick] = useState(false);
@@ -179,11 +226,14 @@ function Coins({ s }: { s: State }) {
     <section className="dash-coins">
       <div className="dash-sec-head">
         <h2>Tus monedas</h2>
-        <button className="btn btn-sm btn-ghost" onClick={() => setPick(true)}><Icon name="pencil" size={14} /> Elegir</button>
+        <div className="dash-sec-act">
+          <Segmented label="Rango de las monedas" value={span} onChange={onSpan} options={SPANS} />
+          <button className="btn btn-sm btn-ghost" onClick={() => setPick(true)}><Icon name="pencil" size={14} /> Elegir</button>
+        </div>
       </div>
       <div className="coin-cards">
         {shown.map((a, i) => {
-          const pts = series(hist, a).filter((p) => p.t >= s.now - DAY);
+          const pts = smooth(series(hist, a), s.now - span, s.now, span === 3600 ? 30 : 60);
           const price = s.p2p?.market[a]?.BUY?.[0]?.price ?? pts[pts.length - 1]?.buy ?? null;
           const ch = change(pts.map((p) => p.buy));
           return (
@@ -194,7 +244,7 @@ function Coins({ s }: { s: State }) {
                 <Delta v={ch} />
               </div>
               <div className="coin-card-price">{money(price, isDollar(a) || (price ?? 0) < 1e5 ? 2 : 0)}</div>
-              <Sparkline values={pts.map((p) => p.buy)} tone={tone(ch)} />
+              <Sparkline values={pts.map((p) => p.buy)} tone={toneOf(ch)} />
             </div>
           );
         })}
@@ -334,14 +384,15 @@ function Now({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
 /** Inicio: tu capital, el dólar, tus monedas, tu rendimiento y lo mejor de ahora, de un vistazo. */
 export function Dashboard({ onTab }: { onTab: (t: TabId) => void }) {
   const { state } = useLive();
+  const [span, setSpan] = useState<number>(DAY);
   if (!state) return null;
   return (
     <div className="dash">
       <div className="dash-row hero">
         <Capital s={state} onTab={onTab} />
-        <Dollar s={state} />
+        <Dollar s={state} span={span} onSpan={setSpan} />
       </div>
-      <Coins s={state} />
+      <Coins s={state} span={span} onSpan={setSpan} />
       <div className={`dash-row ${state.connected ? "perf" : ""}`}>
         <Performance s={state} onTab={onTab} />
         <Split s={state} />

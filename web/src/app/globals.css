@@ -1839,3 +1839,6 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
 
 /* en celular el sidebar se esconde: se abre con el botón ☰ */
 @media (max-width: 1024px) { .shell > .side { display: none; } }
+.dash-note { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.dash-sec-act { display: flex; align-items: center; gap: 8px; }
+.dash-dollar .area-chart { margin-top: 14px; }

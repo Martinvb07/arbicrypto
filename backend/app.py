@@ -969,8 +969,8 @@ balances = {}                 # {uid: [{"t", "fiat", "usdt"}]} (se carga de a un
 
 
 def balance_points(uid):
-    if uid not in balances:
-        balances[uid] = store.load(f"balhist_{uid}", None) or []
+    # siempre del almacenamiento: con varias copias del panel, la que guarda no es siempre la que responde
+    balances[uid] = store.load(f"balhist_{uid}", None) or []
     return balances[uid]
 
 
