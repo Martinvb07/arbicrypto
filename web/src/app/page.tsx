@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Header, Nav, TABS, type TabId } from "@/components/Header";
+import { Sidebar, TABS, Topbar, type TabId } from "@/components/Header";
 import { Logo } from "@/components/ui";
 import { Account } from "@/components/tabs/Account";
 import { AdSim } from "@/components/tabs/AdSim";
@@ -60,9 +60,11 @@ function App() {
     <>
       <Splash text="Abriendo el panel" sub="Conectando con Binance en vivo" show={!state} />
       <ConfirmHost />
-      <Header onTab={go} />
-      <Nav tab={tab} onTab={go} />
-      <main className="wrap">
+      <div className="shell">
+      <Sidebar tab={tab} onTab={go} />
+      <div className="shell-main">
+      <Topbar tab={tab} onTab={go} />
+      <main className="wrap page-in" key={tab}>
         <Banners />
         {noWallet && (
           <div className="banner err">
@@ -91,6 +93,8 @@ function App() {
         <Logo size={22} />
         <span>ArbiCrypto · datos en vivo de Binance · confirma el precio antes de pagar</span>
       </footer>
+      </div>
+      </div>
     </>
   );
 }

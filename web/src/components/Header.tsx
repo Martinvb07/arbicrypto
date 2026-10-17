@@ -7,19 +7,19 @@ import { goWithSplash } from "./splash";
 import { avatarImage, chatUnread, useChat } from "@/lib/chat";
 import { useLive } from "@/lib/live";
 import { Menu, Modal, Sheet } from "./overlay";
-import { Ago, Brand, Icon, PasswordInput, UserAvatar, useThumb, type IconName } from "./ui";
+import { Ago, Brand, Icon, PasswordInput, UserAvatar, type IconName } from "./ui";
 
 export type TabId = "inicio" | "vender" | "mercado" | "anuncios" | "historial" | "chat" | "cuenta" | "equipo";
 
-export const TABS: { id: TabId; label: string; icon: IconName; admin?: boolean }[] = [
-  { id: "mercado", label: "Precios P2P", icon: "chart" },  // la principal: abre aquí
-  { id: "vender", label: "¿Dónde vendo?", icon: "target" },
-  { id: "inicio", label: "Arbitraje", icon: "bolt" },
-  { id: "anuncios", label: "Simular anuncios", icon: "megaphone" },
-  { id: "historial", label: "Historial", icon: "clock" },
-  { id: "chat", label: "Chat", icon: "chat" },
-  { id: "cuenta", label: "Mi Binance", icon: "wallet" },
-  { id: "equipo", label: "Equipo", icon: "users" },
+export const TABS: { id: TabId; label: string; icon: IconName; sub: string; group?: "cuenta"; admin?: boolean }[] = [
+  { id: "mercado", label: "Precios P2P", icon: "chart", sub: "Compradores y vendedores de Binance P2P en pesos, en vivo" },  // la principal: abre aquí
+  { id: "vender", label: "¿Dónde vendo?", icon: "target", sub: "Tus monedas, cuánto te costaron y cuánto ganas si vendes ya" },
+  { id: "inicio", label: "Arbitraje", icon: "bolt", sub: "Comprar barato y vender más caro, con todos los costos" },
+  { id: "anuncios", label: "Simular anuncios", icon: "megaphone", sub: "Cuánto ganas publicando tus propios anuncios" },
+  { id: "historial", label: "Historial", icon: "clock", sub: "Oportunidades pasadas y las mejores horas" },
+  { id: "chat", label: "Chat", icon: "chat", sub: "Habla con tu equipo", group: "cuenta" },
+  { id: "cuenta", label: "Mi Binance", icon: "wallet", sub: "Tus saldos y órdenes, solo los ves tú", group: "cuenta" },
+  { id: "equipo", label: "Equipo", icon: "users", sub: "Tu equipo, solicitudes e invitaciones", group: "cuenta" },
 ];
 
 // ---------------------------------------------------------------- avisos (en la barra)
@@ -159,12 +159,128 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ---------------------------------------------------------------- tema
+
+type Theme = "light" | "dark";
+function useTheme(): [Theme, (t: Theme) => void] {
+  const [theme, setThemeState] = useState<Theme>("dark");
+  useEffect(() => {
+    const root = document.documentElement;
+    setThemeState(root.dataset.theme ? (root.dataset.theme as Theme) : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  }, []);
+  const setTheme = (t: Theme) => {
+    document.documentElement.dataset.theme = t;
+    setThemeState(t);
+    try {
+      localStorage.setItem("theme", t);
+    } catch {
+      /* sin almacenamiento */
+    }
+  };
+  return [theme, setTheme];
+}
+
+async function logout() {
+  // en el VPS el login vive en la portada (arbicrypto.org/login)
+  const r = await api.logout().catch(() => undefined);
+  window.location.href = r?.login || "/login";
+}
+
+/** Insignia de pendientes al lado de una sección (chat sin leer, solicitudes del equipo). */
+function useCounts() {
+  const { state } = useLive();
+  const unread = chatUnread(useChat().summary);
+  const waiting = state?.my_team?.waiting ?? 0;
+  return (t: TabId) => (t === "chat" && unread > 0 ? <span className="count" aria-label={`${unread} sin leer`}>{unread > 99 ? "99+" : unread}</span>
+    : t === "equipo" && waiting > 0 ? <span className="count" aria-label={`${waiting} por responder`}>{waiting}</span> : null);
+}
+
+/** Estado de la conexión con Binance. */
+function LiveBadge() {
+  const { state, offline } = useLive();
+  const errors = state ? Object.keys(state.errors).length : 0;
+  const cls = offline || !state ? "" : errors ? "warn" : "ok";
+  return (
+    <span className={`live ${cls}`} title="Conexión con Binance">
+      <span className="dot" />
+      <b>{offline ? "SIN CONEXIÓN" : !state ? "CONECTANDO" : errors ? "CON ERRORES" : "EN VIVO"}</b>
+      {state && !offline && <span className="live-txt">· <Ago t={Math.max(state.spot?.t ?? 0, state.p2p?.t ?? 0)} /></span>}
+    </span>
+  );
+}
+
+/** Las secciones en lista vertical (la usan el sidebar y el menú del celular). */
+function SideNav({ tab, onTab, onPick }: { tab: TabId; onTab: (t: TabId) => void; onPick?: () => void }) {
+  const { state } = useLive();
+  const admin = state?.user?.role === "admin";
+  const tabs = TABS.filter((t) => !t.admin || admin);
+  const count = useCounts();
+  const main = tabs.filter((t) => t.group !== "cuenta");
+  const more = tabs.filter((t) => t.group === "cuenta");
+  const item = (t: (typeof TABS)[number]) => (
+    <button key={t.id} className={tab === t.id ? "on" : ""} aria-current={tab === t.id ? "page" : undefined}
+      onClick={() => { onTab(t.id); onPick?.(); }}>
+      <span className="side-ico"><Icon name={t.icon} size={18} /></span>
+      <span className="side-lbl">{t.label}</span>
+      {count(t.id)}
+    </button>
+  );
+  return (
+    <nav className="side-nav" aria-label="Secciones">
+      <small className="side-group">Mercado</small>
+      {main.map(item)}
+      <small className="side-group">Tu cuenta</small>
+      {more.map(item)}
+      {state?.user && state.user.access !== "panel" && (
+        <button onClick={() => goWithSplash("/wallet", "Abriendo tu wallet", "Contabilidad y declaración")}>
+          <span className="side-ico"><Icon name="book" size={18} /></span>
+          <span className="side-lbl">Wallet</span>
+          <Icon name="external" size={13} className="side-ext" />
+        </button>
+      )}
+    </nav>
+  );
+}
+
+function ThemeSwitch() {
+  const [theme, setTheme] = useTheme();
+  return (
+    <div className="theme-sw" role="radiogroup" aria-label="Tema">
+      <span className="theme-thumb" style={{ transform: theme === "dark" ? "translateX(100%)" : "none" }} aria-hidden="true" />
+      <button role="radio" aria-checked={theme === "light"} className={theme === "light" ? "on" : ""} onClick={() => setTheme("light")}><Icon name="sun" size={15} /> Claro</button>
+      <button role="radio" aria-checked={theme === "dark"} className={theme === "dark" ? "on" : ""} onClick={() => setTheme("dark")}><Icon name="moon" size={15} /> Oscuro</button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- sidebar (escritorio)
+
+export function Sidebar({ tab, onTab }: { tab: TabId; onTab: (t: TabId) => void }) {
+  return (
+    <aside className="side">
+      <a href="#mercado" className="side-brand" onClick={() => onTab("mercado")}><Brand /></a>
+      <SideNav tab={tab} onTab={onTab} />
+      <div className="side-foot">
+        <ThemeSwitch />
+        <button className="side-out" onClick={() => void logout()}><Icon name="logout" size={17} /> Cerrar sesión</button>
+      </div>
+    </aside>
+  );
+}
+
 // ---------------------------------------------------------------- barra superior
 
-export function Header({ onTab }: { onTab: (t: TabId) => void }) {
-  const { state, offline, refresh, toast } = useLive();
+const TODAY = new Intl.DateTimeFormat("es-CO", { weekday: "long", day: "numeric", month: "long" });
+
+export function Topbar({ tab, onTab }: { tab: TabId; onTab: (t: TabId) => void }) {
+  const { state, refresh, toast } = useLive();
   const photoInput = useRef<HTMLInputElement>(null);
+  const [menu, setMenu] = useState(false);
+  const [today, setToday] = useState("");
+  useEffect(() => setToday(TODAY.format(new Date())), []);
+  const unread = chatUnread(useChat().summary);
   const myPhoto = state?.user ? state.avatars?.[state.user.name] : undefined;
+  const cur = TABS.find((t) => t.id === tab) ?? TABS[0];
   const pickPhoto = async (file: File | undefined) => {
     if (!file) return;
     try {
@@ -184,122 +300,64 @@ export function Header({ onTab }: { onTab: (t: TabId) => void }) {
     }
   };
   const [modal, setModal] = useState<"telegram" | "password" | null>(null);
-  const errors = state ? Object.keys(state.errors).length : 0;
-  const liveCls = offline || !state ? "" : errors ? "warn" : "ok";
-
-  const toggleTheme = () => {
-    const root = document.documentElement;
-    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-    root.dataset.theme = dark ? "light" : "dark";
-    try {
-      localStorage.setItem("theme", root.dataset.theme);
-    } catch {
-      /* sin almacenamiento */
-    }
-  };
-  const logout = async () => {
-    // en el VPS el login vive en la portada (arbicrypto.org/login)
-    const r = await api.logout().catch(() => undefined);
-    window.location.href = r?.login || "/login";
-  };
 
   return (
-    <header className="top">
-      <div className="wrap top-in">
-        <a href="#mercado" onClick={() => onTab("mercado")} style={{ textDecoration: "none" }}><Brand /></a>
-        <span className={`live ${liveCls}`} title="Conexión con Binance">
-          <span className="dot" />
-          <b>{offline ? "SIN CONEXIÓN" : !state ? "CONECTANDO" : errors ? "CON ERRORES" : "EN VIVO"}</b>
-          {state && !offline && <span className="live-txt">· <Ago t={Math.max(state.spot?.t ?? 0, state.p2p?.t ?? 0)} /></span>}
-        </span>
-        <div className="actions">
-          <AlertsMenu onTelegram={() => setModal("telegram")} />
-          <button className="icon-btn" id="btn-theme" onClick={toggleTheme} title="Tema claro u oscuro" aria-label="Cambiar tema">
-            <Icon name="moon" size={17} />
-          </button>
-          {state?.user && (
-            <Menu label="Menú de usuario" buttonClass="btn btn-sm user-btn"
-              button={<><UserAvatar name={state.user.name} src={myPhoto} /><span className="lbl">{state.user.name}</span><Icon name="chevronDown" size={14} className="user-caret" /></>}>
-              {(close) => (
-                <>
-                  <div className="menu-who menu-who-photo">
-                    <UserAvatar name={state.user.name} src={myPhoto} size={42} />
-                    <div>
-                      <b>{state.user.name}</b>
-                      <span className="sub">{state.user.role === "admin" ? "Administrador" : "Miembro"}{state.my_team?.name ? ` · ${state.my_team.name}` : " · sin equipo"}</span>
-                    </div>
-                  </div>
-                  {/* su propia wallet (wallet.arbicrypto.org), con esta misma sesión */}
-                  {state.user.access !== "panel" && <button onClick={() => { close(); goWithSplash("/wallet", "Abriendo tu wallet", "Contabilidad y declaración"); }}><Icon name="wallet" size={16} /> Wallet</button>}
-                  <button onClick={() => { close(); photoInput.current?.click(); }}><Icon name="pencil" size={16} /> {myPhoto ? "Cambiar foto" : "Poner foto de perfil"}</button>
-                  {myPhoto && <button onClick={() => { close(); void removePhoto(); }}><Icon name="trash" size={16} /> Quitar foto</button>}
-                  <button onClick={() => { close(); setModal("password"); }}><Icon name="key" size={16} /> Cambiar contraseña</button>
-                  {state.user.role === "admin" && <button onClick={() => { close(); onTab("equipo"); }}><Icon name="ticket" size={16} /> Invitar al equipo</button>}
-                  <button onClick={() => void logout()}><Icon name="logout" size={16} /> Cerrar sesión</button>
-                </>
-              )}
-            </Menu>
-          )}
-          <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" hidden
-            onChange={(e) => { void pickPhoto(e.target.files?.[0]); e.target.value = ""; }} />
-        </div>
+    <header className="topbar">
+      <button className="icon-btn topbar-burger" onClick={() => setMenu(true)} aria-label="Abrir menú de secciones" aria-expanded={menu}>
+        <Icon name="menu" size={20} />
+      </button>
+      <div className="topbar-title" key={tab}>
+        <h1>{cur.label}</h1>
+        <p>{cur.sub}</p>
       </div>
-      {modal === "telegram" && <TelegramModal onClose={() => setModal(null)} />}
-      {modal === "password" && <PasswordModal onClose={() => setModal(null)} />}
-    </header>
-  );
-}
-
-export function Nav({ tab, onTab }: { tab: TabId; onTab: (t: TabId) => void }) {
-  const { state } = useLive();
-  const admin = state?.user?.role === "admin";
-  // Mi Binance es de todos: cada usuario ve solo su propia cuenta
-  const tabs = TABS.filter((t) => !t.admin || admin);
-  const nav = useRef<HTMLElement>(null);
-  const [menu, setMenu] = useState(false);
-  const cur = tabs.find((t) => t.id === tab) ?? tabs[0];
-  const thumb = useThumb(nav, tabs.findIndex((t) => t.id === tab));
-  const unread = chatUnread(useChat().summary);
-  const waiting = state?.my_team?.waiting ?? 0;
-  const count = (t: TabId) => (t === "chat" && unread > 0 ? <span className="count" aria-label={`${unread} sin leer`}>{unread > 99 ? "99+" : unread}</span>
-    : t === "equipo" && waiting > 0 ? <span className="count" aria-label={`${waiting} por responder`}>{waiting}</span> : null);
-  useEffect(() => {
-    nav.current?.querySelector<HTMLElement>("button.on")?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
-  }, [tab]);
-  return (
-    <div className="nav-wrap">
-      <nav className="wrap nav" aria-label="Secciones" ref={nav}>
-        {thumb && <span className="nav-thumb" style={thumb} aria-hidden="true" />}
-        {tabs.map((t) => (
-          <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => onTab(t.id)} aria-current={tab === t.id ? "page" : undefined}>
-            <Icon name={t.icon} size={17} />
-            {t.label}
-            {count(t.id)}
-          </button>
-        ))}
-      </nav>
-      {/* celular: una sola barra con la sección actual que abre el menú */}
-      <div className="wrap nav-mobile">
-        <button className="nav-burger" onClick={() => setMenu(true)} aria-label="Abrir menú de secciones" aria-expanded={menu}>
-          <Icon name="menu" size={20} />
-          <span className="nav-burger-cur"><Icon name={cur.icon} size={17} /> {cur.label}</span>
-          {cur.id !== "chat" && count("chat")}
-          <Icon name="chevronDown" size={16} />
+      <div className="topbar-act">
+        {today && <span className="topbar-today"><Icon name="calendar" size={15} /> Hoy, {today}</span>}
+        <LiveBadge />
+        <AlertsMenu onTelegram={() => setModal("telegram")} />
+        <button className={`icon-btn topbar-chat ${tab === "chat" ? "on" : ""}`} onClick={() => onTab("chat")} title="Chat" aria-label="Chat">
+          <Icon name="chat" size={18} />
+          {unread > 0 && <span className="topbar-dot" aria-label={`${unread} sin leer`} />}
         </button>
+        {state?.user && (
+          <Menu label="Menú de usuario" buttonClass="btn btn-sm user-btn"
+            button={<><UserAvatar name={state.user.name} src={myPhoto} /><span className="lbl">{state.user.name}</span><Icon name="chevronDown" size={14} className="user-caret" /></>}>
+            {(close) => (
+              <>
+                <div className="menu-who menu-who-photo">
+                  <UserAvatar name={state.user.name} src={myPhoto} size={42} />
+                  <div>
+                    <b>{state.user.name}</b>
+                    <span className="sub">{state.user.role === "admin" ? "Administrador" : "Miembro"}{state.my_team?.name ? ` · ${state.my_team.name}` : " · sin equipo"}</span>
+                  </div>
+                </div>
+                {/* su propia wallet (wallet.arbicrypto.org), con esta misma sesión */}
+                {state.user.access !== "panel" && <button onClick={() => { close(); goWithSplash("/wallet", "Abriendo tu wallet", "Contabilidad y declaración"); }}><Icon name="wallet" size={16} /> Wallet</button>}
+                <button onClick={() => { close(); photoInput.current?.click(); }}><Icon name="pencil" size={16} /> {myPhoto ? "Cambiar foto" : "Poner foto de perfil"}</button>
+                {myPhoto && <button onClick={() => { close(); void removePhoto(); }}><Icon name="trash" size={16} /> Quitar foto</button>}
+                <button onClick={() => { close(); setModal("password"); }}><Icon name="key" size={16} /> Cambiar contraseña</button>
+                {state.user.role === "admin" && <button onClick={() => { close(); onTab("equipo"); }}><Icon name="ticket" size={16} /> Invitar al equipo</button>}
+                <button onClick={() => void logout()}><Icon name="logout" size={16} /> Cerrar sesión</button>
+              </>
+            )}
+          </Menu>
+        )}
+        <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" hidden
+          onChange={(e) => { void pickPhoto(e.target.files?.[0]); e.target.value = ""; }} />
       </div>
       {menu && (
-        <Sheet side="left" title="Secciones" onClose={() => setMenu(false)}>
-          <div className="drawer-list">
-            {tabs.map((t) => (
-              <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => { onTab(t.id); setMenu(false); }}>
-                <Icon name={t.icon} size={19} /> {t.label}
-                {count(t.id)}
-                {tab === t.id && <Icon name="check" size={16} className="drawer-check" />}
-              </button>
-            ))}
+        <Sheet side="left" title={<span className="drawer-brand"><Brand /></span>} onClose={() => setMenu(false)}>
+          <div className="drawer-side">
+            <LiveBadge />
+            <SideNav tab={tab} onTab={onTab} onPick={() => setMenu(false)} />
+            <div className="side-foot">
+              <ThemeSwitch />
+              <button className="side-out" onClick={() => void logout()}><Icon name="logout" size={17} /> Cerrar sesión</button>
+            </div>
           </div>
         </Sheet>
       )}
-    </div>
+      {modal === "telegram" && <TelegramModal onClose={() => setModal(null)} />}
+      {modal === "password" && <PasswordModal onClose={() => setModal(null)} />}
+    </header>
   );
 }
