@@ -80,6 +80,7 @@ ALERT_COOLDOWN = 300              # no repetir el mismo aviso antes de 5 minutos
 SPOT_INTERVAL, P2P_INTERVAL = 2, 1  # Spot usa precios en vivo por WebSocket; P2P no tiene, se consulta seguido
 P2P_ALWAYS = ["USDT"]  # se revisa en cada vuelta; el resto por turnos (Binance bloquea con 429 si se consulta todo cada segundo)
 HISTORY_EVERY = 20  # el grafico del dia guarda un punto cada 20 s aunque P2P se revise mas seguido
+HISTORY_SAVE_EVERY = 300  # y se escribe a la base cada 5 min: reescribir las 24 h cada 20 s llenaba el disco de MySQL
 REST_REFRESH = 30                     # foto completa de precios Spot cada 30 s (respaldo y saldos)
 REAL_PRICE_NEAR = -0.001              # rutas Spot a menos de 0,1 % de dar ganancia se miden con el libro completo
 PUBLISH_EVERY = 5                     # refresco de pantallas por cambios de Spot
@@ -135,6 +136,7 @@ acc_state = {}   # {usuario: saldos, comision y ordenes de su cuenta}
 acc_errors = {}  # {usuario: {"t", "msg"}} si su cuenta no se pudo leer
 graph = {}
 history = []
+history_saved = [0.0]  # cuándo se escribió el historial por última vez
 p2p_cache = {"market": {}, "turn": 0}  # ultimos anuncios de cada cripto
 prefs = {}  # {usuario: {"capital": pesos}}
 by_capital = {}  # {capital: {"routes", "conversions", "found"}} calculado en cada escaneo P2P
@@ -615,7 +617,9 @@ def p2p_step():
             history.append(point)
             while history and history[0]["t"] < now - HISTORY_SECONDS:
                 history.pop(0)
-            snapshot = list(history)
+            if now - history_saved[0] >= HISTORY_SAVE_EVERY:
+                history_saved[0] = now
+                snapshot = list(history)
     if snapshot is not None:
         save_json(HISTORY_FILE, snapshot)
 

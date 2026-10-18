@@ -141,6 +141,7 @@ class Store:
     def __init__(self, data_dir, sql=None):
         self.dir = data_dir
         self.sql = sql if sql is not None and sql.mysql else None
+        self._saved = {}  # {nombre: json}: lo último escrito, para no repetir escrituras iguales
         if self.sql:  # LONGTEXT: el historial del dia pesa varios cientos de KB
             self.sql.script("CREATE TABLE IF NOT EXISTS kv (name VARCHAR(191) PRIMARY KEY, value LONGTEXT NOT NULL, updated DOUBLE NOT NULL)")
 
@@ -162,8 +163,12 @@ class Store:
 
     def save(self, name, data):
         if self.sql:
+            value = json.dumps(data)
+            if self._saved.get(name) == value:  # igual a lo último que guardó esta copia: no se reescribe
+                return
             self.sql.run(self.sql.upsert("kv", ("name", "value", "updated"), ("name",), {"value": "new", "updated": "new"}),
-                         (name, json.dumps(data), time.time()))
+                         (name, value, time.time()))
+            self._saved[name] = value
             return
         tmp = self.path(name) + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
