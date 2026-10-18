@@ -65,7 +65,9 @@ interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; r
   /** compra: pagaste `cost` y te llegó `qty` (no tiene ganancia; su 4x1000 se reparte en las ventas que salgan de ella) */
   buy?: boolean; method?: string; counterpart?: string;
   /** compra: cuánto queda sin vender y a cuánto vender para no perder */
-  left?: number; even?: number | null }
+  left?: number; even?: number | null;
+  /** compra: precio por unidad al que compraste en Binance (con lo que pagaste y la cantidad antes de la comisión) */
+  price?: number }
 
 type Show = "todas" | "compras" | "gana" | "pierde" | "ocultas";
 const PAGE = 50;
@@ -247,8 +249,9 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
     const feeQty = (x: number) => Math.min(x, Math.max((p2p?.fee ?? 0) * x, ["USDT", "USDC", "FDUSD"].includes(asset) ? p2p?.min_usd ?? 0 : 0));
     const left = Math.max(q - (usedOf.get(m.id) ?? 0), 0);
     const even = q > 0 ? (cost + g) / (q - feeQty(q)) : null;
+    const gross = q + (m.fee_qty || 0);  // la comisión ya salió de in_qty: el precio de la orden va sobre lo que compraste
     return { key: `b${m.id}`, id: m.id, t: m.t, kind: m.kind, asset, qty: q, received: null, cost, gross: 0, fee: 0, gain: 0, missing: false,
-      gmf: g, net: 0, sources: [], buy: true, method: m.pay_method, counterpart: m.counterpart, left, even };
+      gmf: g, net: 0, sources: [], buy: true, method: m.pay_method, counterpart: m.counterpart, left, even, price: gross > 0 ? cost / gross : 0 };
   }), [buys, usedOf, market]);
   const listed = show === "ocultas" ? thirdOps : show === "compras" ? buyOps
     : show === "todas" ? [...inPeriod, ...buyOps].sort((p, q) => q.t - p.t)
@@ -494,7 +497,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                             </span>
                             {o.qty > 0 && (
                               <span className="cell-sub op-prices">
-                                {o.buy ? <>Compraste a <b>{unitPrice(o.cost / o.qty)}</b></> : <>Vendiste a <b>{unitPrice(o.gross / o.qty)}</b></>} por {o.asset}
+                                {o.buy ? <>Compraste a <b>{unitPrice(o.price || o.cost / o.qty)}</b></> : <>Vendiste a <b>{unitPrice(o.gross / o.qty)}</b></>} por {o.asset}
                                 {o.method ? ` · ${o.method}` : ""}{o.counterpart ? ` · ${o.counterpart}` : ""}
                               </span>
                             )}
@@ -516,7 +519,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                               <Asset asset={o.asset} qty={qty(o.qty)} />
                               <HideBtn onClick={() => void markThird(o, true)} />
                             </span>
-                            {o.qty > 0 && <span className="cell-sub op-prices">Compraste a <b>{unitPrice(o.cost / o.qty)}</b> por {o.asset}</span>}
+                            {o.qty > 0 && <span className="cell-sub op-prices">Compraste a <b>{unitPrice(o.price || o.cost / o.qty)}</b> por {o.asset}</span>}
                             <span className="cell-sub">{o.method ?? ""}{o.counterpart ? ` · a ${o.counterpart}` : ""}</span>
                             {o.even != null && (
                               <span className="cell-sub buy-even">
