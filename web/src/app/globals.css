@@ -1863,14 +1863,3 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
   100% { opacity: 1; transform: none; }
 }
 
-/* cómo va tu Binance: el % y una frase, sin montos */
-.dash-capital.mood-up { background: radial-gradient(120% 90% at 0% 0%, var(--up-soft), transparent 55%), var(--surface); }
-.dash-capital.mood-down { background: radial-gradient(120% 90% at 0% 0%, var(--down-soft), transparent 55%), var(--surface); }
-.mood-title { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 19px; font-weight: 720; letter-spacing: -.01em; }
-.mood-emoji { font-size: 24px; line-height: 1; }
-.mood-pct { display: inline-flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 40px; font-weight: 800; letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; color: var(--muted); }
-.mood-pct.up { color: var(--up); }
-.mood-pct.down { color: var(--down); }
-.mood-pct .flip { transform: scaleY(-1); }
-.mood-sub { margin: 6px 0 0; font-size: 13.5px; color: var(--muted); max-width: 520px; }
-@media (max-width: 640px) { .mood-pct { font-size: 32px; } .mood-title { font-size: 17px; } }

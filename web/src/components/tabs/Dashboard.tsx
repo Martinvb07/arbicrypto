@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api } from "@/lib/api";
 import { COIN_NAMES, isDollar, series } from "@/lib/calc";
-import { hhmm, money, pct, perUsd, signedMoney, tone } from "@/lib/format";
+import { hhmm, money, num, pct, perUsd, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { State } from "@/lib/types";
 import type { TabId } from "../Header";
@@ -77,19 +77,6 @@ function useCoins(): [string[], (c: string[]) => void] {
 
 // ---------------------------------------------------------------- capital en Binance
 
-/** Frase según cuánto se movió lo que tienes. */
-function mood(ch: number | null): { emoji: string; title: string } {
-  if (ch == null) return { emoji: "⏳", title: "Juntando precios para ver cómo vas" };
-  const v = ch * 100;
-  if (v >= 3) return { emoji: "🚀", title: "¡Tu Binance está volando!" };
-  if (v >= 0.5) return { emoji: "📈", title: "Tu Binance va subiendo" };
-  if (v >= 0.05) return { emoji: "🌱", title: "Sube poquito, pero sube" };
-  if (v > -0.05) return { emoji: "⚖️", title: "Tu Binance está tranquilo" };
-  if (v > -0.5) return { emoji: "🌤️", title: "Baja un poquito, nada grave" };
-  if (v > -3) return { emoji: "📉", title: "Tu Binance va bajando" };
-  return { emoji: "🧊", title: "Día rojo en tu Binance, respira" };
-}
-
 function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
   const { hist } = useLive();
   const [range, setRange] = useState<number>(DAY);
@@ -115,10 +102,7 @@ function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
       }
       return { t, v };
     });
-    // la moneda que más empujó (en pesos), para contarlo en la frase
-    const movers = series_.map(([a, p]) => ({ a, ch: change(p.map((x) => x.sell)), push: (qty.get(a) ?? 0) * (p[p.length - 1].sell - p[0].sell) }));
-    const top = movers.filter((m) => m.ch != null && Math.abs(m.push) > 0).sort((x, y) => Math.abs(y.push) - Math.abs(x.push))[0] ?? null;
-    return { vals, top };
+    return { vals };
   }, [acc, hist, s.now, range]);
 
   if (!s.connected) {
@@ -133,42 +117,34 @@ function Capital({ s, onTab }: { s: State; onTab: (t: TabId) => void }) {
       </section>
     );
   }
-  const vals = perf?.vals ?? [];
+  // el último punto empalma con tu saldo de ahora, para que la gráfica y el número grande digan lo mismo
+  const raw = perf?.vals ?? [];
+  const k = acc?.total_fiat && raw.length ? acc.total_fiat / raw[raw.length - 1].v : 1;
+  const vals = raw.map((p) => ({ t: p.t, v: p.v * k }));
   const ch = change(vals.map((p) => p.v));
   const t = toneOf(ch);
-  const m = mood(ch);
-  const base = vals[0]?.v;
-  const top = perf?.top;
-  const when = range === DAY ? "hace 24 horas" : range === 6 * 3600 ? "hace 6 horas" : "hace una hora";
+  const diff = vals.length > 1 ? vals[vals.length - 1].v - vals[0].v : null;
   return (
-    <section className={`card dash-capital mood-${t}`}>
+    <section className="card dash-capital">
       <div className="dash-head">
         <div>
-          <small className="dash-label"><Icon name="wallet" size={14} /> Cómo va tu Binance</small>
-          <div className="mood-title"><span className="mood-emoji" aria-hidden="true">{m.emoji}</span> {m.title}</div>
-          <div className={`mood-pct ${t}`}>
-            <Icon name="trend" size={26} className={t === "down" ? "flip" : ""} />
-            {ch == null ? "—" : pct(ch)}
+          <small className="dash-label"><Icon name="wallet" size={14} /> Tu capital en Binance</small>
+          <div className="dash-big">{money(acc?.total_fiat, 0)} <small>≈ {num(acc?.total_usdt, 2)} USDT</small></div>
+          <div className="dash-meta">
+            <Delta v={ch} money={diff} />
+            <span className="dim">{range === DAY ? "en 24 h" : range === 6 * 3600 ? "en 6 h" : "en 1 h"}</span>
           </div>
-          <p className="mood-sub">
-            {ch == null
-              ? "En unos minutos verás aquí si lo que tienes sube o baja."
-              : t === "flat"
-                ? `Lo que tienes vale prácticamente lo mismo que ${when}.`
-                : `Lo que tienes vale ${pct(Math.abs(ch)).replace(/^[+−]/, "")} ${t === "up" ? "más" : "menos"} que ${when}.`}
-            {top && top.ch != null && t !== "flat" && ` ${top.push > 0 ? "Lo que más empuja" : "Lo que más pesa"}: ${top.a} (${pct(top.ch)}).`}
-          </p>
         </div>
         <Segmented label="Rango" value={range} onChange={setRange} options={[[3600, "1 h"], [6 * 3600, "6 h"], [DAY, "24 h"]] as const} />
       </div>
       <AreaChart points={vals} tone={t === "down" ? "down" : t === "up" ? "up" : "brand"}
-        fmt={(v) => (base ? pct(v / base - 1) : "—")} fmtT={hhmm}
+        fmt={(v) => money(v, 0)} fmtT={hhmm}
         empty={<span className="cap-empty">
           <Icon name="clock" size={20} />
           <b>La gráfica se arma sola</b>
           <span>Vamos guardando el precio de tus monedas; en unos minutos ves cómo se mueven.</span>
         </span>} />
-      <p className="dash-note"><Icon name="info" size={13} /> Solo cuenta cómo se mueve el precio de lo que tienes; depósitos, retiros y ventas no cambian el %.</p>
+      <p className="dash-note"><Icon name="info" size={13} /> Sube o baja según el precio de tus monedas; depósitos y retiros no cuentan.</p>
     </section>
   );
 }
