@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { advertiserUrl, bestDeal, COIN_NAMES, dayStats, effBuy, GOOD_FINISH, GOOD_ORDERS, isDollar, paysWith, perDollar, roundTrip, series, takesCapital } from "@/lib/calc";
+import { advertiserUrl, bestDeal, COIN_NAMES, dayStats, effBuy, GOOD_FINISH, GOOD_ORDERS, isDollar, paysWith, perDollar, roundTrip, series, takesMine, walletQty } from "@/lib/calc";
 import { money, num, pct, pctPlain, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, P2PStep, Route, Side, State } from "@/lib/types";
@@ -35,8 +35,11 @@ const every = (sec: number) => (sec >= 60 ? `${num(sec / 60, sec % 60 ? 1 : 0)} 
 /** Medios de un lado: los de pago al comprar, los de recibir al vender. */
 const methodsFor = (s: State, side: Side) => (side === "BUY" ? s.settings.pay_methods : s.settings.recv_methods) ?? [];
 
-/** ¿Este anuncio sirve con MI capital y MIS medios? */
-const forMe = (ad: Ad, s: State, side: Side) => takesCapital(ad, s.settings.capital) && paysWith(ad, methodsFor(s, side));
+/** ¿Este anuncio sirve con MI monto (al vender, lo de mi billetera) y MIS medios? */
+const forMe = (ad: Ad, s: State, asset: string, side: Side) => takesMine(ad, s, asset, side) && paysWith(ad, methodsFor(s, side));
+
+/** Lo que tienes para vender en tu billetera, en palabras: "152,30 USDT". */
+const holdTxt = (q: number, asset: string) => `${isDollar(asset) ? num(q, 2) : qty(q)} ${asset}`;
 
 type View = "mine" | "all" | "alerts";
 
@@ -318,7 +321,7 @@ function MineSide({ side, ad, asset, s, qtyHint }: { side: Side; ad: Ad | undefi
         <span className={`mkt-col-ico ${side}`}><Icon name={buy ? "cart" : "handCoins"} size={17} /></span>
         <div>
           <small>{buy ? "Le compras a" : "Le vendes a"}</small>
-          <b>{ad ? <ExtLink href={advertiserUrl(ad)}>{ad.nick}</ExtLink> : "Nadie acepta tu capital"}</b>
+          <b>{ad ? <ExtLink href={advertiserUrl(ad)}>{ad.nick}</ExtLink> : buy || !walletQty(s, asset) ? "Nadie acepta tu capital" : "Nadie acepta tu saldo"}</b>
         </div>
       </div>
       {ad ? (
@@ -335,7 +338,7 @@ function MineSide({ side, ad, asset, s, qtyHint }: { side: Side; ad: Ad | undefi
           </GoButton>
         </>
       ) : (
-        <p className="dim small">Prueba con otro capital o agrega más medios de pago.</p>
+        <p className="dim small">{buy || !walletQty(s, asset) ? "Prueba con otro capital o agrega más medios de pago." : "Ningún comprador acepta todo lo que tienes de una vez: mira Todos los anuncios."}</p>
       )}
     </div>
   );
@@ -346,17 +349,20 @@ function MineView({ s, asset, onCoin }: { s: State; asset: string; onCoin: (a: s
   const m = s.p2p?.market[asset];
   const r = directRoute(s, asset);
   const [bStep, sStep] = (r?.steps ?? []) as P2PStep[];
-  const buyAd = bStep?.ad ?? m?.BUY.find((a) => forMe(a, s, "BUY"));
-  const sellAd = sStep?.ad ?? m?.SELL.find((a) => forMe(a, s, "SELL"));
+  const buyAd = bStep?.ad ?? m?.BUY.find((a) => forMe(a, s, asset, "BUY"));
+  const sellAd = sStep?.ad ?? m?.SELL.find((a) => forMe(a, s, asset, "SELL"));
   const row = r && p2pRow(s, r);
   const wins = !!r && r.profit_fiat > 0;
   const cap = money(s.settings.capital, 0);
   const coins = s.settings.p2p_assets
     .map((a) => ({ a, r: directRoute(s, a) }))
     .sort((x, y) => (y.r?.profit_fiat ?? -Infinity) - (x.r?.profit_fiat ?? -Infinity));
-  const mineAds = (side: Side) => (m?.[side] ?? []).filter((a) => forMe(a, s, side));
+  const mineAds = (side: Side) => (m?.[side] ?? []).filter((a) => forMe(a, s, asset, side));
   const nPay = s.settings.pay_methods?.length ?? 0;
   const nRecv = s.settings.recv_methods?.length ?? 0;
+  const held = walletQty(s, asset);
+  const walletAd = held ? m?.SELL.find((a) => forMe(a, s, asset, "SELL")) : undefined;
+  const sellTxt = held ? holdTxt(held, asset) : cap;
 
   return (
     <>
@@ -380,6 +386,24 @@ function MineView({ s, asset, onCoin }: { s: State; asset: string; onCoin: (a: s
         {r ? <Breakdown r={r} /> : <p className="dim small mine-none"><Icon name="info" size={14} /> No hay un par de anuncios que acepte {cap} con tus medios.</p>}
         {wins && row && <details className="mine-steps"><summary><Icon name="listChecks" size={15} /> Paso a paso con botones a Binance</summary><Steps row={row} s={s} /></details>}
       </section>
+
+      {held > 0 && (
+        <section className="card mine-card mine-wallet">
+          <div className="mkt-sec-head">
+            <div className="mkt-sec-title">
+              <span className="sec-ico green"><Icon name="wallet" /></span>
+              <div>
+                <h2>Vender lo que tienes: {holdTxt(held, asset)}</h2>
+                <p className="sub">Tu billetera de Binance (Spot + Fondos) · cuando la vacíes se vuelve a usar tu capital de {cap}</p>
+              </div>
+            </div>
+            {walletAd && <span className="badge good">Recibes {money(held * walletAd.price * (1 - (s.p2p_fee ?? 0)), 0)}</span>}
+          </div>
+          <div className="mine-pair one">
+            <MineSide side="SELL" ad={walletAd} asset={asset} s={s} />
+          </div>
+        </section>
+      )}
 
       <section className="card mine-coins">
         <div className="mkt-sec-head">
@@ -409,12 +433,12 @@ function MineView({ s, asset, onCoin }: { s: State; asset: string; onCoin: (a: s
             <span className="sec-ico"><Icon name="filter" /></span>
             <div>
               <h2>Anuncios para ti</h2>
-              <p className="sub">Aceptan {cap}{nPay || nRecv ? " y tus medios de pago" : ""}</p>
+              <p className="sub">Para comprar aceptan {cap}, para vender {held ? <>tus {sellTxt}</> : cap}{nPay || nRecv ? " · y tus medios de pago" : ""}</p>
             </div>
           </div>
         </div>
         <Book s={s} asset={asset} ads={{ BUY: mineAds("BUY"), SELL: mineAds("SELL") }}
-          empty={(k) => <EmptyBox icon="filter" title={`Ningún anuncio para ${k === "BUY" ? "comprar" : "vender"} acepta ${cap}${methodsFor(s, k).length ? " con tus medios" : ""}.`}>Mira <b>Todos los anuncios</b> o cambia tu capital.</EmptyBox>} />
+          empty={(k) => <EmptyBox icon="filter" title={`Ningún anuncio para ${k === "BUY" ? "comprar" : "vender"} acepta ${k === "SELL" ? sellTxt : cap}${methodsFor(s, k).length ? " con tus medios" : ""}.`}>Mira <b>Todos los anuncios</b> o cambia tu capital.</EmptyBox>} />
       </section>
     </>
   );
@@ -452,8 +476,9 @@ function OtherAmount({ s, asset }: { s: State; asset: string }) {
 function AdRow({ ad, asset, best, side, s, i }: { ad: Ad; asset: string; best: number; side: Side; s: State; i: number }) {
   const j = judge(ad, best, side, s);
   const top = ad.price === best;
-  const capital = s.settings.capital;
-  const fits = takesCapital(ad, capital);
+  const wallet = side === "SELL" && walletQty(s, asset) > 0; // al vender cuenta lo que tienes en Binance
+  const fits = takesMine(ad, s, asset, side);
+  const what = wallet ? "tu saldo" : "tu capital";
   const mineM = methodsFor(s, side);
   const unit = isDollar(asset) ? "por dólar" : `por ${asset}`;
   const url = advertiserUrl(ad);
@@ -487,10 +512,10 @@ function AdRow({ ad, asset, best, side, s, i }: { ad: Ad; asset: string; best: n
       </dl>
 
       <footer className="ad-foot">
-        <span className={`ad-limit ${fits ? "ok" : "no"}`} title={fits ? "Acepta tu capital" : "Tu capital está fuera de su límite"}>
+        <span className={`ad-limit ${fits ? "ok" : "no"}`} title={fits ? `Acepta ${what}` : `${wallet ? "Tu saldo" : "Tu capital"} está fuera de su límite`}>
           <Icon name={fits ? "checkCircle" : "alert"} size={15} />
           <span className="ad-limit-txt">
-            <small>{fits ? "Acepta tu capital" : "Fuera de tu capital"}</small>
+            <small>{fits ? `Acepta ${what}` : `Fuera de ${what}`}</small>
             {money(ad.min, 0)} – {money(ad.max, 0)}
           </span>
         </span>
@@ -607,7 +632,10 @@ export function Market() {
   const route: Route | undefined = directRoute(state, asset);
   const [bStep, sStep] = (route?.steps ?? []) as P2PStep[];
   const netBuy = route && bStep ? (route.paid + route.costs.gmf + (route.costs.bank ?? 0)) / bStep.qty : effBuy(buy, state); // con 4x1000 y transferencia
-  const netSell = route && sStep ? route.received / sStep.qty : sell;
+  // al vender cuenta lo que tienes en tu billetera de Binance; si no tienes nada, tu capital
+  const held = walletQty(state, asset);
+  const walletAd = held ? m?.SELL.find((a) => forMe(a, state, asset, "SELL")) : undefined;
+  const netSell = held ? (walletAd ? walletAd.price * (1 - (state.p2p_fee ?? 0)) : sell) : route && sStep ? route.received / sStep.qty : sell;
   const rt = route ? route.per_usd : roundTrip(state, asset);
   const cap = money(st.capital, 0);
   const alerts = state.price_alerts ?? [];
@@ -635,6 +663,11 @@ export function Market() {
           </div>
           <div className="toolbar mkt-tools">
             <CapitalField />
+            {held > 0 && (
+              <span className="chip-static mkt-held" title="Al vender se usa lo que tienes en tu billetera de Binance (Spot + Fondos). Cuando no tengas nada, se vuelve a usar tu capital.">
+                <Icon name="wallet" size={14} /> Vendes {holdTxt(held, asset)}
+              </span>
+            )}
             <button className="btn mkt-tool-btn" onClick={() => setSheet("costs")} title="Comisión P2P y 4x1000">
               <Icon name="receipt" size={16} /> Mis costos
             </button>
@@ -667,7 +700,9 @@ export function Market() {
                 hint={bStep ? <>Te vende <b>{bStep.ad.nick}</b>{netBuy !== bStep.price && <> · anuncio {money(bStep.price)}</>}</>
                   : buyAd ? <>Ninguno acepta {cap} · mejor: <b>{buyAd.nick}</b></> : "Sin anuncios"} />
               <Kpi i={1} icon="handCoins" kind="sell" label="Recibes al vender" value={money(netSell)}
-                hint={sStep ? <>Te compra <b>{sStep.ad.nick}</b>{netSell !== sStep.price && <> · anuncio {money(sStep.price)}</>}</>
+                hint={held ? (walletAd ? <>Tus {holdTxt(held, asset)}: <b>{money(held * netSell!, 0)}</b> con <b>{walletAd.nick}</b></>
+                  : <>Ninguno acepta tus {holdTxt(held, asset)} de una vez{sellAd ? <> · mejor: <b>{sellAd.nick}</b></> : null}</>)
+                  : sStep ? <>Te compra <b>{sStep.ad.nick}</b>{netSell !== sStep.price && <> · anuncio {money(sStep.price)}</>}</>
                   : sellAd ? <>Ninguno acepta {cap} · mejor: <b>{sellAd.nick}</b></> : "Sin anuncios"} />
               <Kpi i={2} icon="swap" kind={`rt ${tone(rt)}`} label="Comprar y vender ya" value={<Usd v={rt} suffix="por dólar" />}
                 hint={route ? <>Con {cap}: <b className={tone(route.profit_fiat) === "up" ? "up" : "down"}>{signedMoney(route.profit_fiat)}</b> neto</>

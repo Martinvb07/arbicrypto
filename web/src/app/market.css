@@ -12,6 +12,7 @@
   background: radial-gradient(520px 160px at 0 0, var(--brand-soft), transparent 70%), var(--surface); }
 .mkt-tools { gap: 10px; }
 .mkt-tools .inline-field input { height: 38px; width: 136px; border-radius: 10px; font-size: 14px; }
+.mkt-held { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 12px; border-radius: 10px; font-weight: 650; color: var(--up); }
 .mkt-tools .toggle { height: 38px; padding: 0 12px 0 7px; font-size: 13.5px; }
 
 .mkt-coins { position: relative; margin: 0 -4px; }
@@ -259,6 +260,7 @@
 .mine-card.on { border-color: color-mix(in srgb, var(--up) 45%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--up) 18%, transparent), 0 8px 28px -12px color-mix(in srgb, var(--up) 40%, transparent);
   background: linear-gradient(170deg, var(--up-soft), var(--surface) 45%); }
 .mine-pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: stretch; }
+.mine-pair.one { grid-template-columns: minmax(0, 1fr); }
 .mine-arrow { display: grid; place-items: center; width: 34px; height: 34px; align-self: center; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
 .mine-side { display: grid; gap: 10px; align-content: start; min-width: 0; padding: 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface-2);
   animation: card-in .4s cubic-bezier(.2, .8, .2, 1) both; transition: border-color .2s, transform .2s; }

@@ -42,6 +42,21 @@ export const paysWith = (ad: Ad, methods: string[] | undefined) => !methods?.len
 /** ¿El anuncio acepta mi capital (monto y cripto disponible)? */
 export const takesCapital = (ad: Ad, capital: number) => ad.min <= capital && capital <= ad.max && (!ad.available || ad.available >= capital / ad.price);
 
+/** Lo que tienes de `asset` en tu Binance (Spot + Fondos) para vender; 0 si no tienes o es menos de un dólar (polvo). */
+export function walletQty(s: State, asset: string) {
+  const acc = s.account;
+  if (!acc) return 0;
+  const q = [...acc.spot, ...acc.funding].filter((b) => b.asset === asset).reduce((t, b) => t + b.qty, 0);
+  const price = bestAd(s, asset, "SELL")?.price ?? 0;
+  return q * price >= (s.usd_ref ?? 4000) ? q : 0;
+}
+
+/** ¿El anuncio me sirve por monto? Al vender cuenta lo que tienes en tu billetera de Binance; sin saldo (o al comprar), tu capital. */
+export function takesMine(ad: Ad, s: State, asset: string, side: Side) {
+  const q = side === "SELL" ? walletQty(s, asset) : 0;
+  return takesCapital(ad, q ? q * ad.price : s.settings.capital);
+}
+
 export function usdtPrices(s: State) {
   return { buy: effBuy(bestAd(s, "USDT", "BUY")?.price, s), sell: bestAd(s, "USDT", "SELL")?.price };
 }
