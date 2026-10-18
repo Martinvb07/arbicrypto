@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
-import { Newsreader } from "next/font/google";
+import { Archivo, JetBrains_Mono } from "next/font/google";
 import "./portada.css";
 
-// Letra de periódico para titulares y artículos; la interfaz sigue en Inter, como el panel
-const news = Newsreader({ subsets: ["latin"], variable: "--font-news", display: "swap", style: ["normal", "italic"] });
+// Tablero de bolsa: titulares en Archivo angosta y las cifras del tablero en monoespaciada
+const display = Archivo({ subsets: ["latin"], variable: "--font-board-display", axes: ["wdth"], display: "swap" });
+const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-board-mono", weight: ["400", "500", "700", "800"], display: "swap" });
 
 // La portada (arbicrypto.org) sí sale en los buscadores; el panel y la wallet no.
-const TITLE = "ArbiCrypto · El diario del arbitraje en pesos";
+const TITLE = "ArbiCrypto · Compra barato, vende caro, en pesos";
 const DESCRIPTION =
   "Arbitraje en Binance P2P y Spot leído en pesos colombianos, con comisiones y 4x1000 incluidos, y la contabilidad de tus cripto lista para la DIAN.";
 
@@ -29,5 +30,5 @@ export const metadata: Metadata = {
 };
 
 export default function PortadaLayout({ children }: { children: React.ReactNode }) {
-  return <div className={news.variable}>{children}</div>;
+  return <div className={`${display.variable} ${mono.variable}`}>{children}</div>;
 }
