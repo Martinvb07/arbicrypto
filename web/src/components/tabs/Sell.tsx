@@ -399,6 +399,28 @@ function CoinRow({ w, i, onEdit, others }: { w: Watch; i: number; onEdit: () => 
   );
 }
 
+/** Una moneda terminada: si la vendiste, cuánto compraste, por cuánto la vendiste y cuánto ganaste (con el 4x1000);
+ * mostrar lo que queda no sirve, porque al vender todo siempre queda en cero. */
+function EndedRow({ w, gmf }: { w: Watch; gmf: number }) {
+  const moves = w.moves ?? [];
+  const sells = moves.filter((m) => m.kind === "vendiste");
+  const when = new Date((sells.at(-1)?.t ?? w.created) * 1000).toLocaleDateString("es-CO", { day: "numeric", month: "short" }).replace(".", "");
+  if (!sells.length) {
+    return <li><Coin s={w.asset} size={18} /> {amount(w.asset, w.qty)} <span className="dim">· te costó {money(w.cost, 0)} · {ENDED[w.status]}</span></li>;
+  }
+  const sold = sells.reduce((a, m) => a + (m.moved ?? m.qty ?? 0), 0);
+  const got = sells.reduce((a, m) => a + (m.total ?? 0), 0);
+  const cost = sells.reduce((a, m) => a + (m.cost ?? 0), 0) * (1 + gmf);
+  const gain = got - cost;
+  return (
+    <li>
+      <Coin s={w.asset} size={18} /> {amount(w.asset, sold)}
+      <span className="dim"> · te costó {money(cost, 0)} · la vendiste por {money(got, 0)} · {when}</span>
+      {" "}<b className={`val ${tone(gain)}`}>{gain >= 0 ? "ganaste" : "perdiste"} {money(Math.abs(gain), 0)}</b>
+    </li>
+  );
+}
+
 export function Sell() {
   const { state } = useLive();
   const holdings = useHoldings();
@@ -451,9 +473,7 @@ export function Sell() {
             <button className="link-btn" onClick={() => setPast(!past)}><Icon name="history" size={15} /> Terminadas ({ended.length})</button>
             {past && (
               <ul>
-                {ended.map((w) => (
-                  <li key={w.id}><Coin s={w.asset} size={18} /> {amount(w.asset, w.qty)} <span className="dim">· te costó {money(w.cost, 0)} · {ENDED[w.status]}</span></li>
-                ))}
+                {ended.map((w) => <EndedRow key={w.id} w={w} gmf={state.settings.gmf} />)}
               </ul>
             )}
           </div>
