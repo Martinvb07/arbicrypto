@@ -19,7 +19,7 @@ export const TABS: { id: TabId; label: string; icon: IconName; sub: string; grou
   { id: "anuncios", label: "Simular anuncios", icon: "megaphone", sub: "Cuánto ganas publicando tus propios anuncios" },
   { id: "historial", label: "Historial", icon: "clock", sub: "Oportunidades pasadas y las mejores horas" },
   { id: "chat", label: "Chat", icon: "chat", sub: "Habla con tu equipo", group: "cuenta" },
-  { id: "cuenta", label: "Mi Binance", icon: "wallet", sub: "Tus saldos y órdenes, solo los ves tú", group: "cuenta" },
+  { id: "cuenta", label: "Mi Binance", icon: "candles", sub: "Tus saldos y órdenes, solo los ves tú", group: "cuenta" },
   { id: "equipo", label: "Equipo", icon: "users", sub: "Tu equipo, solicitudes e invitaciones", group: "cuenta" },
 ];
 
@@ -303,7 +303,7 @@ function SideFoot({ mini, onToggle }: { mini?: boolean; onToggle?: () => void })
     <div className="side-foot">
       {state?.user && state.user.access !== "panel" && (
         <button className="side-link" data-tip="Mi wallet" onClick={() => goWithSplash("/wallet", "Abriendo tu wallet", "Contabilidad y declaración")}>
-          <Icon name="book" size={18} /><span>Mi wallet</span>
+          <Icon name="wallet" size={18} /><span>Mi wallet</span>
         </button>
       )}
       <button className="side-link" data-tip={dark ? "Tema claro" : "Tema oscuro"}

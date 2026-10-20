@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
-  ArrowLeftRight, ArrowRight, Bell, BellOff, CalendarDays, ChartLine, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock, Code, Copy, Download, ExternalLink, Eye, EyeOff, Flag, House, KeyRound, Lightbulb, ListFilter, Lock, LogOut, Megaphone, Menu, Moon, NotebookPen, PiggyBank, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Sparkles, Sun, Target, Ticket, Trash2, TrendingUp, Triangle, TriangleAlert, UserCog, Users, Wallet, X, Zap,
+  ArrowLeftRight, ArrowRight, Bell, BellOff, CalendarDays, ChartCandlestick, ChartLine, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock, Code, Copy, Download, ExternalLink, Eye, EyeOff, Flag, House, KeyRound, Lightbulb, ListFilter, Lock, LogOut, Megaphone, Menu, Moon, NotebookPen, PiggyBank, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Sparkles, Sun, Target, Ticket, Trash2, TrendingUp, Triangle, TriangleAlert, UserCog, Users, Wallet, X, Zap,
   UserPen,
   Plus,
   Radar,
@@ -47,6 +47,7 @@ const ICONS = {
   flag: Flag,
   chart: ChartLine,
   wallet: Wallet,
+  candles: ChartCandlestick,
   sliders: SlidersHorizontal,
   code: Code,
   bell: Bell,
