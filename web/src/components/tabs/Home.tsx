@@ -560,32 +560,103 @@ function Arbitrage({ s }: { s: State }) {
 
 // ---------------------------------------------------------------- tus dólares: directo o convirtiendo en Spot
 
+/** El par de Spot a partir del símbolo (ETHUSDT → ETH/USDT): la conversión no trae el par, pero siempre es contra USDT. */
+const pairOf = (symbol: string | null): [string, string] | null =>
+  !symbol ? null : symbol.endsWith("USDT") ? [symbol.slice(0, -4), "USDT"] : symbol.startsWith("USDT") ? ["USDT", symbol.slice(4)] : null;
+
+/** Pasos de una conversión: el cambio en Spot y a quién venderle (o comprarle) en P2P. */
+function ConvSteps({ r, side }: { r: Conversion; side: "sell" | "buy" }) {
+  const pair = pairOf(r.symbol);
+  const from = side === "sell" ? "USDT" : r.asset;
+  const to = side === "sell" ? r.asset : "USDT";
+  const sells = pair ? pair[0] === from : false;
+  const spot = (
+    <li>
+      <div>
+        <div className="step-main">Cambia <Asset s={from} size={18} /> por <Asset s={to} size={18} /> en Binance Spot</div>
+        <div className="step-sub">
+          Abre <b>{r.symbol}</b> · pestaña <b>Market</b> →{" "}
+          {sells
+            ? <>abajo a la derecha: en <b>Cantidad</b> pon tus {from} → botón rojo <b>Vender {from}</b></>
+            : <>abajo a la izquierda: en <b>Total</b> pon tus {from} → botón verde <b>Comprar {to}</b></>}
+          {" "}· <b>NO uses Convertir</b>
+        </div>
+        <div className="step-actions">
+          <GoButton href={spotUrl(pair)} icon="swap">{sells ? <>Vender <b>{from}</b></> : <>Comprar <b>{to}</b></>} en Spot ({r.symbol})</GoButton>
+        </div>
+      </div>
+    </li>
+  );
+  const move = (a: string, src: string, dst: string) => (
+    <li>
+      <div>
+        <div className="step-main">Pasa tus <Asset s={a} size={18} /> de <b>{src}</b> a <b>{dst}</b></div>
+        <div className="step-sub">Billetera → Transferir · es gratis e inmediato</div>
+      </div>
+    </li>
+  );
+  const p2p = (
+    <li>
+      <div>
+        <div className="step-main">
+          {side === "sell" ? "Vende" : "Compra"} <Asset s={r.asset} size={18} /> en P2P a <b>{money(r.ad.price)}</b> por cada {r.asset}
+        </div>
+        <div className="step-sub">
+          <b>{r.ad.nick}</b> <span className="muted">({num(r.ad.orders, 0)} órdenes, {num(r.ad.finish * 100, 0)} %)</span> · {r.ad.methods.slice(0, 3).join(", ")}
+          {side === "buy" && " · confirma el precio antes de pagar"}
+        </div>
+        <div className="step-actions">
+          <GoButton href={advertiserUrl(r.ad)} icon={side === "sell" ? "handCoins" : "cart"} strong>
+            {side === "sell" ? "Vender" : "Comprar"} {r.asset} a <b>{r.ad.nick}</b>
+          </GoButton>
+        </div>
+      </div>
+    </li>
+  );
+  if (r.asset === "USDT") return <ol className="steps-list">{move("USDT", "Spot", "Fondos")}{p2p}</ol>;
+  return (
+    <>
+      <ol className="steps-list">
+        {side === "sell" ? <>{move("USDT", "Spot", "Fondos")}{spot}{move(r.asset, "Spot", "Fondos")}{p2p}</> : <>{p2p}{move(r.asset, "Fondos", "Spot")}{spot}</>}
+      </ol>
+      <SafetyNote />
+    </>
+  );
+}
+
 function ConvTable({ rows, side }: { rows: Conversion[]; side: "sell" | "buy" }) {
+  const [open, setOpen] = useState<string | null>(null);
   return (
     <div className="table-wrap">
-      <table className="t">
+      <table className="t clickable">
         <thead>
           <tr>
             <th>Cómo</th>
             <th className="num">{side === "sell" ? "Recibes por dólar" : "Te cuesta por dólar"}</th>
             <th className="num">Vs directo</th>
+            <th />
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.asset} className={r.vs_direct != null && r.vs_direct > 0.005 ? "win" : ""}>
-              <td>
-                {r.asset === "USDT" ? (
-                  <span className="asset"><Coin s="USDT" size={18} /> Directo en P2P</span>
-                ) : side === "sell" ? (
-                  <span className="path"><Coin s="USDT" size={18} /><span className="arrow">→</span><Coin s={r.asset} size={18} />{r.asset}<span className="tag">Spot → P2P</span></span>
-                ) : (
-                  <span className="path"><Coin s={r.asset} size={18} />{r.asset}<span className="arrow">→</span><Coin s="USDT" size={18} /><span className="tag">P2P → Spot</span></span>
-                )}
-              </td>
-              <td className="num">{money(r.per_usd)}</td>
-              <td className="num">{r.asset === "USDT" ? <span className="val flat">—</span> : <Usd v={r.vs_direct} />}</td>
-            </tr>
+            <Fragment key={r.asset}>
+              <tr className={r.vs_direct != null && r.vs_direct > 0.005 ? "win" : ""} onClick={() => setOpen(open === r.asset ? null : r.asset)}
+                title={side === "sell" ? `A quién venderle por ${r.asset}` : `A quién comprarle por ${r.asset}`}>
+                <td>
+                  {r.asset === "USDT" ? (
+                    <span className="asset"><Coin s="USDT" size={18} /> Directo en P2P</span>
+                  ) : side === "sell" ? (
+                    <span className="path"><Coin s="USDT" size={18} /><span className="arrow">→</span><Coin s={r.asset} size={18} />{r.asset}<span className="tag">Spot → P2P</span></span>
+                  ) : (
+                    <span className="path"><Coin s={r.asset} size={18} />{r.asset}<span className="arrow">→</span><Coin s="USDT" size={18} /><span className="tag">P2P → Spot</span></span>
+                  )}
+                </td>
+                <td className="num">{money(r.per_usd)}</td>
+                <td className="num">{r.asset === "USDT" ? <span className="val flat">—</span> : <Usd v={r.vs_direct} />}</td>
+                <td className="num"><span className="link-btn">{open === r.asset ? "Ocultar" : "Pasos"}</span></td>
+              </tr>
+              {open === r.asset && <tr className="detail"><td colSpan={4}><ConvSteps r={r} side={side} /></td></tr>}
+            </Fragment>
           ))}
         </tbody>
       </table>
