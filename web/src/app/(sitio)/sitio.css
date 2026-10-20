@@ -452,8 +452,9 @@
 /* franja final */
 .wb-end { position: relative; display: grid; justify-items: center; gap: 14px; padding: 72px 24px; text-align: center; border-radius: 32px; overflow: hidden;
   background: linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, .01)); border: 1px solid var(--line); }
+/* el brillo flota detrás, abajo al centro; el resto va encima de él */
 .wb-end .wb-glow { top: 100%; }
-.wb-end > * { position: relative; }
+.wb-end > :not(.wb-glow) { position: relative; }
 .wb-end .wb-cta { justify-content: center; margin-top: 18px; }
 
 /* tablero con pestañas y nombre de cada moneda */
