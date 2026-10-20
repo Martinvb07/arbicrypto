@@ -11,6 +11,7 @@ import functools
 import hmac
 import html
 import logging
+import math
 import mimetypes
 import os
 import queue
@@ -448,18 +449,41 @@ def route_links(route):
     links = []
     for st in route["steps"]:
         if st["venue"] == "Spot":
-            links.append((f"Abrir {st['symbol']} en Spot", spot_url(st.get("pair"))))
+            links.append((f"{'Vender' if spot_sells(st) else 'Comprar'} {st['from'] if spot_sells(st) else st['to']} en Spot ({st['symbol']})",
+                          spot_url(st.get("pair"))))
         else:
             links.append((f"{'Comprar' if st['kind'] == 'buy' else 'Vender'} {st['asset']} a {st['ad']['nick']}",
                           advertiser_url(st["ad"])))
     return links
 
 
+def spot_sells(st):
+    """En el par de Spot, ¿se vende la moneda que tienes (es la base, ETH en ETHUSDT) o se compra la otra?"""
+    pair = st.get("pair")
+    return pair[0] == st["from"] if pair else st["symbol"].startswith(st["from"])
+
+
+def floor_qty(v):
+    """Cantidad para escribir en Binance: redondeada hacia abajo, nunca mas de lo que tienes."""
+    d = 2 if v >= 1 else 6
+    return num(math.floor(v * 10 ** d) / 10 ** d, d)
+
+
+def spot_clicks(st, have):
+    """Donde hacer clic en Spot, paso a paso, para cambiar `have` de st['from'] a st['to']."""
+    if spot_sells(st):
+        return (f"pestaña Mercado → lado rojo Vender {st['from']} → en Cantidad pon {floor_qty(have)} {st['from']}"
+                f" → botón Vender {st['from']}")
+    return (f"pestaña Mercado → lado verde Comprar {st['to']} → en Total pon {floor_qty(have)} {st['from']}"
+            f" → botón Comprar {st['to']}")
+
+
 def route_text(route):
     lines = []
     for i, st in enumerate(route["steps"], 1):
         if st["venue"] == "Spot":
-            lines.append(f"{i}. Cambia a {st['to']} en Spot ({st['symbol']}) con orden de MERCADO, NO Convertir"
+            have = route["steps"][i - 2]["qty"] if i > 1 else 0
+            lines.append(f"{i}. Cambia a {st['to']} en Spot: abre {st['symbol']} · {spot_clicks(st, have)} (NO uses Convertir)"
                          f" · te deben llegar mínimo {qty(st['qty'])} {st['to']} (si llega menos, no sigas)")
         elif st["kind"] == "buy":
             ad = st["ad"]

@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { advertiserUrl, bestDeal, COIN_NAMES, copyQty, dealReceived, effBuy, gmfOf, isDollar, isMine, netOf, roundTrip, spotUrl, takerFeeAt, usdtPrices, type Deal } from "@/lib/calc";
+import { advertiserUrl, bestDeal, COIN_NAMES, copyQty, dealReceived, effBuy, gmfOf, isDollar, isMine, netOf, roundTrip, spotSells, spotUrl, takerFeeAt, usdtPrices, type Deal } from "@/lib/calc";
 import { money, num, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, Conversion, Route, State, Triangle } from "@/lib/types";
@@ -211,11 +211,15 @@ export function Steps({ row, s }: { row: Row; s: State }) {
                   por {isDollar(st.to) ? <>dólares <Asset s={st.to} size={18} /></> : <Asset s={st.to} size={18} />} en Binance Spot
                 </div>
                 <div className="step-sub">
-                  Par <b>{st.symbol}</b> · orden de <b>Mercado</b>, <b>NO Convertir</b> · te deben llegar mínimo{" "}
+                  Abre <b>{st.symbol}</b> · pestaña <b>Mercado</b> →{" "}
+                  {spotSells(st)
+                    ? <>lado rojo <b>Vender {st.from}</b> → en <b>Cantidad</b> pon <b>{copyQty(steps[i - 1]?.qty ?? 0, st.from)} {st.from}</b> → botón <b>Vender {st.from}</b></>
+                    : <>lado verde <b>Comprar {st.to}</b> → en <b>Total</b> pon <b>{copyQty(steps[i - 1]?.qty ?? 0, st.from)} {st.from}</b> → botón <b>Comprar {st.to}</b></>}
+                  {" "}· <b>NO uses Convertir</b> · te deben llegar mínimo{" "}
                   <b>{isDollar(st.to) ? `${num(st.qty, 2)} dólares (${st.to})` : `${qty(st.qty)} ${st.to}`}</b> (si llega menos, no vendas)
                 </div>
                 <div className="step-actions">
-                  <GoButton href={spotUrl(st.pair)} icon="swap" strong={row.opp}>Abrir <b>{st.symbol}</b> en Spot</GoButton>
+                  <GoButton href={spotUrl(st.pair)} icon="swap" strong={row.opp}>{spotSells(st) ? <>Vender <b>{st.from}</b></> : <>Comprar <b>{st.to}</b></>} en Spot ({st.symbol})</GoButton>
                   {steps[i - 1] && <CopyButton text={copyQty(steps[i - 1].qty, st.from)}>Copiar {amountTxt(steps[i - 1].qty, st.from)}</CopyButton>}
                 </div>
               </div>

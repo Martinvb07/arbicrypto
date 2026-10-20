@@ -1,6 +1,6 @@
 // Cálculos que convierten los datos del backend en cifras simples.
 // Todo lo que se muestra ya incluye comisiones de Binance y el 4x1000: 0,4 % de cada pago que haces (al comprar), ganes o pierdas.
-import type { Ad, HistPoint, Side, State } from "./types";
+import type { Ad, HistPoint, Side, SpotStep, State } from "./types";
 
 /** ¿Este aviso es para mí? (rutas de mi capital y mis propias vigilancias) */
 export const isMine = (a: { capital?: number | null; user?: string | null; users?: string[] | null }, s: State) =>
@@ -108,6 +108,9 @@ export const advertiserUrl = (ad: Ad) =>
 
 export const spotUrl = (pair?: [string, string] | null) =>
   pair ? `https://www.binance.com/es/trade/${pair[0]}_${pair[1]}?type=spot` : undefined;
+
+/** En el par de Spot, ¿se vende la moneda que tienes (es la base, ETH en ETHUSDT) o se compra la otra? */
+export const spotSells = (st: SpotStep) => (st.pair ? st.pair[0] === st.from : st.symbol.startsWith(st.from));
 
 /** Cantidad lista para pegar en Binance: con punto decimal y redondeada hacia abajo (nunca más de lo que tienes). */
 export function copyQty(q: number, asset: string): string {
