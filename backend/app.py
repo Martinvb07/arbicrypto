@@ -472,10 +472,10 @@ def floor_qty(v):
 def spot_clicks(st, have):
     """Donde hacer clic en Spot, paso a paso, para cambiar `have` de st['from'] a st['to']."""
     if spot_sells(st):
-        return (f"pestaña Mercado → lado rojo Vender {st['from']} → en Cantidad pon {floor_qty(have)} {st['from']}"
-                f" → botón Vender {st['from']}")
-    return (f"pestaña Mercado → lado verde Comprar {st['to']} → en Total pon {floor_qty(have)} {st['from']}"
-            f" → botón Comprar {st['to']}")
+        return (f"abajo, en el lado derecho: pestaña Market → en Cantidad pon {floor_qty(have)} {st['from']}"
+                f" → botón rojo Vender {st['from']}")
+    return (f"abajo, en el lado izquierdo: pestaña Market → en Total pon {floor_qty(have)} {st['from']}"
+            f" → botón verde Comprar {st['to']}")
 
 
 def route_text(route):
@@ -483,8 +483,10 @@ def route_text(route):
     for i, st in enumerate(route["steps"], 1):
         if st["venue"] == "Spot":
             have = route["steps"][i - 2]["qty"] if i > 1 else 0
-            lines.append(f"{i}. Cambia a {st['to']} en Spot: abre {st['symbol']} · {spot_clicks(st, have)} (NO uses Convertir)"
-                         f" · te deben llegar mínimo {qty(st['qty'])} {st['to']} (si llega menos, no sigas)")
+            lines.append(f"{i}. Cambia a {st['to']} en Spot: lo que compras en P2P llega a Fondos, primero pásalo a Spot"
+                         f" (Billetera → Transferir, gratis) · abre {st['symbol']} · {spot_clicks(st, have)} (NO uses Convertir)"
+                         f" · te deben llegar mínimo {qty(st['qty'])} {st['to']} (si llega menos, no sigas)"
+                         f" · luego pasa los {st['to']} de Spot a Fondos para venderlos en P2P")
         elif st["kind"] == "buy":
             ad = st["ad"]
             lines.append(f"{i}. Compra {qty(st['qty'])} {st['asset']} a {money(st['price'])} · {ad['nick']} · {', '.join(ad['methods'][:2])}"

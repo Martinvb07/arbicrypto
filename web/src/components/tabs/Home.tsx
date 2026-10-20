@@ -211,12 +211,12 @@ export function Steps({ row, s }: { row: Row; s: State }) {
                   por {isDollar(st.to) ? <>dólares <Asset s={st.to} size={18} /></> : <Asset s={st.to} size={18} />} en Binance Spot
                 </div>
                 <div className="step-sub">
-                  Abre <b>{st.symbol}</b> · pestaña <b>Mercado</b> →{" "}
+                  Lo que compras en P2P llega a <b>Fondos</b>: primero pásalo a <b>Spot</b> (Billetera → Transferir, gratis) · abre <b>{st.symbol}</b> ·{" "}
                   {spotSells(st)
-                    ? <>lado rojo <b>Vender {st.from}</b> → en <b>Cantidad</b> pon <b>{copyQty(steps[i - 1]?.qty ?? 0, st.from)} {st.from}</b> → botón <b>Vender {st.from}</b></>
-                    : <>lado verde <b>Comprar {st.to}</b> → en <b>Total</b> pon <b>{copyQty(steps[i - 1]?.qty ?? 0, st.from)} {st.from}</b> → botón <b>Comprar {st.to}</b></>}
+                    ? <>abajo a la derecha: pestaña <b>Market</b> → en <b>Cantidad</b> pon <b>{copyQty(steps[i - 1]?.qty ?? 0, st.from)} {st.from}</b> → botón rojo <b>Vender {st.from}</b></>
+                    : <>abajo a la izquierda: pestaña <b>Market</b> → en <b>Total</b> pon <b>{copyQty(steps[i - 1]?.qty ?? 0, st.from)} {st.from}</b> → botón verde <b>Comprar {st.to}</b></>}
                   {" "}· <b>NO uses Convertir</b> · te deben llegar mínimo{" "}
-                  <b>{isDollar(st.to) ? `${num(st.qty, 2)} dólares (${st.to})` : `${qty(st.qty)} ${st.to}`}</b> (si llega menos, no vendas)
+                  <b>{isDollar(st.to) ? `${num(st.qty, 2)} dólares (${st.to})` : `${qty(st.qty)} ${st.to}`}</b> (si llega menos, no vendas) · luego pasa los {st.to} de <b>Spot</b> a <b>Fondos</b> para venderlos en P2P
                 </div>
                 <div className="step-actions">
                   <GoButton href={spotUrl(st.pair)} icon="swap" strong={row.opp}>{spotSells(st) ? <>Vender <b>{st.from}</b></> : <>Comprar <b>{st.to}</b></>} en Spot ({st.symbol})</GoButton>
