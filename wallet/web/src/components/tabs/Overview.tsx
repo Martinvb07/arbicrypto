@@ -555,7 +555,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                           )}
                           {o.manual ? (
                             <button className="cell-sub op-source" onClick={() => setCostOf(o)} title="Cambiar lo que te costó">
-                              <span>Costo escrito a mano</span><span className="tag">a mano</span><Icon name="edit" size={12} />
+                              <span>Costo escrito a mano{o.gmf < 1 && " · sin 4x1000"}</span><span className="tag">a mano</span><Icon name="edit" size={12} />
                             </button>
                           ) : o.sources.length > 0 && (() => {
                             const mv = o.id != null ? moveById.get(o.id) : undefined;
