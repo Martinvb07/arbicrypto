@@ -1194,9 +1194,11 @@ def run_loop(name, step, interval):
 
 # ---------------------------------------------------------------- seguridad y sesiones
 
+# Páginas del sitio público (arbicrypto.org): se ven sin sesión y salen en los buscadores
+SITE_PAGES = {"/inicio", "/arbitraje", "/vender", "/renta", "/precios", "/seguridad", "/preguntas"}
 PUBLIC_PATHS = {"/login", "/login.html", "/favicon.ico", "/robots.txt", "/api/auth/login", "/api/auth/register",
-                "/inicio", "/api/public/mercado", "/api/auth/logout", "/salir",
-                "/internal/binance", "/internal/avatar", "/internal/cuenta"}  # solo responde a la wallet de este servidor, con firma (ver internal_binance)  # cerrar sesión funciona aunque ya haya vencido
+                "/api/public/mercado", "/api/auth/logout", "/salir",
+                "/internal/binance", "/internal/avatar", "/internal/cuenta"} | SITE_PAGES  # solo responde a la wallet de este servidor, con firma (ver internal_binance)  # cerrar sesión funciona aunque ya haya vencido
 PUBLIC_PREFIXES = ("/_next/", "/coins/", "/brand/", "/icons/")
 # Lo que puede abrir en el panel alguien con acceso solo a la wallet (entrar, ir a su wallet y salir)
 WALLET_ONLY_PATHS = PUBLIC_PATHS | {"/wallet", "/login"}
@@ -1265,7 +1267,7 @@ def guard():
             return jsonify(error="No existe."), 404
         return redirect(panel_home().rstrip("/") + path)  # arbicrypto.org/algo-del-panel -> panel.arbicrypto.org/algo
     # la portada: siempre en arbicrypto.org; en el panel, a quien llega sin sesión (en este PC)
-    g.landing = path == "/inicio" or (path == "/" and (on_site() or (not g.user and not SITE_DOMAIN)))
+    g.landing = path in SITE_PAGES or (path == "/" and (on_site() or (not g.user and not SITE_DOMAIN)))
     if g.user and g.user.get("access") == "wallet" and not g.landing and path not in WALLET_ONLY_PATHS \
             and not path.startswith(PUBLIC_PREFIXES):  # su usuario solo tiene la wallet: el panel lo manda allá
         if path.startswith("/api/"):
