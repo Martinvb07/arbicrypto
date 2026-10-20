@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import { Archivo, JetBrains_Mono } from "next/font/google";
+import { Inter_Tight } from "next/font/google";
 import "./portada.css";
 
-// Tablero de bolsa: titulares en Archivo angosta y las cifras del tablero en monoespaciada
-const display = Archivo({ subsets: ["latin"], variable: "--font-board-display", axes: ["wdth"], display: "swap" });
-const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-board-mono", weight: ["400", "500", "700", "800"], display: "swap" });
+// Titulares en Inter Tight: apretada y limpia; el resto en la Inter del sitio
+const display = Inter_Tight({ subsets: ["latin"], variable: "--font-portada", display: "swap" });
 
 // La portada (arbicrypto.org) sí sale en los buscadores; el panel y la wallet no.
 const TITLE = "ArbiCrypto · Compra barato, vende caro, en pesos";
@@ -30,5 +29,5 @@ export const metadata: Metadata = {
 };
 
 export default function PortadaLayout({ children }: { children: React.ReactNode }) {
-  return <div className={`${display.variable} ${mono.variable}`}>{children}</div>;
+  return <div className={display.variable}>{children}</div>;
 }
