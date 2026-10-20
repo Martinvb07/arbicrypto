@@ -617,7 +617,7 @@ function ConvSteps({ r, side }: { r: Conversion; side: "sell" | "buy" }) {
   return (
     <>
       <ol className="steps-list">
-        {side === "sell" ? <>{move("USDT", "Spot", "Fondos")}{spot}{move(r.asset, "Spot", "Fondos")}{p2p}</> : <>{p2p}{move(r.asset, "Fondos", "Spot")}{spot}</>}
+        {side === "sell" ? <>{spot}{move(r.asset, "Spot", "Fondos")}{p2p}</> : <>{p2p}{move(r.asset, "Fondos", "Spot")}{spot}</>}
       </ol>
       <SafetyNote />
     </>
