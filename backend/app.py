@@ -433,7 +433,9 @@ def cached_depth(symbol):
 
 
 def advertiser_url(ad):
-    """Perfil del anunciante en Binance P2P: ahi estan sus anuncios para comprarle o venderle."""
+    """El anuncio exacto en Binance P2P; si no hay numero de anuncio, el perfil del anunciante."""
+    if ad.get("adv"):
+        return f"https://p2p.binance.com/es/adv?code={quote(str(ad['adv']))}"
     return f"https://p2p.binance.com/es/advertiserDetail?advertiserNo={quote(str(ad['user']))}" if ad.get("user") else None
 
 

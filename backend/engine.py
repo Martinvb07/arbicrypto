@@ -286,6 +286,7 @@ def _ad(a):
         "methods": [m.get("tradeMethodName") or m.get("identifier") for m in adv.get("tradeMethods") or []],
         "nick": user.get("nickName") or "?",
         "user": user.get("userNo"),
+        "adv": adv.get("advNo"),
         "orders": user.get("monthOrderCount") or 0,
         "finish": user.get("monthFinishRate") or 0,
         "merchant": user.get("userType") == "merchant",

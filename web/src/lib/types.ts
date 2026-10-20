@@ -10,6 +10,8 @@ export interface Ad {
   methods: string[];
   nick: string;
   user: string | null;
+  /** Número del anuncio (advNo): enlace directo al anuncio. */
+  adv?: string | null;
   orders: number;
   finish: number;
   merchant: boolean;

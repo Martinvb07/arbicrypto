@@ -101,7 +101,9 @@ export function dayStats(points: { t: number; buy: number; sell: number }[], now
   return { buyMin: Math.min(...buys), buyMax: Math.max(...buys), sellMin: Math.min(...sells), sellMax: Math.max(...sells) };
 }
 
+/** El anuncio exacto en Binance P2P; si no hay número de anuncio, el perfil del anunciante. */
 export const advertiserUrl = (ad: Ad) =>
+  ad.adv ? `https://p2p.binance.com/es/adv?code=${encodeURIComponent(ad.adv)}` :
   ad.user ? `https://p2p.binance.com/es/advertiserDetail?advertiserNo=${encodeURIComponent(ad.user)}` : undefined;
 
 export const spotUrl = (pair?: [string, string] | null) =>
