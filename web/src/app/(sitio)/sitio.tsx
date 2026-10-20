@@ -378,12 +378,63 @@ export function PageHero({ kicker, title, lead, children, cta = true }: { kicker
   );
 }
 
+// Velas de ejemplo para el fondo de la franja final: una subida con tropiezos (fija, para que no cambie en cada visita)
+const CANDLES = (() => {
+  const raw: { o: number; c: number; h: number; l: number }[] = [];
+  let p = 0;
+  for (let i = 0; i < 34; i++) {
+    const o = p, c = p + Math.sin(i * 0.55) * 7 + Math.cos(i * 1.7) * 4 + 1.6;
+    raw.push({ o, c, h: Math.max(o, c) + 2 + ((i * 7) % 4), l: Math.min(o, c) - 2 - ((i * 5) % 4) });
+    p = c;
+  }
+  // a coordenadas del dibujo: el precio más alto arriba (y = 18) y el más bajo abajo (y = 104)
+  const hi = Math.max(...raw.map((k) => k.h)), lo = Math.min(...raw.map((k) => k.l));
+  const y = (v: number) => 104 - ((v - lo) / (hi - lo)) * 86;
+  return raw.map((k) => ({ o: y(k.o), c: y(k.c), h: y(k.h), l: y(k.l) }));
+})();
+
+/** Fondo de la franja final: velas que suben una tras otra, la línea de precio que se traza y monedas flotando. */
+function MarketBackdrop() {
+  const W = 1200, H = 120, step = W / CANDLES.length;
+  const pts = CANDLES.map((k, i) => `${(i * step + step / 2).toFixed(1)},${k.c.toFixed(1)}`).join(" ");
+  return (
+    <div className="wb-end-bg" aria-hidden="true">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        {[24, 48, 72, 96].map((y) => <line key={y} className="wb-end-grid" x1="0" x2={W} y1={y} y2={y} />)}
+        <motion.g initial="hidden" whileInView="show" viewport={{ once: true, amount: 0.3 }}
+          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.035 } } }}>
+          {CANDLES.map((k, i) => {
+            const x = i * step + step / 2, up = k.c < k.o;
+            return (
+              <motion.g key={i} className={up ? "up" : "down"} style={{ originY: 1, originX: 0.5 }}
+                variants={{ hidden: { opacity: 0, scaleY: 0.2 }, show: { opacity: 1, scaleY: 1, transition: { duration: 0.5, ease: EASE } } }}>
+                <line x1={x} x2={x} y1={k.h} y2={k.l} />
+                <rect x={x - step * 0.28} width={step * 0.56} y={Math.min(k.o, k.c)} height={Math.max(1.5, Math.abs(k.o - k.c))} rx="1" />
+              </motion.g>
+            );
+          })}
+        </motion.g>
+        <motion.polyline className="wb-end-line" points={pts} initial={{ pathLength: 0 }} whileInView={{ pathLength: 1 }}
+          viewport={{ once: true, amount: 0.3 }} transition={{ duration: 2.2, ease: EASE, delay: 0.4 }} />
+      </svg>
+      {(["btc", "eth", "usdt", "bnb"] as const).map((a, i) => (
+        <motion.span key={a} className={`wb-end-coin c${i}`} initial={{ opacity: 0, scale: 0.6 }} whileInView={{ opacity: 1, scale: 1 }}
+          viewport={{ once: true }} transition={{ type: "spring", stiffness: 200, damping: 16, delay: 0.6 + i * 0.12 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={coin(a)} alt="" width={44} height={44} />
+        </motion.span>
+      ))}
+    </div>
+  );
+}
+
 /** Franja final con el llamado a entrar. */
 export function EndBand({ title = "Abre el tablero.", text = "Deja que la cuenta la haga el panel y entra solo cuando quedan pesos." }: { title?: string; text?: string }) {
   return (
     <section className="wb-sec">
       <div className="wb-wrap">
         <Reveal className="wb-end">
+          <MarketBackdrop />
           <div className="wb-glow sm" aria-hidden="true" />
           <h2 className="wb-h2">{title}</h2>
           <p className="wb-small center">{text}</p>
