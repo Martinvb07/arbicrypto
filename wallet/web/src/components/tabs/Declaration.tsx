@@ -30,6 +30,40 @@ export function Declaration({ onTab }: { onTab: (t: TabId) => void }) {
   return <DeclarationBody report={report} onTab={onTab} />;
 }
 
+/** En cuánto vas: lo que pagaste en compras y te entró por ventas en el año, sumado operación por operación, la ganancia
+ * de lo vendido y lo que todavía tienes en cripto (por lo que te costó). */
+function HowFar({ report }: { report: Report }) {
+  const t = report.summary.totals;
+  const sales = report.disposals.filter((d) => d.kind === "venta");
+  const gain = report.disposals.reduce((a, d) => a + (d.net ?? d.gain), 0);
+  const held = report.holdings.reduce((a, h) => a + h.cost, 0);
+  const flow = t.sold_cop - t.bought_cop - t.gmf;
+  return (
+    <div className="card card-pad howfar">
+      <div className="card-head" style={{ padding: 0, marginBottom: 14 }}>
+        <div>
+          <h2>En cuánto vas en {report.year}</h2>
+          <p className="sub">Cada compra y cada venta de Binance sumadas, con comisiones y 4x1000.</p>
+        </div>
+      </div>
+      <div className="kpis">
+        <div className="kpi"><small>Pagaste en compras</small><b>{money(t.bought_cop + t.gmf)}</b>
+          <span>{t.gmf >= 1 ? `${money(t.bought_cop)} + 4x1000 ${money(t.gmf)}` : "Con comisiones"}</span></div>
+        <div className="kpi"><small>Te entró por ventas</small><b>{money(t.sold_cop)}</b>
+          <span>{num(sales.length)} venta{sales.length === 1 ? "" : "s"}</span></div>
+        <div className="kpi accent"><small>Ganaste en lo vendido</small><b className={tone(gain)}>{signedMoney(gain)}</b>
+          <span>Lo recibido menos lo que costó, ya sin 4x1000</span></div>
+        <div className="kpi"><small>Tienes en cripto</small><b>{money(held)}</b>
+          <span>Por lo que te costó (casilla 29)</span></div>
+      </div>
+      <p className="small-print" style={{ marginTop: 12 }}>
+        En pesos: te entraron {money(t.sold_cop)} y salieron {money(t.bought_cop + t.gmf)} · diferencia <b className={tone(flow)}>{signedMoney(flow)}</b>
+        {held >= 1 && <> (lo que falta está en tus {money(held)} de cripto)</>}
+      </p>
+    </div>
+  );
+}
+
 function DeclarationBody({ report, onTab }: { report: Report; onTab: (t: TabId) => void }) {
   const { year, me } = useWallet();
   const [upload, setUpload] = useState(false);
@@ -113,6 +147,8 @@ function DeclarationBody({ report, onTab }: { report: Report; onTab: (t: TabId) 
           <div><small>Fecha límite</small><b>{deadlineBig}</b><span>{deadlineSmall}</span></div>
         </div>
       </div>
+
+      <HowFar report={report} />
 
       <div className="steps-nav no-print" role="tablist" aria-label="Pasos">
         {STEPS.map((x) => (
