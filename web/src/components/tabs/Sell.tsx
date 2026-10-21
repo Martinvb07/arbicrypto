@@ -106,7 +106,6 @@ function coinOptions(choices: string[], holdings: { asset: string; qty: number }
 }
 
 
-const ENDED: Record<string, string> = { vendida: "Ya la vendiste", vencida: "Venció", reemplazada: "Reemplazada" };
 const LIVE = new Set<Watch["status"]>(["vigilando", "lista"]);
 
 /** Agregar o editar una moneda de la lista. */
@@ -402,38 +401,14 @@ function CoinRow({ w, i, onEdit, others }: { w: Watch; i: number; onEdit: () => 
   );
 }
 
-/** Una moneda terminada: si la vendiste, cuánto compraste, por cuánto la vendiste y cuánto ganaste (con el 4x1000);
- * mostrar lo que queda no sirve, porque al vender todo siempre queda en cero. */
-function EndedRow({ w, gmf }: { w: Watch; gmf: number }) {
-  const moves = w.moves ?? [];
-  const sells = moves.filter((m) => m.kind === "vendiste");
-  const when = new Date((sells.at(-1)?.t ?? w.created) * 1000).toLocaleDateString("es-CO", { day: "numeric", month: "short" }).replace(".", "");
-  if (!sells.length) {
-    return <li><Coin s={w.asset} size={18} /> {amount(w.asset, w.qty)} <span className="dim">· te costó {money(w.cost, 0)} · {ENDED[w.status]}</span></li>;
-  }
-  const sold = sells.reduce((a, m) => a + (m.moved ?? m.qty ?? 0), 0);
-  const got = sells.reduce((a, m) => a + (m.total ?? 0), 0);
-  const cost = sells.reduce((a, m) => a + (m.cost ?? 0), 0) * (1 + gmf);
-  const gain = got - cost;
-  return (
-    <li>
-      <Coin s={w.asset} size={18} /> {amount(w.asset, sold)}
-      <span className="dim"> · te costó {money(cost, 0)} · la vendiste por {money(got, 0)} · {when}</span>
-      {" "}<b className={`val ${tone(gain)}`}>{gain >= 0 ? "ganaste" : "perdiste"} {money(Math.abs(gain), 0)}</b>
-    </li>
-  );
-}
-
 export function Sell() {
   const { state } = useLive();
   const holdings = useHoldings();
   const [form, setForm] = useState<{ edit: Watch | null } | null>(null);
-  const [past, setPast] = useState(false);
   if (!state) return null;
   const choices = [...new Set([...holdings.map((h) => h.asset), ...state.settings.p2p_assets, "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "LTC"])];
   const rows = state.watches ?? [];
   const live = rows.filter((w) => LIVE.has(w.status));
-  const ended = rows.filter((w) => !LIVE.has(w.status));
   const ready = live.filter((w) => w.last?.best?.ok).length;
   const total = live.reduce((a, w) => a + (w.last?.best?.profit ?? 0), 0);
 
@@ -471,16 +446,6 @@ export function Sell() {
           </div>
         )}
 
-        {ended.length > 0 && (
-          <div className="wpast">
-            <button className="link-btn" onClick={() => setPast(!past)}><Icon name="history" size={15} /> Terminadas ({ended.length})</button>
-            {past && (
-              <ul>
-                {ended.map((w) => <EndedRow key={w.id} w={w} gmf={state.settings.gmf} />)}
-              </ul>
-            )}
-          </div>
-        )}
         <p className="note"><Icon name="check" size={14} /><span>Ya con comisiones, redondeo de Binance y el 4x1000 que pagaste al comprar (0,4 % de lo que te costó). Confirma el precio en Binance antes de vender.</span></p>
       </section>
       {form && <CoinForm edit={form.edit} choices={choices} holdings={holdings} onClose={() => setForm(null)} />}
