@@ -1820,6 +1820,19 @@ main.wrap { padding-top: 24px; padding-bottom: 16px; }
   z-index: 50; padding: 6px 10px; border-radius: 8px; background: var(--text); color: var(--page); font-size: 12.5px; font-weight: 650; white-space: nowrap;
   box-shadow: var(--shadow-lg); pointer-events: none; animation: t-up .15s ease both; }
 :root[data-side="mini"] .shell .side-link, :root[data-side="mini"] .shell .side-nav { position: relative; overflow: visible; }
+/* pantallas bajitas: los íconos del sidebar contraído se juntan para que todo quepa sin montarse sobre los de abajo */
+@media (max-height: 820px) {
+  :root[data-side="mini"] .shell .side-logo { height: 56px; }
+  :root[data-side="mini"] .shell .side-profile { min-height: 0; padding: 9px 0; }
+  :root[data-side="mini"] .shell .side-nav { padding: 8px 12px; }
+  :root[data-side="mini"] .shell .side-nav button, :root[data-side="mini"] .shell .side-link { padding: 7px 0; }
+  :root[data-side="mini"] .shell .side-group { margin: 6px auto; }
+  :root[data-side="mini"] .shell .side-foot { padding: 8px 12px; }
+}
+/* y si ni así caben, la lista del medio se desplaza en vez de taparse (los rótulos de esa lista quedan recortados) */
+@media (max-height: 600px) {
+  :root[data-side="mini"] .shell .side-nav { overflow-y: auto; overflow-x: hidden; }
+}
 
 /* menú del celular */
 .drawer-side .side-profile { padding: 0 0 14px; border-bottom: 1px solid var(--border); min-height: 0; }
