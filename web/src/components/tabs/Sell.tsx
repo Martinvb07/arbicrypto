@@ -229,7 +229,10 @@ function historyOf(w: Watch): WatchMove[] {
 function CoinHistory({ w, hist, gmf, others, onMove }: { w: Watch; hist: WatchMove[]; gmf: number; others: Watch[]; onMove: (o: Watch) => void }) {
   const sales = hist.filter((m) => m.kind === "vendiste");
   const gainOf = (m: WatchMove) => (m.cost != null && m.total != null ? m.total - m.cost * (1 + gmf) : null);
-  const won = sales.reduce((a, m) => a + (gainOf(m) ?? 0), 0);
+  // en pesos, tal cual las órdenes de Binance: lo que te entró por ventas menos lo que pagaste (con su 4x1000)
+  const received = sales.reduce((a, m) => a + (m.total ?? 0), 0);
+  const paid = ((w.start?.cost ?? 0) + hist.filter((m) => m.kind === "compraste").reduce((a, m) => a + (m.total ?? 0), 0)) * (1 + gmf);
+  const cash = received - paid;
   const soldQty = sales.reduce((a, m) => a + (m.moved ?? m.qty ?? 0), 0);
   const startQty = w.start?.qty ?? (hist[0] && hist[0].kind !== "editaste" ? hist[0].left + (hist[0].kind === "vendiste" ? 1 : -1) * (hist[0].moved ?? 0) : null);
   const base = startQty != null ? startQty + hist.filter((m) => m.kind === "compraste").reduce((a, m) => a + (m.moved ?? 0), 0) : 0;
@@ -240,8 +243,8 @@ function CoinHistory({ w, hist, gmf, others, onMove }: { w: Watch; hist: WatchMo
         <div className="chist-stat"><small>Vendido</small><b>{num(soldQty, 2)} {w.asset}</b>
           {soldPct > 0 && <span className="chist-bar"><span style={{ width: `${soldPct}%` }} /></span>}</div>
         <div className="chist-stat"><small>Te queda</small><b>{num(w.qty, 2)} {w.asset}</b><span className="dim">costo {money(w.cost * (1 + gmf), 0)}</span></div>
-        <div className="chist-stat"><small>Ganado en ventas</small><b className={tone(won)}>{sales.length ? signedMoney(won) : "—"}</b>
-          <span className="dim">{sales.length} venta{sales.length === 1 ? "" : "s"}</span></div>
+        <div className="chist-stat"><small>Recibiste − pagaste</small><b className={tone(cash)}>{sales.length ? signedMoney(cash) : "—"}</b>
+          <span className="dim">{sales.length ? `recibiste ${money(received, 0)} · pagaste ${money(paid, 0)}` : "Aún no vendes"}</span></div>
       </div>
       <ol className="chist-list">
         {[...hist].reverse().map((m, i) => {
@@ -259,7 +262,7 @@ function CoinHistory({ w, hist, gmf, others, onMove }: { w: Watch; hist: WatchMo
                 </small>
               </div>
               <div className="chist-right">
-                {g != null && <b className={tone(g)}>{signedMoney(g)}</b>}
+                {g != null && <b className={tone(g)} title="Lo que recibiste en esta venta menos lo que costó lo vendido (sin lo que te queda)">{signedMoney(g)}</b>}
                 <small>quedan {num(m.left, 2)}</small>
               </div>
             </li>
