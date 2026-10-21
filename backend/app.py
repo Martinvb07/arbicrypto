@@ -380,8 +380,16 @@ def p2p_fee():
     (ahora leido de takerCommission). Las ordenes de anuncios propios no cuentan: pagan otra comision. Con la comision
     automatica, encima va siempre el minimo fijo por orden (engine.P2P_TAKER_USD)."""
     rates = sorted(o["commission"] / o["amount"] for snap in list(acc_state.values()) for o in snap.get("orders", [])
-                   if o.get("status") == "COMPLETED" and o.get("amount") and o.get("commission") and o.get("role") != "MAKER")
+                   if o.get("status") == "COMPLETED" and o.get("amount") and o.get("commission") and o.get("role") != "MAKER"
+                   and not fixed_fee_only(o))
     return min(rates[len(rates) // 2], 0.01) if rates else 0.0
+
+
+def fixed_fee_only(o):
+    """¿Binance cobró solo el fijo por orden (0,07 USDT)? Esas órdenes no dicen nada del porcentaje: en una orden pequeña
+    el fijo parece un porcentaje alto (0,07 de 70 USDT = 0,1 %) y aplicarlo a una grande la haría ver peor de lo que es."""
+    usd = 1.0 if o.get("asset") in ("USDT", "USDC", "FDUSD") else (engine.usdt_value(graph, o.get("asset") or "", 1) if graph else None)
+    return not usd or o["commission"] * usd <= engine.P2P_TAKER_USD * 1.1
 
 
 def maker_fee(user):
