@@ -99,6 +99,8 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
   const nowMonth = Number(new Intl.DateTimeFormat("en", { timeZone: "America/Bogota", month: "numeric" }).format(new Date())) - 1;
   const month = live ? report?.books.months[nowMonth] : undefined;
   const unreal = bn.coins.reduce((a, c) => a + (c.pnl ?? 0), 0);
+  // lo que se suma de verdad en el resultado: las ventas sin su compra no cuentan hasta que la agregues
+  const ops = pnl ? pnl.gross_profit + pnl.income - (pnl.unmatched ?? 0) : 0;
   const todos = report ? todoList : [];
   const pending = todos.filter((t) => !t.optional).length;
   const hour = Number(new Intl.DateTimeFormat("en", { timeZone: "America/Bogota", hour: "numeric", hour12: false }).format(new Date()));
@@ -108,7 +110,7 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
     <div className="stack">
       {binance && !binance.connected && <BinanceCard />}
       {binance?.connected && <BinanceCard alertsOnly />}
-      {pnl && live && <GmfQuestion operations={pnl.gross_profit + pnl.income} gmf={pnl.gmf} onSettings={() => onTab("ajustes")} />}
+      {pnl && live && <GmfQuestion operations={ops} gmf={pnl.gmf} onSettings={() => onTab("ajustes")} />}
       {error && <Note kind="bad">{error}</Note>}
 
       {/* ---------- lo principal ---------- */}
@@ -134,7 +136,10 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
           <div className="home-stat">
             <small>Resultado {year}</small>
             <b className={pnl ? tone(pnl.net) : ""}>{pnl ? signedMoney(pnl.net) : "…"}</b>
-            <span>{pnl ? `Operaciones ${signedMoney(pnl.gross_profit + pnl.income)}${pnl.gmf ? ` · 4x1000 −${money(pnl.gmf)}` : ""}` : " "}</span>
+            <span>{pnl ? `Operaciones ${signedMoney(ops)}${pnl.gmf ? ` · 4x1000 −${money(pnl.gmf)}` : ""}` : " "}</span>
+            {pnl && (pnl.unmatched ?? 0) >= 1 && (
+              <span className="warn">Sin contar {money(pnl.unmatched ?? 0)} de ventas sin su compra · <button className="link" onClick={() => onTab("movimientos")}>Revisar</button></span>
+            )}
           </div>
           {month && (
             <div className="home-stat">
