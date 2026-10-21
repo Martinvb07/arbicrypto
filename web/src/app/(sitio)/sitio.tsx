@@ -147,7 +147,8 @@ const MENU: Group[] = [
   {
     t: "Mercado", items: [
       { href: "/precios", ic: "activity", h: "Precios P2P en vivo", p: "Compra y venta en pesos, al momento" },
-      { href: "/precios#la-cuenta", ic: "percent", h: "Cómo se hace la cuenta", p: "Comisión, redondeo y 4x1000" },
+      { href: "/calculadora", ic: "percent", h: "Calculadora", p: "Cuánto te queda con tu monto, hoy" },
+      { href: "/precios#la-cuenta", ic: "receipt", h: "Cómo se hace la cuenta", p: "Comisión, redondeo y 4x1000" },
     ],
   },
   { t: "Seguridad", href: "/seguridad" },
@@ -158,6 +159,41 @@ const MENU: Group[] = [
     ],
   },
 ];
+
+/** Claro u oscuro: lo que elegiste (se guarda como en el panel) o, si no elegiste, lo del dispositivo. */
+function useSiteTheme(): ["light" | "dark", () => void] {
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
+  useEffect(() => {
+    const mq = matchMedia("(prefers-color-scheme: light)");
+    const read = () => setTheme((document.documentElement.dataset.theme as "light" | "dark") || (mq.matches ? "light" : "dark"));
+    read();
+    mq.addEventListener("change", read);
+    return () => mq.removeEventListener("change", read);
+  }, []);
+  const toggle = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("theme", next); } catch { /* sin almacenamiento: dura solo esta visita */ }
+    setTheme(next);
+  };
+  return [theme, toggle];
+}
+
+function ThemeButton() {
+  const [theme, toggle] = useSiteTheme();
+  const dark = theme === "dark";
+  return (
+    <motion.button type="button" className="wb-theme" onClick={toggle} whileTap={{ scale: 0.9 }} transition={TAP}
+      aria-label={dark ? "Pasar a modo claro" : "Pasar a modo oscuro"} title={dark ? "Modo claro" : "Modo oscuro"}>
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span key={theme} initial={{ opacity: 0, rotate: -90, scale: 0.6 }} animate={{ opacity: 1, rotate: 0, scale: 1 }}
+          exit={{ opacity: 0, rotate: 90, scale: 0.6 }} transition={{ duration: 0.22, ease: EASE }}>
+          <Icon name={dark ? "sun" : "moon"} size={18} />
+        </motion.span>
+      </AnimatePresence>
+    </motion.button>
+  );
+}
 
 const here = (path: string, href: string) => href.split("#")[0] === (path.replace(/\.html$/, "").replace(/\/$/, "") || "/");
 
@@ -249,6 +285,7 @@ function SiteNav() {
         </nav>
 
         <div className="wb-nav-cta">
+          <ThemeButton />
           <Pill href="/login" kind="ghost" sm>Iniciar sesión</Pill>
           <Pill href={LOGIN.invite} kind="soft" sm>Registrarme</Pill>
           <button className="wb-burger" aria-label={mobile ? "Cerrar menú" : "Abrir menú"} aria-expanded={mobile} onClick={() => setMobile((v) => !v)}>

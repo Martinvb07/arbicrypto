@@ -1195,7 +1195,7 @@ def run_loop(name, step, interval):
 # ---------------------------------------------------------------- seguridad y sesiones
 
 # Páginas del sitio público (arbicrypto.org): se ven sin sesión y salen en los buscadores
-SITE_PAGES = {"/inicio", "/arbitraje", "/vender", "/renta", "/precios", "/seguridad", "/preguntas"}
+SITE_PAGES = {"/inicio", "/arbitraje", "/vender", "/renta", "/precios", "/calculadora", "/seguridad", "/preguntas"}
 PUBLIC_PATHS = {"/login", "/login.html", "/favicon.ico", "/robots.txt", "/api/auth/login", "/api/auth/register",
                 "/api/public/mercado", "/api/auth/logout", "/salir",
                 "/internal/binance", "/internal/avatar", "/internal/cuenta", "/internal/aviso"} | SITE_PAGES  # solo responde a la wallet de este servidor, con firma (ver internal_binance)  # cerrar sesión funciona aunque ya haya vencido
