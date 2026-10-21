@@ -138,7 +138,7 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
             <b className={pnl ? tone(pnl.net) : ""}>{pnl ? signedMoney(pnl.net) : "…"}</b>
             <span>{pnl ? `Operaciones ${signedMoney(ops)}${pnl.gmf ? ` · 4x1000 −${money(pnl.gmf)}` : ""}` : " "}</span>
             {pnl && (pnl.unmatched ?? 0) >= 1 && (
-              <span className="warn">Sin contar {money(pnl.unmatched ?? 0)} de ventas sin su compra · <button className="link" onClick={() => onTab("movimientos")}>Revisar</button></span>
+              <span className="warn">Sin contar {money(pnl.unmatched ?? 0)} de ventas sin su compra · <button className="link" onClick={() => onTab("ganancias")}>Revisar</button></span>
             )}
           </div>
           {month && (
