@@ -92,6 +92,7 @@ WATCH_MAX = 10                    # maximo de monedas en la lista por usuario
 WATCH_PER_STEP = 2                # en cada vuelta se revisan las 2 que llevan mas tiempo sin revisar (cupo de Binance)
 WATCH_SPOT_EXTRA = 0.001          # si hay que cambiar en Spot antes de vender, se exige 0,1 % mas (el cambio toma tiempo)
 WATCH_CONFIRM_DELAY = 2           # antes de avisar se vuelve a consultar a los 2 s: la oferta debe seguir ahi
+C2C_URL = "https://c2c.binance.com/es-LA"  # el dominio con el que la app de Binance comparte P2P: en el celular abre la app
 WALLET_URL = "https://www.binance.com/es/my/wallet/account/main"  # P2P vende desde la Billetera de Fondos
 FIXED = {"fiat": FIAT, "p2p_assets": P2P_ASSETS, "max_profit": MAX_PROFIT, "p2p_interval": P2P_INTERVAL,
          "min_orders": MIN_ORDERS, "min_finish": MIN_FINISH,
@@ -436,8 +437,8 @@ def cached_depth(symbol):
 def advertiser_url(ad):
     """El anuncio exacto en Binance P2P; si no hay numero de anuncio, el perfil del anunciante."""
     if ad.get("adv"):
-        return f"https://p2p.binance.com/es/adv?code={quote(str(ad['adv']))}"
-    return f"https://p2p.binance.com/es/advertiserDetail?advertiserNo={quote(str(ad['user']))}" if ad.get("user") else None
+        return f"{C2C_URL}/adv?code={quote(str(ad['adv']))}"
+    return f"{C2C_URL}/advertiserDetail?advertiserNo={quote(str(ad['user']))}" if ad.get("user") else None
 
 
 def spot_url(pair):

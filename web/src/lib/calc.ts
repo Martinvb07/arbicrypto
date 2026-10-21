@@ -101,10 +101,13 @@ export function dayStats(points: { t: number; buy: number; sell: number }[], now
   return { buyMin: Math.min(...buys), buyMax: Math.max(...buys), sellMin: Math.min(...sells), sellMax: Math.max(...sells) };
 }
 
+/** Dominio con el que la app de Binance comparte P2P: en el celular abre la app; en el computador, la página. */
+const C2C = "https://c2c.binance.com/es-LA";
+
 /** El anuncio exacto en Binance P2P; si no hay número de anuncio, el perfil del anunciante. */
 export const advertiserUrl = (ad: Ad) =>
-  ad.adv ? `https://p2p.binance.com/es/adv?code=${encodeURIComponent(ad.adv)}` :
-  ad.user ? `https://p2p.binance.com/es/advertiserDetail?advertiserNo=${encodeURIComponent(ad.user)}` : undefined;
+  ad.adv ? `${C2C}/adv?code=${encodeURIComponent(ad.adv)}` :
+  ad.user ? `${C2C}/advertiserDetail?advertiserNo=${encodeURIComponent(ad.user)}` : undefined;
 
 export const spotUrl = (pair?: [string, string] | null) =>
   pair ? `https://www.binance.com/es/trade/${pair[0]}_${pair[1]}?type=spot` : undefined;
