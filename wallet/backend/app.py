@@ -701,6 +701,54 @@ def finish_sync(uid, ok, cursor, error):
     else:
         fields["last_error"] = error
     db.binance_sync(uid, **fields)
+    if ok:
+        try:
+            warn_cuadre(uid, cursor)
+        except Exception:
+            log.exception("aviso de cuadre")
+
+
+def qty_txt(a, q):
+    """Cantidad legible: dólares con 2 decimales, cripto con hasta 8, con coma decimal."""
+    t = f"{q:,.2f}" if a in STABLE else f"{q:,.8f}".rstrip("0").rstrip(".")
+    return t.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def warn_cuadre(uid, cursor):
+    """Tras sincronizar: si tu Binance (Spot + Fondos + Earn) no cuadra con tus movimientos, te avisa en el panel
+    qué cripto, cuánto y qué falta anotar. Una sola vez por cada diferencia: si sigue igual, no repite."""
+    c = cuadre(uid, db.profile(uid))
+    bad = [r for r in (c or {}).get("rows", []) if not r["ok"]]
+    sig = ";".join(f"{r['asset']}:{r['diff']:.6g}" for r in bad)
+    if sig == (cursor.get("cuadre_sig") or ""):
+        return
+    cursor["cuadre_sig"] = sig
+    db.binance_sync(uid, cursor=json.dumps(cursor))
+    if not bad:
+        return
+    lines = []
+    for r in bad[:4]:
+        a, d = r["asset"], r["diff"]
+        what = f"tienes {qty_txt(a, d)} más: falta una compra o algo que te llegó" if d > 0 \
+            else f"tienes {qty_txt(a, -d)} menos: falta una venta o algo que salió"
+        lines.append(f"{a}: en Binance {qty_txt(a, r['binance'])}, según tus movimientos {qty_txt(a, r['app'])} ({what})")
+    if len(bad) > 4:
+        lines.append(f"y {len(bad) - 4} más")
+    panel_notice(uid, sig, "Tu Binance no cuadra con la wallet", "\n".join(lines))
+
+
+def panel_notice(uid, key, title, text):
+    """Un aviso en el panel para esta persona (por la ruta interna firmada). Si el panel no responde, se pierde: el
+    cuadre igual se ve en Inicio."""
+    u = db.one("SELECT panel_uid FROM users WHERE id=?", (uid,))
+    if not u or not u["panel_uid"]:
+        return
+    secret, ts = sso.secret(_env, PANEL_ENV), int(time.time())
+    try:
+        requests.get(f"{PANEL_INTERNAL}/internal/aviso", params={"uid": u["panel_uid"], "ts": ts, "key": key, "title": title, "body": text},
+                     headers={"X-Wallet-Sig": sso.sign(secret, f"aviso|{u['panel_uid']}|{ts}|{key}|{title}|{text}")}, timeout=5)
+    except requests.RequestException:
+        pass
 
 
 def binance_status(uid):

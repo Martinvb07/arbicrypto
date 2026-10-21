@@ -1534,3 +1534,6 @@ tr:hover .op-adjust, .op-adjust:focus-visible { opacity: 1; }
   60% { opacity: 1; }
   100% { opacity: 1; transform: none; }
 }
+
+/* Inicio: qué cripto no cuadra con Binance y qué falta anotar */
+.cuadre-list { display: grid; gap: 4px; margin: 8px 0; padding-left: 18px; }

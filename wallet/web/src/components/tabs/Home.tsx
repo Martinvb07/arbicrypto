@@ -223,8 +223,18 @@ export function Home({ onTab }: { onTab: (t: TabId) => void }) {
           {bad.length > 0 && (
             <div className="card-body" style={{ paddingTop: 12 }}>
               <Note kind="warn">
-                <b>{bad.map((c) => c.asset).join(", ")}</b> no coincide con tus movimientos
-                {bad.length === 1 ? ` (según ellos tienes ${qty(bad[0].app_qty)})` : ""}. Falta anotar alguna entrada o salida.{" "}
+                <b>Tu Binance no cuadra con tus movimientos.</b> Te avisamos en el panel cada vez que cambia.
+                <ul className="cuadre-list">
+                  {bad.map((c) => {
+                    const d = c.qty - (c.app_qty ?? 0);
+                    return (
+                      <li key={c.asset}>
+                        <b>{c.asset}</b>: en Binance {qty(c.qty)} · según tus movimientos {qty(c.app_qty ?? 0)} ·{" "}
+                        {d > 0 ? <>tienes <b>{qty(d)} más</b>: falta una compra o algo que te llegó</> : <>tienes <b>{qty(-d)} menos</b>: falta una venta o algo que salió</>}
+                      </li>
+                    );
+                  })}
+                </ul>
                 <button className="link" onClick={() => onTab("movimientos")}>Ir a Movimientos</button>
               </Note>
             </div>

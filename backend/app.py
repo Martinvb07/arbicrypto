@@ -1198,7 +1198,7 @@ def run_loop(name, step, interval):
 SITE_PAGES = {"/inicio", "/arbitraje", "/vender", "/renta", "/precios", "/seguridad", "/preguntas"}
 PUBLIC_PATHS = {"/login", "/login.html", "/favicon.ico", "/robots.txt", "/api/auth/login", "/api/auth/register",
                 "/api/public/mercado", "/api/auth/logout", "/salir",
-                "/internal/binance", "/internal/avatar", "/internal/cuenta"} | SITE_PAGES  # solo responde a la wallet de este servidor, con firma (ver internal_binance)  # cerrar sesión funciona aunque ya haya vencido
+                "/internal/binance", "/internal/avatar", "/internal/cuenta", "/internal/aviso"} | SITE_PAGES  # solo responde a la wallet de este servidor, con firma (ver internal_binance)  # cerrar sesión funciona aunque ya haya vencido
 PUBLIC_PREFIXES = ("/_next/", "/coins/", "/brand/", "/icons/")
 # Lo que puede abrir en el panel alguien con acceso solo a la wallet (entrar, ir a su wallet y salir)
 WALLET_ONLY_PATHS = PUBLIC_PATHS | {"/wallet", "/login"}
@@ -2620,6 +2620,27 @@ def internal_binance():
     resp = jsonify(connected=bool(keys), key=keys[0] if keys else None, secret=keys[1] if keys else None)
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+@app.get("/internal/aviso")
+def internal_notice():
+    """La wallet de ESTE servidor le avisa algo a una persona (hoy: que su Binance no cuadra con sus movimientos).
+    Llega como un aviso más del panel (y por Telegram si es la cuenta principal). Mismas reglas que /internal/binance:
+    solo 127.0.0.1, firmada con SSO_SECRET y con hora (vale 30 s)."""
+    if not is_local() or request.headers.get("x-forwarded-for"):
+        abort(404)
+    a = request.args
+    uid, ts, key, title, body_ = a.get("uid", ""), a.get("ts", 0, type=int), a.get("key", ""), a.get("title", ""), a.get("body", "")
+    sig = request.headers.get("x-wallet-sig", "")
+    if not uid or not title or abs(time.time() - ts) > 30 \
+            or not hmac.compare_digest(sig, sso.sign(sso_secret, f"aviso|{uid}|{ts}|{key}|{title}|{body_}")):
+        abort(404)
+    name = next((n for n, u in auth.users.items() if u.get("uid") == uid), None)
+    if not name:
+        abort(404)
+    raise_alert(f"wallet:{uid}:{key[:80]}", "system", title[:120], body_[:600], user=name, telegram_too=name == main_user(),
+                links=[("Revisar en la wallet", wallet_url())])
+    return jsonify(ok=True)
 
 
 @app.get("/internal/avatar")
