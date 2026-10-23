@@ -214,28 +214,35 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   }, [report]);
   const moveById = useMemo(() => new Map((moves ?? []).map((m) => [m.id, m])), [moves]);
   const allBuys = useMemo(() => mine.filter((m) => m.kind === "compra"), [mine]);
-  const thirdOps = useMemo<Op[]>(() => (moves ?? []).filter((m) => m.tercero && inRange(m.t) && (m.kind === "compra" || m.kind === "venta")).map((m) => {
+  const thirdOps = useMemo<Op[]>(() => (moves ?? []).filter((m) => m.tercero && inRange(m.t) && (m.kind === "compra" || m.kind === "venta" || m.kind === "permuta")).map((m) => {
     const buy = m.kind === "compra";
     return { key: `t${m.id}`, id: m.id, t: m.t, kind: m.kind, asset: (buy ? m.in_asset : m.out_asset) ?? "", qty: (buy ? m.in_qty : m.out_qty) ?? 0,
-      received: null, cost: buy ? m.cop_value + (m.fee_cop || 0) : 0, gross: buy ? 0 : m.cop_value, fee: buy ? 0 : m.fee_cop || 0, gain: 0,
+      received: m.kind === "permuta" && m.in_asset ? `${qty(m.in_qty ?? 0)} ${m.in_asset}` : null, cost: buy ? m.cop_value + (m.fee_cop || 0) : 0, gross: buy ? 0 : m.cop_value, fee: buy ? 0 : m.fee_cop || 0, gain: 0,
       missing: false, gmf: m.gmf_cop || 0, net: 0, sources: [], buy, method: m.pay_method, counterpart: m.counterpart };
   }).sort((p, q) => q.t - p.t), [moves, a, b]);
 
-  /** Oculta (o vuelve a mostrar). Al ocultar una compra se van con ella las ventas que salieron de esa. */
+  /** Oculta (o vuelve a mostrar). Al ocultar una compra o una permuta se van con ella las ventas que salieron de lo que te llegó. */
   async function markThird(o: Op, on: boolean) {
     if (o.id == null) return;
     const ids = [o.id];
-    if (o.buy && on) for (const d of report?.disposals ?? []) {
-      if (d.sources?.some((x) => x.id === o.id)) ids.push(d.id);  // si no, quedarían vendidas sin su compra
-    }
-    if (o.buy && !on) for (const m of moves ?? []) {
-      if (m.tercero && m.kind === "venta" && m.lot_from === o.id) ids.push(m.id);
+    // en cadena: si de esa permuta salió otra permuta, lo que salió de la segunda también se va
+    for (let i = 0; i < ids.length; i++) {
+      const m = moveById.get(ids[i]);
+      if (m?.kind !== "compra" && m?.kind !== "permuta") continue;
+      if (on) for (const d of report?.disposals ?? []) {
+        if (!ids.includes(d.id) && d.sources?.some((x) => x.id === m.id)) ids.push(d.id);  // si no, quedarían vendidas sin su compra
+      }
+      else for (const x of moves ?? []) {
+        if (!x.tercero || ids.includes(x.id) || (x.kind !== "venta" && x.kind !== "permuta")) continue;
+        // las ocultas no salen en el reporte: vuelven las que eligieron esa compra o, de una permuta, las que gastaron después lo que te llegó
+        if (x.lot_from === m.id || (m.kind === "permuta" && x.lot_from == null && x.out_asset === m.in_asset && x.t >= m.t)) ids.push(x.id);
+      }
     }
     try {
       await api.movementsThird(ids, on);
       const more = ids.length - 1;
       toast(on ? "Oculta" : "Visible otra vez",
-        on ? `Ya no suma ni resta${more ? ` (con ${more === 1 ? "la venta que salió" : `${more} ventas que salieron`} de esa compra)` : ""}. La ves en "Ocultas".`
+        on ? `Ya no suma ni resta${more ? ` (con ${more === 1 ? "la venta que salió" : `${more} ventas que salieron`} de ${o.kind === "permuta" ? "lo que te llegó" : "esa compra"})` : ""}. La ves en "Ocultas".`
           : `Vuelve a contar en tus resultados${more ? ` con ${more} venta${more === 1 ? "" : "s"}` : ""}.`, "good");
       refresh();
     } catch (e) {
@@ -444,7 +451,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
               ))}
               {(thirdOps.length > 0 || show === "ocultas") && (
                 <button className={show === "ocultas" ? "on" : ""} onClick={() => { setShow("ocultas"); setPage(0); }}
-                  title="Compras y ventas que ocultaste: no suman ni restan">
+                  title="Compras, ventas y permutas que ocultaste: no suman ni restan">
                   Ocultas <span className="seg-count">{thirdOps.length}</span>
                 </button>
               )}
@@ -493,11 +500,13 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                             <span className="op-what">
                               <Badge kind={KIND_BADGE[o.kind]}>{KIND_LABEL[o.kind]}</Badge>
                               <Asset asset={o.asset} qty={qty(o.qty)} />
+                              {o.received && <span className="muted nowrap">→ {o.received}</span>}
                               <span className="third-tag"><Icon name="x" size={11} /> oculta</span>
                             </span>
                             {o.qty > 0 && (
                               <span className="cell-sub op-prices">
-                                {o.buy ? <>Compraste a <b>{unitPrice(o.price || o.cost / o.qty)}</b></> : <>Vendiste a <b>{unitPrice(o.gross / o.qty)}</b></>} por {o.asset}
+                                {o.buy ? <>Compraste a <b>{unitPrice(o.price || o.cost / o.qty)}</b></>
+                                  : <>{o.kind === "permuta" ? "Cambiaste" : "Vendiste"} a <b>{unitPrice(o.gross / o.qty)}</b></>} por {o.asset}
                                 {o.method ? ` · ${o.method}` : ""}{o.counterpart ? ` · ${o.counterpart}` : ""}
                               </span>
                             )}
@@ -545,7 +554,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                             <Badge kind={KIND_BADGE[o.kind]}>{KIND_LABEL[o.kind]}</Badge>
                             <Asset asset={o.asset} qty={qty(o.qty)} />
                             {o.kind === "permuta" && o.received && <span className="muted nowrap">→ {o.received}</span>}
-                            {o.kind === "venta" && o.id != null && <HideBtn onClick={() => void markThird(o, true)} />}
+                            {(o.kind === "venta" || o.kind === "permuta") && o.id != null && <HideBtn onClick={() => void markThird(o, true)} />}
                           </span>
                           {o.missing && <span className="cell-sub warn">Falta la compra: la ganancia puede salir más alta</span>}
                           {o.qty > 0 && o.kind === "venta" && o.cost > 0 && (
