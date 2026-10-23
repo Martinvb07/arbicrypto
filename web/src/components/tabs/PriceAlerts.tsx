@@ -2,7 +2,7 @@
 
 import { useState, type CSSProperties } from "react";
 import { api } from "@/lib/api";
-import { advertiserUrl, COIN_NAMES, isDollar, paysWith, takesCapital } from "@/lib/calc";
+import { advertiserUrl, COIN_NAMES, isDollar, paysWith, takesMine, walletQty } from "@/lib/calc";
 import { money, num, pctPlain } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, PriceAlert, Side, State } from "@/lib/types";
@@ -13,11 +13,18 @@ import { Ago, Coin, GoButton, Icon, Segmented, Toggle } from "../ui";
 const parseCop = (v: string) => Number(v.trim().replace(/[\s$]/g, "").replace(/\./g, "").replace(",", "."));
 const unitOf = (asset: string) => (isDollar(asset) ? "por dólar" : `por ${asset}`);
 
-/** El precio que hoy vale para la alerta: el mejor anuncio de ese lado (si mine, solo los que aceptan tu capital y medios). */
+/** El precio que hoy vale para la alerta: el mejor anuncio de ese lado. Con mine, solo los que te sirven por monto y
+ * medio de pago: al vender, los que reciben lo que tienes en tu Binance; sin saldo (o al comprar), tu capital. */
 function bestFor(s: State, asset: string, side: Side, mine: boolean): Ad | undefined {
   const ads = s.p2p?.market[asset]?.[side] ?? [];
   const methods = (side === "BUY" ? s.settings.pay_methods : s.settings.recv_methods) ?? [];
-  return mine ? ads.find((a) => takesCapital(a, s.settings.capital) && paysWith(a, methods)) : ads[0];
+  return mine ? ads.find((a) => takesMine(a, s, asset, side) && paysWith(a, methods)) : ads[0];
+}
+
+/** Con qué monto cuenta la alerta: al vender, tu saldo de esa moneda en Binance si tienes; si no, tu capital. */
+function amountFor(s: State, asset: string, side: Side) {
+  const q = side === "SELL" ? walletQty(s, asset) : 0;
+  return q ? { held: true, txt: `${isDollar(asset) ? num(q, 2) : num(q, 6)} ${asset}` } : { held: false, txt: money(s.settings.capital, 0) };
 }
 
 /** Qué tan cerca está el precio de la meta: 100 % = ya llegó. */
@@ -97,8 +104,12 @@ function AlertForm({ s, edit, asset0, onClose }: { s: State; edit: PriceAlert | 
         {ahead && <p className="pf-worth"><Icon name="info" size={15} /><span>Ese precio ya está disponible: te avisará apenas guardes.</span></p>}
         <div className={`pf-alert ${mine ? "on" : ""}`}>
           <div>
-            <b><Icon name="wallet" size={16} /> Solo con mi capital</b>
-            <span className="dim small">Solo cuentan anuncios que aceptan {money(s.settings.capital, 0)} y tus medios de pago.</span>
+            <b><Icon name="wallet" size={16} /> {amountFor(s, asset, side).held ? "Solo con lo que tengo" : "Solo con mi capital"}</b>
+            <span className="dim small">
+              {amountFor(s, asset, side).held
+                ? <>Solo cuentan anuncios que reciben tus {amountFor(s, asset, side).txt} (lo que tienes en Binance) y tus medios de pago.</>
+                : <>Solo cuentan anuncios que aceptan {amountFor(s, asset, side).txt} y tus medios de pago{side === "SELL" ? ` (no tienes ${asset} en Binance)` : ""}.</>}
+            </span>
           </div>
           <Toggle on={mine} onChange={setMine} label="Solo con mi capital" />
         </div>
@@ -153,7 +164,7 @@ function AlertRow({ a, s, i, onEdit }: { a: PriceAlert; s: State; i: number; onE
         </div>
       </div>
       <div className="pa-cell">
-        <small>Hoy {a.mine ? "con tu capital" : "(cualquier monto)"}</small>
+        <small>Hoy {a.mine ? (amountFor(s, a.asset, a.side).held ? `con tus ${amountFor(s, a.asset, a.side).txt}` : "con tu capital") : "(cualquier monto)"}</small>
         <b>{now ? money(now) : "—"}</b>
         {ad && <span className="dim">{ad.nick}</span>}
       </div>
@@ -163,7 +174,7 @@ function AlertRow({ a, s, i, onEdit }: { a: PriceAlert; s: State; i: number; onE
         <span className="dim">{a.hits ? <>avisó {a.hits} {a.hits === 1 ? "vez" : "veces"}{a.last_hit ? <> · <Ago t={a.last_hit} /></> : null}</> : a.once ? "avisa una vez" : "avisa con cada anuncio que llegue"}</span>
       </div>
       <div className="pa-tags">
-        {a.mine && <span className="badge brand"><Icon name="wallet" size={12} /> Mi capital</span>}
+        {a.mine && <span className="badge brand"><Icon name="wallet" size={12} /> {amountFor(s, a.asset, a.side).held ? "Mi saldo" : "Mi capital"}</span>}
         {p.hit && a.on && ad && (
           <GoButton href={advertiserUrl(ad)} icon={buy ? "cart" : "handCoins"} strong>{buy ? "Comprar" : "Vender"}</GoButton>
         )}

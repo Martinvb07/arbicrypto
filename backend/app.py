@@ -936,14 +936,28 @@ price_alerts = []
 price_lock = threading.Lock()
 
 
+def wallet_qty(user, asset):
+    """Lo que la persona tiene de `asset` en su Binance (Spot + Fondos) para vender; 0 si no tiene o es menos de un
+    dólar (polvo: ningún anuncio lo recibe)."""
+    acc = acc_state.get(user) or {}
+    q = sum(float((acc.get(w) or {}).get(asset) or 0) for w in ("spot", "funding"))
+    usd = engine.usdt_value(graph, asset, q) if q > 0 and graph else None
+    return q if usd and usd >= 1 else 0.0
+
+
 def price_ads(alert, market):
     """Anuncios que cuentan para esa alerta, del mejor al peor: BUY = los mas baratos para comprar, SELL = los que mas
-    pagan al vender. Con mine=True solo los que aceptan tu capital y tus medios de pago."""
+    pagan al vender. Con mine=True solo los que te sirven por monto y medio de pago: al vender, los que reciben lo que
+    tienes en tu Binance; sin saldo (o al comprar), los que aceptan tu capital."""
     pr = profile(alert["user"])
     cap = pr["capital"]
+    held = wallet_qty(alert["user"], alert["asset"]) if alert["side"] == "SELL" else 0.0
     methods = pr["pay_methods"] if alert["side"] == "BUY" else pr["recv_methods"]
+
+    def fits(ad):
+        return engine._fits(ad, held * ad["price"], held) if held else engine._fits(ad, cap, cap / ad["price"])
     return [ad for ad in market.get(alert["asset"], {}).get(alert["side"]) or []
-            if not alert.get("mine", True) or (engine._fits(ad, cap, cap / ad["price"]) and engine._pays_with(ad, methods))]
+            if not alert.get("mine", True) or (fits(ad) and engine._pays_with(ad, methods))]
 
 
 def price_meets(alert, ad):
