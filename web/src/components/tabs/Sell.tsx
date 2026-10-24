@@ -292,7 +292,14 @@ function CoinHistory({ w, hist, gmf, others, onMove }: { w: Watch; hist: WatchMo
   );
 }
 
-function CoinRow({ w, i, onEdit, others }: { w: Watch; i: number; onEdit: () => void; others: Watch[] }) {
+/** Mis monedas sigue tus órdenes P2P: lo que cambias en Spot no lo ve. Si lo que tienes en Binance no cuadra, se dice aquí. */
+function binanceGap(w: Watch, held: number | null, others: Watch[]) {
+  if (held == null || others.length) return null;  // sin cuenta leída, o con varias filas de esa cripto no se sabe de cuál es
+  const tol = isDollar(w.asset) ? 0.01 : Math.max(w.qty * 1e-4, 1e-8);
+  return Math.abs(held - w.qty) > tol ? held : null;
+}
+
+function CoinRow({ w, i, onEdit, others, held }: { w: Watch; i: number; onEdit: () => void; others: Watch[]; held: number | null }) {
   const { state, toast, refresh } = useLive();
   const gmf = state?.settings.gmf ?? 0; // 4x1000 que pagaste al comprar
   const [open, setOpen] = useState(false);
@@ -326,6 +333,20 @@ function CoinRow({ w, i, onEdit, others }: { w: Watch; i: number; onEdit: () => 
       setSaving(false);
     }
   };
+  const real = binanceGap(w, held, others);
+  const useBinance = async () => {
+    if (real == null) return;
+    setSaving(true);
+    try {
+      await api.updateWatch(w.id, { qty: real });  // lo que pagaste se queda igual: lo que falta se fue en comisiones o cambios
+      toast("Listo", `Ahora dice ${amount(w.asset, real)}, como en tu Binance`, "good");
+      refresh();
+    } catch (e) {
+      toast("No se pudo cambiar", (e as Error).message, "bad");
+    } finally {
+      setSaving(false);
+    }
+  };
   const remove = async () => {
     if (!(await ask({ title: `¿Quitar ${w.asset} de tu lista?`, body: "Ya no la seguiré ni te avisaré por ella.", confirm: "Quitar", tone: "danger", icon: "trash" }))) return;
     try {
@@ -351,6 +372,16 @@ function CoinRow({ w, i, onEdit, others }: { w: Watch; i: number; onEdit: () => 
                 <Icon name="chevronDown" size={10} className="chev" />
               </button>
             )}
+            {real != null && (real > 0 && real < w.qty ? (
+              <button className="data-check" onClick={() => void useBinance()} disabled={saving}
+                title="En Binance (Spot + Fondos) tienes menos: lo que falta se fue en comisiones o en cambios en Spot. Lo que pagaste se queda igual">
+                <Icon name="alert" size={13} /> En Binance tienes {num(real, isDollar(w.asset) ? 2 : 8)} · Usar lo de Binance
+              </button>
+            ) : (
+              <span className="data-check" title="Puede ser de una compra que no está en esta fila: si es de esta, edítala con lo que pagaste">
+                <Icon name="alert" size={13} /> {real > 0 ? `En Binance tienes ${num(real, isDollar(w.asset) ? 2 : 8)}` : "En Binance ya no la tienes"}
+              </span>
+            ))}
           </div>
         </div>
         <div className="crow-cell"><small>Te costó</small><b>{money(w.cost * (1 + gmf), 0)}</b>
@@ -435,6 +466,7 @@ export function Sell() {
               <span>Moneda</span><span>Te costó</span><span>Si vendes ahora</span><span>Meta</span><span>Aviso</span><span />
             </div>
             {live.map((w, i) => <CoinRow key={w.id} w={w} i={i} onEdit={() => setForm({ edit: w })}
+              held={state.account ? holdings.find((h) => h.asset === w.asset)?.qty ?? 0 : null}
               others={live.filter((x) => x.id !== w.id && x.asset === w.asset)} />)}
           </div>
         ) : (
