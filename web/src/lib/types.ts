@@ -202,7 +202,12 @@ export interface Settings {
   /** Medios con los que pagas al comprar y por los que recibes al vender (vacío = todos). */
   pay_methods: string[];
   recv_methods: string[];
+  /** Avisos silenciados: por tipo ("spot", "p2p", "sell", "price") o rutas puntuales ("p2p:USDT>BTC"). */
+  muted_kinds?: MutableKind[];
+  muted_routes?: string[];
 }
+
+export type MutableKind = "spot" | "p2p" | "sell" | "price";
 
 /** "Avísame cuando USDT esté barato": el servidor la revisa en cada escaneo P2P. */
 export interface PriceAlert {

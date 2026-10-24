@@ -107,6 +107,9 @@ LIMITS = {"capital": (10000, 1e10), "min_per_usd": (0, 1e5), "gmf": (0, 0.01), "
           "bank_fee": (0, 100000), "tax": (0, 0.39)}
 # Medios de pago de cada usuario: con cuales paga al comprar y por cuales recibe al vender (vacio = todos)
 METHOD_LISTS = ("pay_methods", "recv_methods")
+# Avisos que cada usuario silencia: por tipo (todo el arbitraje Spot, todo el P2P...) o una ruta puntual ("p2p:USDT>BTC")
+MUTABLE_KINDS = ("spot", "p2p", "sell", "price")
+MUTED_ROUTES_MAX = 100
 PRICE_ALERT_MAX = 20              # alertas de precio por usuario
 
 CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
@@ -177,7 +180,24 @@ def profile(name):
     out["tax"] = 0  # la renta se cuadra por aparte: el panel no la descuenta (aunque se haya guardado otra)
     for k in METHOD_LISTS:
         out[k] = [str(m) for m in mine.get(k) or []]
+    out["muted_kinds"] = [k for k in mine.get("muted_kinds") or [] if k in MUTABLE_KINDS]
+    out["muted_routes"] = [str(r) for r in mine.get("muted_routes") or []]
     return out
+
+
+def clean_muted(raw):
+    """muted_kinds: solo tipos conocidos. muted_routes: ids de ruta como "p2p:USDT>BTC" o "spot:USDT>BTC>ETH>USDT"."""
+    kinds = sorted({k for k in raw.get("muted_kinds") or [] if k in MUTABLE_KINDS}) if isinstance(raw.get("muted_kinds"), list) else None
+    routes = (sorted({str(r).strip()[:120] for r in raw.get("muted_routes") or []
+                      if re.fullmatch(r"(p2p|spot):[A-Z0-9]{2,15}(>[A-Z0-9]{2,15}){1,4}", str(r).strip())})[:MUTED_ROUTES_MAX]
+              if isinstance(raw.get("muted_routes"), list) else None)
+    return {k: v for k, v in (("muted_kinds", kinds), ("muted_routes", routes)) if v is not None and k in raw}
+
+
+def wants_alert(name, kind, key):
+    """¿Este usuario quiere el aviso? No, si silenció ese tipo o esa ruta (la clave del aviso empieza con el id de la ruta)."""
+    pr = profile(name)
+    return kind not in pr["muted_kinds"] and key.split("@")[0] not in pr["muted_routes"]
 
 
 def clean_methods(raw):
@@ -347,6 +367,11 @@ def raise_alert(key, kind, title, body, capital=None, user=None, telegram_too=Tr
     """links: [(texto, url)] para ir directo a Binance desde el aviso (anunciante, par de Spot...)."""
     now = time.time()
     audience = list(users) if users is not None else [user] if user else [ADMINS]
+    if kind in MUTABLE_KINDS:  # los del sistema, del equipo y de prueba no se silencian
+        audience = [n for n in audience if n == ADMINS or wants_alert(n, kind, key)]
+        if not audience:
+            return
+        telegram_too = telegram_too and (main_user() in audience or (user is None and users is None))
     links = [{"label": label, "url": url} for label, url in links if url]
     with lock:
         if now - last_alert.get(key, 0) < ALERT_COOLDOWN:
@@ -2062,6 +2087,7 @@ def api_settings():
     raw = body()
     b = {k: v for k, v in raw.items() if k in PERSONAL}
     lists = {k: clean_methods(raw[k]) for k in METHOD_LISTS if k in raw}
+    lists.update(clean_muted(raw))
     if not b and not lists:
         return jsonify(error="Nada que guardar."), 400
     # capital, 4x1000, "avisar desde", costos y medios son de cada usuario, tambien de los administradores

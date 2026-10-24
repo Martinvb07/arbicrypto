@@ -2,7 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { routeName } from "@/lib/calc";
 import { perUsd } from "@/lib/format";
+import type { MutableKind } from "@/lib/types";
 import { goWithSplash } from "./splash";
 import { avatarImage, chatUnread, useChat } from "@/lib/chat";
 import { useLive } from "@/lib/live";
@@ -38,6 +40,13 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: 
   return <label className="switch"><input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} aria-label={label} /></label>;
 }
 
+const KINDS: { kind: MutableKind; title: string; sub: string }[] = [
+  { kind: "p2p", title: "Arbitraje P2P", sub: "Rutas que compran y venden en P2P" },
+  { kind: "spot", title: "Arbitraje en Spot", sub: "Triángulos dentro de Binance" },
+  { kind: "sell", title: "Ventas de mis monedas", sub: "Cuando ya puedes vender con ganancia" },
+  { kind: "price", title: "Alertas de precio", sub: "Las que creaste tú" },
+];
+
 function AlertsMenu({ onTelegram }: { onTelegram: () => void }) {
   const { state, prefs, setPrefs, permission, askPermission, soundReady, enableSound, saveSettings, toast } = useLive();
   const [minUsd, setMinUsd] = useState("");
@@ -54,6 +63,11 @@ function AlertsMenu({ onTelegram }: { onTelegram: () => void }) {
     if (!Number.isFinite(n) || n === state.settings.min_per_usd) return setMinUsd(String(state.settings.min_per_usd));
     if (await saveSettings({ min_per_usd: n })) toast("Aviso actualizado", `Te avisamos desde ${perUsd(n)} por dólar.`, "good", 2500);
   };
+  const mutedKinds = state.settings.muted_kinds ?? [];
+  const mutedRoutes = state.settings.muted_routes ?? [];
+  const setKind = (kind: MutableKind, on: boolean) =>
+    void saveSettings({ muted_kinds: on ? mutedKinds.filter((k) => k !== kind) : [...mutedKinds, kind] });
+  const unmute = (id: string) => void saveSettings({ muted_routes: mutedRoutes.filter((r) => r !== id) });
   const test = () => api.testAlert().then(() => undefined, (e: Error) => toast("Espera", e.message, "info"));
   return (
     <Menu label="Avisos" width={340} buttonClass={`btn btn-sm ${ready ? "bell-on" : "bell-warn"}`}
@@ -81,6 +95,22 @@ function AlertsMenu({ onTelegram }: { onTelegram: () => void }) {
             {admin ? <button className="btn btn-sm" onClick={() => { close(); onTelegram(); }}>{state.telegram.ready ? "Cambiar" : "Configurar"}</button>
               : <span className={state.telegram.ready ? "up" : "muted"}>{state.telegram.ready ? "Activo" : "No configurado"}</span>}
           </Row>
+          <div className="pop-head" style={{ marginTop: 12 }}><b>Qué avisar</b><small>Lo que apagues no suena ni llega al celular; las rutas se siguen viendo en el panel</small></div>
+          {KINDS.map(({ kind, title, sub }) => (
+            <Row key={kind} title={title} sub={sub}>
+              <Switch checked={!mutedKinds.includes(kind)} onChange={(v) => setKind(kind, v)} label={title} />
+            </Row>
+          ))}
+          {mutedRoutes.length > 0 && (
+            <>
+              <div className="pop-head" style={{ marginTop: 12 }}><b>Rutas silenciadas</b><small>Se silencian desde los pasos de cada ruta</small></div>
+              {mutedRoutes.map((id) => (
+                <Row key={id} title={routeName(id, state.p2p?.fiat)} sub={id.startsWith("spot:") ? "Spot" : "P2P"}>
+                  <button className="btn btn-sm" onClick={() => unmute(id)}>Reactivar</button>
+                </Row>
+              ))}
+            </>
+          )}
           <button className="btn btn-sm" style={{ width: "100%", marginTop: 10 }} onClick={() => void test()}>Probar aviso</button>
         </div>
       )}

@@ -145,6 +145,24 @@ function Breakdown({ route }: { route: Route }) {
   );
 }
 
+/** Silenciar (o volver a recibir) los avisos de esta ruta, sin tocar las demás. */
+function MuteRoute({ id }: { id: string }) {
+  const { state, saveSettings, toast } = useLive();
+  if (!state) return null;
+  const muted = state.settings.muted_routes ?? [];
+  const on = muted.includes(id);
+  const toggle = async () => {
+    const next = on ? muted.filter((r) => r !== id) : [...muted, id];
+    if (await saveSettings({ muted_routes: next }))
+      toast(on ? "Avisos activados" : "Ruta silenciada", on ? "Te volvemos a avisar de esta ruta." : "No te avisamos más de esta ruta. Puedes reactivarla aquí o en Avisos.", "good", 2500);
+  };
+  return (
+    <button type="button" className="btn btn-sm mute-route" onClick={() => void toggle()} title={on ? "Volver a recibir avisos de esta ruta" : "No avisar más de esta ruta (la sigues viendo aquí)"}>
+      <Icon name={on ? "bell" : "bellOff"} size={14} /> {on ? "Volver a avisar de esta ruta" : "Silenciar avisos de esta ruta"}
+    </button>
+  );
+}
+
 function SafetyNote() {
   return (
     <p className="note">
@@ -192,6 +210,7 @@ export function Steps({ row, s }: { row: Row; s: State }) {
           ))}
         </ol>
         <SafetyNote />
+        <MuteRoute id={row.id} />
       </>
     );
   }
@@ -251,6 +270,7 @@ export function Steps({ row, s }: { row: Row; s: State }) {
       </ol>
       <Breakdown route={row.route} />
       {steps.some((st) => st.venue === "Spot") && <SafetyNote />}
+      <MuteRoute id={row.id} />
     </>
   );
 }

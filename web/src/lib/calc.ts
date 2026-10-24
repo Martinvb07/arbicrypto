@@ -51,6 +51,14 @@ export function walletQty(s: State, asset: string) {
   return q * price >= (s.usd_ref ?? 4000) ? q : 0;
 }
 
+/** "p2p:USDT>BTC" → "COP → USDT → BTC → COP"; "spot:USDT>BTC>ETH>USDT" → "USDT → BTC → ETH → USDT". */
+export function routeName(id: string, fiat = "COP") {
+  const [venue, path = ""] = id.split(":");
+  const coins = path.split(">");
+  if (venue === "spot") return coins.join(" → ");
+  return [fiat, ...(coins[0] === coins[1] ? [coins[0]] : coins), fiat].join(" → ");
+}
+
 /** ¿El anuncio me sirve por monto? Al vender cuenta lo que tienes en tu billetera de Binance; sin saldo (o al comprar), tu capital. */
 export function takesMine(ad: Ad, s: State, asset: string, side: Side) {
   const q = side === "SELL" ? walletQty(s, asset) : 0;

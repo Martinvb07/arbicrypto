@@ -249,6 +249,7 @@ main { padding-top: 22px; padding-bottom: 12px; }
 table.clickable tbody tr { cursor: pointer; }
 .note { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 12.5px; color: var(--muted); }
 .note svg { color: var(--up); }
+.mute-route { margin-top: 10px; display: inline-flex; align-items: center; gap: 6px; }
 .link-btn { font-size: 12.5px; font-weight: 650; color: var(--accent); }
 .t tr.detail td { background: var(--surface-2); padding: 4px 16px 8px; }
 .t tr.detail:hover td { background: var(--surface-2); }
@@ -565,7 +566,7 @@ label.chip:has(input:checked)::before { content: "✓"; font-weight: 800; color:
 
 /* ---------- menu de avisos ---------- */
 .btn.bell-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-.pop { padding: 6px 8px 8px; display: grid; }
+.pop { padding: 6px 8px 8px; display: grid; max-height: min(80vh, 680px); overflow-y: auto; }
 .pop-head { padding: 4px 0 10px; border-bottom: 1px solid var(--border); display: grid; gap: 2px; }
 .pop-head small, .pop-row small { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
 .pop-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
