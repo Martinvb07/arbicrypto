@@ -358,6 +358,19 @@ def _fits(ad, fiat_amount, crypto_qty, btc_held=0.0):
             and btc_held >= ad.get("hold_btc", 0))
 
 
+# Margen sobre el mínimo en pesos del comprador al final de una ruta: entre comprar, cambiar en Spot y vender pasan minutos,
+# y si la cripto baja, el precio del anuncio baja con ella y lo que vendes puede quedar debajo de su mínimo (Binance no deja
+# vender). Ej.: 0,001996 BTC a $253.959.868 son $506.904, solo 1,4 % sobre un mínimo de $500.000. Los dólares casi no se mueven.
+SELL_MIN_MARGIN = 0.03
+SELL_MIN_MARGIN_USD = 0.01
+DOLLARS = ("USDT", "USDC", "FDUSD")
+
+
+def _clears_min(ad, asset, fiat_amount):
+    """Lo que vendes queda holgado sobre el mínimo del comprador, aunque el precio se mueva un poco."""
+    return fiat_amount >= ad["min"] * (1 + (SELL_MIN_MARGIN_USD if asset in DOLLARS else SELL_MIN_MARGIN))
+
+
 def _pays_with(ad, methods):
     """El anuncio acepta alguno de tus medios de pago (sin medios elegidos, todos sirven)."""
     return not methods or any(m in methods for m in ad["methods"])
@@ -376,7 +389,8 @@ def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0, bank_fee=0.0
     def sell_ad(asset, qty):
         held = qty if asset == "BTC" else 0.0  # al vender BTC tienes al menos lo que vas a vender
         return next((a for a in market.get(asset, {}).get("SELL") or []
-                     if _fits(a, qty * a["price"], qty, held) and _pays_with(a, recv)), None)
+                     if _fits(a, qty * a["price"], qty, held) and _clears_min(a, asset, qty * a["price"])
+                     and _pays_with(a, recv)), None)
 
     def p2p_step(kind, asset, ad, qty):
         return {"venue": "P2P", "kind": kind, "asset": asset, "label": f"{'Comprar' if kind == 'buy' else 'Vender'} {asset}",
