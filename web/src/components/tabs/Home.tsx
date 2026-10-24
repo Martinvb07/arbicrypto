@@ -237,6 +237,11 @@ export function Steps({ row, s }: { row: Row; s: State }) {
                 <div className="step-sub">
                   <b>{st.ad.nick}</b>{" "}
                   <span className="muted">({num(st.ad.orders, 0)} órdenes, {num(st.ad.finish * 100, 0)} %)</span> · {st.ad.methods.slice(0, 3).join(", ")}
+                  <span className="muted">
+                    {" "}· acepta {money(st.ad.min, 0)} – {money(st.ad.max, 0)}
+                    {st.ad.min_qty ? ` · mínimo ${qty(st.ad.min_qty)} ${st.asset}` : ""}
+                    {st.ad.hold_btc ? ` · pide tener ${qty(st.ad.hold_btc)} BTC` : ""}
+                  </span>
                 </div>
                 <P2PActions kind={st.kind} asset={st.asset} ad={st.ad} qty={st.qty} pay={row.route.paid} strong={row.opp} />
               </div>

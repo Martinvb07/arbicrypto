@@ -7,6 +7,11 @@ export interface Ad {
   min: number;
   max: number;
   available: number;
+  /** Límites en cripto por orden (0 = sin límite aparte del de pesos). */
+  min_qty?: number;
+  max_qty?: number;
+  /** BTC que el anunciante exige tener para tomar su anuncio (0 = no exige). */
+  hold_btc?: number;
   methods: string[];
   nick: string;
   user: string | null;

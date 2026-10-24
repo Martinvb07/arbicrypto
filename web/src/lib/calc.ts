@@ -40,7 +40,7 @@ export function netOf(paid: number, received: number, s: State) {
 export const paysWith = (ad: Ad, methods: string[] | undefined) => !methods?.length || ad.methods.some((m) => methods.includes(m));
 
 /** ¿El anuncio acepta mi capital (monto y cripto disponible)? */
-export const takesCapital = (ad: Ad, capital: number) => ad.min <= capital && capital <= ad.max && (!ad.available || ad.available >= capital / ad.price);
+export const takesCapital = (ad: Ad, capital: number) => fitsAd(ad, capital, capital / ad.price);
 
 /** Lo que tienes de `asset` en tu Binance (Spot + Fondos) para vender; 0 si no tienes o es menos de un dólar (polvo). */
 export function walletQty(s: State, asset: string) {
@@ -54,7 +54,7 @@ export function walletQty(s: State, asset: string) {
 /** ¿El anuncio me sirve por monto? Al vender cuenta lo que tienes en tu billetera de Binance; sin saldo (o al comprar), tu capital. */
 export function takesMine(ad: Ad, s: State, asset: string, side: Side) {
   const q = side === "SELL" ? walletQty(s, asset) : 0;
-  return takesCapital(ad, q ? q * ad.price : s.settings.capital);
+  return q ? fitsAd(ad, q * ad.price, q, asset === "BTC" ? q : 0) : takesCapital(ad, s.settings.capital);
 }
 
 export function usdtPrices(s: State) {
@@ -159,8 +159,11 @@ export function bestDeal(s: State, asset: string): Deal | null {
     for (const v of m.SELL.filter((a) => trusted(a) && paysWith(a, s.settings.recv_methods))) {
       if ((v.price * k * k) / b.price - 1 - s.settings.gmf <= 0) continue; // ni antes de transferencia y renta gana
       const c = (v.price * k) / b.price; // pesos que vale en el anuncio de venta cada peso que pagas
-      const lo = Math.ceil(Math.max(b.min, v.min / c));
-      const hi = Math.floor(Math.min(b.max, v.max / c, b.available ? b.available * b.price : Infinity, v.available ? (v.available * b.price) / k : Infinity));
+      if (b.hold_btc || (v.hold_btc && asset !== "BTC")) continue; // exige tener BTC que no sabemos si tienes
+      // límites en cripto: compras `amount / b.price` y vendes eso por k (montos en pesos que pagas)
+      const lo = Math.ceil(Math.max(b.min, v.min / c, (b.min_qty ?? 0) * b.price, ((Math.max(v.min_qty ?? 0, v.hold_btc ?? 0)) * b.price) / k));
+      const hi = Math.floor(Math.min(b.max, v.max / c, b.available ? b.available * b.price : Infinity, v.available ? (v.available * b.price) / k : Infinity,
+        b.max_qty ? b.max_qty * b.price : Infinity, v.max_qty ? (v.max_qty * b.price) / k : Infinity));
       if (!(lo <= hi)) continue;
       const amount = Math.min(Math.max(cap, lo), hi);
       const { ratio } = netOf(amount, dealReceived(s, asset, b, v, amount), s); // comisión con ESTE monto (pesa el mínimo fijo)
@@ -177,8 +180,13 @@ export function bestDeal(s: State, asset: string): Deal | null {
  *  pagan 20 % menos). Se usa la más alta mientras no tengas órdenes como anunciante: así nunca promete de más. */
 export const MAKER_FEE_REF = 0.0035;
 
-/** El anuncio acepta ese monto en pesos y tiene esa cripto disponible. */
-export const fitsAd = (ad: Ad, fiat: number, crypto: number) => ad.min <= fiat && fiat <= ad.max && (!ad.available || ad.available >= crypto);
+/** El anuncio acepta ese monto en pesos y esa cantidad de cripto, tiene esa cripto disponible y no exige tener más BTC
+ *  de los que tienes (sin saberlo se cuenta como 0). Es `function` para que `takesCapital`, arriba, la pueda usar. */
+export function fitsAd(ad: Ad, fiat: number, crypto: number, btcHeld = 0) {
+  return ad.min <= fiat && fiat <= ad.max
+    && (!ad.min_qty || crypto >= ad.min_qty) && (!ad.max_qty || crypto <= ad.max_qty)
+    && (!ad.available || ad.available >= crypto) && btcHeld >= (ad.hold_btc ?? 0);
+}
 
 /** Puesto que tendría tu anuncio entre los que ya hay. BUY: tu anuncio compra y compite con los que compran (gana el más alto).
  *  SELL: tu anuncio vende y compite con los que venden (gana el más bajo). */

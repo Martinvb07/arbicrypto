@@ -283,6 +283,11 @@ def _ad(a):
         "min": float(adv.get("minSingleTransAmount") or 0),
         "max": float(adv.get("dynamicMaxSingleTransAmount") or adv.get("maxSingleTransAmount") or 0),
         "available": float(adv.get("tradableQuantity") or adv.get("surplusAmount") or 0),
+        # Límites en cripto por orden (aparte de los de pesos): un comprador puede pedir, por ejemplo, mínimo 0,002 BTC
+        "min_qty": float(adv.get("minSingleTransQuantity") or 0),
+        "max_qty": float(adv.get("dynamicMaxSingleTransQuantity") or adv.get("maxSingleTransQuantity") or 0),
+        # Condición del anunciante: solo deja tomar su anuncio a quien tenga al menos esa cantidad de BTC
+        "hold_btc": float(adv.get("buyerBtcPositionLimit") or 0),
         "methods": [m.get("tradeMethodName") or m.get("identifier") for m in adv.get("tradeMethods") or []],
         "nick": user.get("nickName") or "?",
         "user": user.get("userNo"),
@@ -343,9 +348,14 @@ def with_gmf(paid, gmf):
     return paid * (1 + gmf)
 
 
-def _fits(ad, fiat_amount, crypto_qty):
-    """El anuncio acepta este monto en pesos y tiene suficiente cripto disponible."""
-    return ad["min"] <= fiat_amount <= ad["max"] and (not ad["available"] or ad["available"] >= crypto_qty)
+def _fits(ad, fiat_amount, crypto_qty, btc_held=0.0):
+    """El anuncio acepta este monto en pesos y esta cantidad de cripto, tiene suficiente disponible y no exige tener
+    más BTC de los que tienes (`btc_held`; sin saberlo se cuenta como 0, así nunca promete un anuncio que no deja entrar)."""
+    return (ad["min"] <= fiat_amount <= ad["max"]
+            and (not ad.get("min_qty") or crypto_qty >= ad["min_qty"])
+            and (not ad.get("max_qty") or crypto_qty <= ad["max_qty"])
+            and (not ad["available"] or ad["available"] >= crypto_qty)
+            and btc_held >= ad.get("hold_btc", 0))
 
 
 def _pays_with(ad, methods):
@@ -364,8 +374,9 @@ def p2p_routes(market, graph, fee, gmf, capital, fiat, p2p_fee=0.0, bank_fee=0.0
                      if _fits(a, capital, capital / a["price"]) and _pays_with(a, pay)), None)
 
     def sell_ad(asset, qty):
+        held = qty if asset == "BTC" else 0.0  # al vender BTC tienes al menos lo que vas a vender
         return next((a for a in market.get(asset, {}).get("SELL") or []
-                     if _fits(a, qty * a["price"], qty) and _pays_with(a, recv)), None)
+                     if _fits(a, qty * a["price"], qty, held) and _pays_with(a, recv)), None)
 
     def p2p_step(kind, asset, ad, qty):
         return {"venue": "P2P", "kind": kind, "asset": asset, "label": f"{'Comprar' if kind == 'buy' else 'Vender'} {asset}",
@@ -496,7 +507,7 @@ def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, mi
         except (requests.RequestException, BinanceError):
             errors.append(y)
             continue
-        ok = [a for a in ads if _fits(a, got * a["price"], got)]
+        ok = [a for a in ads if _fits(a, got * a["price"], got, got if y == "BTC" else 0.0)]
         if not ok:
             continue
         best = ok[0]

@@ -759,8 +759,8 @@ def watch_partial(w):
     for ad in ads:
         if ad["max"] >= w["qty"] * ad["price"]:
             continue  # ese acepta todo: ya es la venta normal
-        q = min(w["qty"], ad["max"] / ad["price"], ad["available"] or float("inf"))
-        if q <= 0 or q * ad["price"] < ad["min"]:
+        q = min(w["qty"], ad["max"] / ad["price"], ad["available"] or float("inf"), ad.get("max_qty") or float("inf"))
+        if q <= 0 or q * ad["price"] < ad["min"] or q < ad.get("min_qty", 0) or ad.get("hold_btc", 0) > (w["qty"] if w["asset"] == "BTC" else 0):
             continue
         cut = engine.p2p_taker_fee(graph, w["asset"], q, *fee)
         received = (q - cut) * ad["price"]
@@ -955,7 +955,8 @@ def price_ads(alert, market):
     methods = pr["pay_methods"] if alert["side"] == "BUY" else pr["recv_methods"]
 
     def fits(ad):
-        return engine._fits(ad, held * ad["price"], held) if held else engine._fits(ad, cap, cap / ad["price"])
+        btc = held if alert["asset"] == "BTC" else 0.0
+        return engine._fits(ad, held * ad["price"], held, btc) if held else engine._fits(ad, cap, cap / ad["price"])
     return [ad for ad in market.get(alert["asset"], {}).get(alert["side"]) or []
             if not alert.get("mine", True) or (fits(ad) and engine._pays_with(ad, methods))]
 
@@ -2692,7 +2693,7 @@ def sell_now(name, asset, qty):
     ads = (p2p["market"].get(asset) or {}).get("SELL") if p2p else None
     if not ads or not graph or qty <= 0:
         return None
-    ad = next((a for a in ads if engine._fits(a, qty * a["price"], qty)), None)
+    ad = next((a for a in ads if engine._fits(a, qty * a["price"], qty, qty if asset == "BTC" else 0.0)), None)
     if not ad:
         return None
     cut = engine.p2p_taker_fee(graph, asset, qty, *taker_fee_of(profile(name)))
@@ -2726,7 +2727,7 @@ def internal_account():
         rate, min_usd = taker_fee_of(profile(name))
         market = (state["p2p"] or {}).get("market") or {}
         account["p2p"] = {"fee": rate, "min_usd": min_usd, "buyers": {
-            a: [{k: ad[k] for k in ("price", "nick", "min", "max", "available")} for ad in (market.get(a) or {}).get("SELL", [])[:15]]
+            a: [{k: ad.get(k) for k in ("price", "nick", "min", "max", "available", "min_qty", "max_qty", "hold_btc")} for ad in (market.get(a) or {}).get("SELL", [])[:15]]
             for a in P2P_ASSETS}}
     resp = jsonify(connected=bool(name and name in accounts), account=account,
                    error=error["msg"] if error else None, fiat=FIAT)

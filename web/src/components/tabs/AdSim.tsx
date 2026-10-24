@@ -128,7 +128,7 @@ function Simulator({ s, asset, m, amount, rounds, makerFee }: {
 
   // venta: tu anuncio compite con los que venden (m.BUY); si tomas uno, le vendes a los que compran (m.SELL)
   const sellStr = sellTyped ?? String(m.BUY[0]?.price ?? "");
-  const sellTaken = got ? m.SELL.find((a) => fitsAd(a, got * a.price, got)) : undefined;
+  const sellTaken = got ? m.SELL.find((a) => fitsAd(a, got * a.price, got, asset === "BTC" ? got : 0)) : undefined;
   const sell = sellMode === "mine" ? parse(sellStr) : sellTaken?.price ?? null;
   const sellFee = sellMode === "mine" ? makerFee : got && sell ? takerFeeAt(s, got * sell, asset, sell) : s.p2p_fee ?? 0;
 
