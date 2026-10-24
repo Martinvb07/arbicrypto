@@ -461,7 +461,10 @@ def usdt_conversions(market, graph, fee, gmf, capital, p2p_fee=0.0, p2p_min_usd=
         if not qty or (x != "USDT" and graph["USDT"][x][1] < usd):
             continue
         rate = qty / usd
-        ad = first(x, "SELL", lambda a: qty * a["price"], lambda a: qty)
+        # si antes cambias en Spot, el precio se mueve mientras tanto: el comprador tiene que aceptarlo con holgura
+        ad = next((a for a in market.get(x, {}).get("SELL") or []
+                   if _fits(a, qty * a["price"], qty, qty if x == "BTC" else 0.0)
+                   and (x == "USDT" or _clears_min(a, x, qty * a["price"]))), None)
         if ad:
             net = (qty - p2p_taker_fee(graph, x, qty, p2p_fee, p2p_min_usd)) / usd  # comisión P2P al vender
             sell.append({"asset": x, "per_usd": net * ad["price"], "ad": ad,
@@ -521,7 +524,8 @@ def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, mi
         except (requests.RequestException, BinanceError):
             errors.append(y)
             continue
-        ok = [a for a in ads if _fits(a, got * a["price"], got, got if y == "BTC" else 0.0)]
+        ok = [a for a in ads if _fits(a, got * a["price"], got, got if y == "BTC" else 0.0)
+              and (len(path) == 1 or _clears_min(a, y, got * a["price"]))]  # pasando por Spot: con holgura sobre su mínimo
         if not ok:
             continue
         best = ok[0]
