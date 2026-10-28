@@ -371,6 +371,8 @@ def raise_alert(key, kind, title, body, capital=None, user=None, telegram_too=Tr
         audience = [n for n in audience if n == ADMINS or wants_alert(n, kind, key)]
         if not audience:
             return
+        if users is not None:  # el navegador decide si suena con "users": sin los que silenciaron, a ellos no les suena
+            users = [n for n in users if n in audience]
         telegram_too = telegram_too and (main_user() in audience or (user is None and users is None))
     links = [{"label": label, "url": url} for label, url in links if url]
     with lock:

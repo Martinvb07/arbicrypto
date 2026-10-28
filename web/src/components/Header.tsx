@@ -41,10 +41,10 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 }
 
 const KINDS: { kind: MutableKind; title: string; sub: string }[] = [
-  { kind: "p2p", title: "Arbitraje P2P", sub: "Rutas que compran y venden en P2P" },
-  { kind: "spot", title: "Arbitraje en Spot", sub: "Triángulos dentro de Binance" },
-  { kind: "sell", title: "Ventas de mis monedas", sub: "Cuando ya puedes vender con ganancia" },
-  { kind: "price", title: "Alertas de precio", sub: "Las que creaste tú" },
+  { kind: "p2p", title: "P2P", sub: "Arbitraje: rutas que compran y venden en P2P" },
+  { kind: "spot", title: "Spot", sub: "Arbitraje: triángulos dentro de Binance" },
+  { kind: "sell", title: "Ventas", sub: "Cuando ya puedes vender tus monedas con ganancia" },
+  { kind: "price", title: "Precio", sub: "Las alertas de precio que creaste tú" },
 ];
 
 function AlertsMenu({ onTelegram }: { onTelegram: () => void }) {
@@ -95,21 +95,27 @@ function AlertsMenu({ onTelegram }: { onTelegram: () => void }) {
             {admin ? <button className="btn btn-sm" onClick={() => { close(); onTelegram(); }}>{state.telegram.ready ? "Cambiar" : "Configurar"}</button>
               : <span className={state.telegram.ready ? "up" : "muted"}>{state.telegram.ready ? "Activo" : "No configurado"}</span>}
           </Row>
-          <div className="pop-head" style={{ marginTop: 12 }}><b>Qué avisar</b><small>Lo que apagues no suena ni llega al celular; las rutas se siguen viendo en el panel</small></div>
-          {KINDS.map(({ kind, title, sub }) => (
-            <Row key={kind} title={title} sub={sub}>
-              <Switch checked={!mutedKinds.includes(kind)} onChange={(v) => setKind(kind, v)} label={title} />
-            </Row>
-          ))}
+          <div className="pop-sec"><b>Qué avisar</b><small>Toca para apagar o prender</small></div>
+          <div className="mute-kinds">
+            {KINDS.map(({ kind, title, sub }) => {
+              const on = !mutedKinds.includes(kind);
+              return (
+                <button key={kind} type="button" className={`mute-kind${on ? " on" : ""}`} aria-pressed={on} title={sub} onClick={() => setKind(kind, !on)}>
+                  <Icon name={on ? "bell" : "bellOff"} size={13} />{title}
+                </button>
+              );
+            })}
+          </div>
           {mutedRoutes.length > 0 && (
-            <>
-              <div className="pop-head" style={{ marginTop: 12 }}><b>Rutas silenciadas</b><small>Se silencian desde los pasos de cada ruta</small></div>
+            <details className="mute-routes">
+              <summary>Rutas silenciadas <span className="count">{mutedRoutes.length}</span></summary>
               {mutedRoutes.map((id) => (
-                <Row key={id} title={routeName(id, state.p2p?.fiat)} sub={id.startsWith("spot:") ? "Spot" : "P2P"}>
-                  <button className="btn btn-sm" onClick={() => unmute(id)}>Reactivar</button>
-                </Row>
+                <div key={id} className="mute-route-row">
+                  <span title={id.startsWith("spot:") ? "Spot" : "P2P"}>{routeName(id, state.p2p?.fiat)}</span>
+                  <button type="button" className="link-btn" onClick={() => unmute(id)}>Reactivar</button>
+                </div>
               ))}
-            </>
+            </details>
           )}
           <button className="btn btn-sm" style={{ width: "100%", marginTop: 10 }} onClick={() => void test()}>Probar aviso</button>
         </div>

@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, us
 import { api } from "./api";
 import { refreshChat } from "./chat";
 import { isMine } from "./calc";
-import type { Alert, HistPoint, Settings, State } from "./types";
+import type { Alert, HistPoint, MutableKind, Settings, State } from "./types";
 
 // ---------------------------------------------------------------- reloj compartido (para "hace 3 s")
 
@@ -303,7 +303,8 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
         seen.current = { boot: s.boot, alert: first ? maxId : s.alerts_at_boot };
         if (first) return;
       }
-      const fresh = s.alerts.filter((a) => a.id > seen.current.alert && isMine(a, s)).reverse();
+      const muted = s.settings.muted_kinds ?? [];
+      const fresh = s.alerts.filter((a) => a.id > seen.current.alert && isMine(a, s) && !muted.includes(a.kind as MutableKind)).reverse();
       seen.current.alert = Math.max(seen.current.alert, maxId);
       fresh.slice(-4).forEach(notify);
     },
