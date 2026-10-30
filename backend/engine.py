@@ -622,6 +622,16 @@ class Account:
         cache[symbol] = (fee, time.time())
         return fee
 
+    def spot_trades(self, symbols):
+        """Los últimos trades de Spot en esos pares (pesa 20 cada par): para seguir tus monedas cuando las cambias en Spot."""
+        out = []
+        for sym in symbols:
+            for t in self.call("GET", "/api/v3/myTrades", symbol=sym, limit=50):
+                out.append({"symbol": sym, "order": t["orderId"], "buyer": bool(t["isBuyer"]), "qty": float(t["qty"]),
+                            "quote": float(t["quoteQty"]), "fee": float(t["commission"]), "fee_asset": t["commissionAsset"],
+                            "time": int(t["time"])})
+        return out
+
     def snapshot(self):
         perms = self.permissions()
         acc = self.call("GET", "/api/v3/account", omitZeroBalances="true")

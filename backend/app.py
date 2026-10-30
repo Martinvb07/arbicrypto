@@ -85,6 +85,7 @@ HISTORY_EVERY = 20  # el grafico del dia guarda un punto cada 20 s aunque P2P se
 HISTORY_SAVE_EVERY = 300  # y se escribe a la base cada 5 min: reescribir las 24 h cada 20 s llenaba el disco de MySQL
 REST_REFRESH = 30                     # foto completa de precios Spot cada 30 s (respaldo y saldos)
 REAL_PRICE_NEAR = -0.001              # rutas Spot a menos de 0,1 % de dar ganancia se miden con el libro completo
+ACCOUNT_INTERVAL = 20                 # saldos y órdenes de cada cuenta: Mis monedas se ajusta casi al momento
 PUBLISH_EVERY = 5                     # refresco de pantallas por cambios de Spot
 HISTORY_SECONDS = 24 * 3600
 # Vigilancia de ventas ("avisame cuando pueda vender sin perder")
@@ -948,6 +949,107 @@ def sync_watches(user, orders):
         publish("watch")
 
 
+spot_seen = {}  # por usuario: saldos de Spot de la última lectura (si cambian, se buscan cambios en Spot)
+
+
+def watch_symbols(user):
+    """Pares de Spot entre una moneda de su lista y otra que se vende en P2P (USDT→BTC, XRP→USDT...)."""
+    with watch_lock:
+        assets = {w["asset"] for w in watches if w["user"] == user and w["status"] in ("vigilando", "lista")}
+    return sorted(sym for sym, (b, q) in pairs["data"].items()
+                  if (b in assets and q in P2P_ASSETS) or (q in assets and b in P2P_ASSETS))
+
+
+def spot_orders(trades):
+    """Trades de Spot agrupados por orden (una orden de mercado se llena en varios trades): qué diste y qué te llegó."""
+    by = {}
+    for t in trades:
+        pair = pairs["data"].get(t["symbol"])
+        if not pair:
+            continue
+        base, quote = pair
+        o = by.setdefault((t["symbol"], t["order"]), {"id": f"spot:{t['symbol']}:{t['order']}", "symbol": t["symbol"],
+                                                      "from": quote if t["buyer"] else base, "to": base if t["buyer"] else quote,
+                                                      "spent": 0.0, "got": 0.0, "time": 0})
+        o["spent"] += t["quote"] if t["buyer"] else t["qty"]
+        o["got"] += t["qty"] if t["buyer"] else t["quote"]
+        if t["fee_asset"] == o["to"]:
+            o["got"] -= t["fee"]  # la comisión de Spot sale de lo que te llega (si se paga en BNB, no)
+        o["time"] = max(o["time"], t["time"])
+    return sorted(by.values(), key=lambda o: o["time"])
+
+
+def sync_spot(user, trades):
+    """Si cambias en Spot una moneda de tu lista (p. ej. tus USDT por XRP), la fila pasa sola a la otra moneda con lo que
+    te llegó y el costo en pesos de lo que cambiaste; si ya tenías esa moneda en la lista, se suma. Así, al venderla en P2P,
+    la ganancia se mide contra lo que de verdad pagaste. Cada orden se cuenta una sola vez."""
+    changed = False
+    with watch_lock:
+        auto = watch_auto.setdefault(user, {"since": time.time(), "done": []})
+        done = set(auto["done"]) | {i for w in watches if w["user"] == user for i in (w.get("orders") or [])}
+        for o in spot_orders(trades):
+            t = o["time"] / 1000
+            if o["id"] in done or o["spent"] <= 0 or o["got"] <= 0:
+                continue
+            live = [w for w in watches if w["user"] == user and w["status"] in ("vigilando", "lista")]
+            src = max((w for w in live if w["asset"] == o["from"] and w["created"] <= t and w["qty"] > 0),
+                      key=lambda w: w["created"], default=None)
+            if not src:
+                continue  # cambiaste algo que no está en tu lista
+            moved = min(o["spent"], src["qty"])  # si cambiaste más de lo anotado, solo cuenta lo de esta fila
+            got = o["got"] * moved / o["spent"]
+            cost = src["cost"] * moved / src["qty"]
+            dst = max((w for w in live if w["asset"] == o["to"] and w is not src), key=lambda w: w["created"], default=None)
+            if not dst and len(live) >= WATCH_MAX and src["qty"] - moved > 0:
+                continue
+            src["qty"] -= moved
+            src["cost"] -= cost
+            src["moves"] = (src.get("moves") or [])[-49:] + [{
+                "id": o["id"], "t": t, "kind": "cambiaste", "qty": moved, "to": o["to"], "got": got, "moved": moved,
+                "cost": cost, "left": src["qty"], "cost_left": src["cost"]}]
+            src["orders"] = sorted(set(src.get("orders") or []) | {o["id"]})[-300:]
+            if src["cost"] < (usd_ref() or 4000):  # quedó menos de un dólar (polvo): la fila ya pasó a la otra moneda
+                src.update(status="vendida", qty=max(src["qty"], 0.0), cost=max(src["cost"], 0.0), changed_to=o["to"])
+            if not dst:
+                dst = {"id": secrets.token_hex(6), "asset": o["to"], "qty": 0.0, "cost": 0.0, "target": 0, "user": user,
+                       "created": t, "expires": None, "status": "vigilando", "alerts": 0, "last": None,
+                       "alert": src.get("alert", True), "auto": True, "start": {"t": t, "qty": 0, "cost": 0}, "orders": [], "moves": []}
+                watches.append(dst)
+                del watches[:-100]
+            dst["qty"] += got
+            dst["cost"] += cost
+            dst["moves"] = (dst.get("moves") or [])[-49:] + [{
+                "id": o["id"], "t": t, "kind": "llego", "qty": got, "from": o["from"], "spent": moved, "moved": got,
+                "cost": cost, "left": dst["qty"], "cost_left": dst["cost"]}]
+            dst["orders"] = sorted(set(dst.get("orders") or []) | {o["id"]})[-300:]
+            dst.update(status="vigilando", last=None)
+            dst["synced"] = {"t": time.time(), "kind": "llego", "qty": got, "price": 0, "total": cost}
+            auto["done"].append(o["id"])
+            done.add(o["id"])
+            changed = True
+        if changed:
+            auto["done"] = auto["done"][-500:]
+            save_json(WATCH_AUTO_FILE, watch_auto)
+            save_json(WATCH_FILE, watches)
+    if changed:
+        wake["watch"].set()
+        publish("watch")
+
+
+def watch_spot_step(user, acc, snap):
+    """Busca cambios en Spot solo cuando cambió el saldo de Spot de alguna moneda de su lista (myTrades pesa 20 por par)."""
+    symbols = watch_symbols(user)
+    if not symbols:
+        return
+    with watch_lock:
+        assets = {w["asset"] for w in watches if w["user"] == user and w["status"] in ("vigilando", "lista")}
+    now = {a: round(snap["spot"].get(a, 0.0), 8) for a in assets}
+    if spot_seen.get(user) == now:
+        return
+    sync_spot(user, acc.spot_trades(symbols))
+    spot_seen[user] = now  # solo si se leyó bien: si falla, se intenta en la próxima lectura
+
+
 def watch_step():
     with watch_lock:
         active = [w for w in watches if w["status"] in ("vigilando", "lista")]
@@ -1224,6 +1326,10 @@ def account_step():
             if accounts.get(user) is acc:
                 acc_state[user] = dict(snap, t=time.time())
                 acc_errors.pop(user, None)
+        try:
+            watch_spot_step(user, acc, snap)  # antes que P2P: si cambiaste USDT por XRP y vendiste el XRP, primero llega el XRP
+        except Exception as e:  # sin esto, igual siguen las órdenes P2P
+            print(f"  cambios en Spot ({user}): {e}")
         sync_watches(user, snap["orders"])
         try:
             record_balance(user)
@@ -2886,7 +2992,7 @@ def main():
     price_alerts.extend(load_json(PRICE_FILE, []))
     prefs.update(load_json(PREFS_FILE, {}))
     for name, step, interval in (("spot", spot_step, SPOT_INTERVAL), ("p2p", p2p_step, P2P_INTERVAL),
-                                 ("account", account_step, 60), ("watch", watch_step, WATCH_INTERVAL)):
+                                 ("account", account_step, ACCOUNT_INTERVAL), ("watch", watch_step, WATCH_INTERVAL)):
         threading.Thread(target=run_loop, args=(name, step, interval), daemon=True).start()
     threading.Thread(target=watchdog, daemon=True).start()
 

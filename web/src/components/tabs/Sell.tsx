@@ -16,6 +16,7 @@ const parseQty = (v: string) => Number(v.trim().replace(/\s/g, "").replace(",", 
 const parseCop = (v: string) => Number(v.trim().replace(/[\s$]/g, "").replace(/\./g, "").replace(",", "."));
 
 const amount = (asset: string, v: number) => (isDollar(asset) ? `${num(v, 2)} dólares (${asset})` : `${qty(v)} ${asset}`);
+const amountOf = (asset: string, v: number) => `${isDollar(asset) ? num(v, 2) : qty(v)} ${asset}`;
 
 /** Lo que el administrador tiene en Binance (Spot + Fondos), con valor de al menos $1.000. */
 function useHoldings() {
@@ -233,11 +234,12 @@ function CoinHistory({ w, hist, gmf, others, onMove }: { w: Watch; hist: WatchMo
   const gainOf = (m: WatchMove) => (m.cost != null && m.total != null ? m.total - m.cost * (1 + gmf) : null);
   // en pesos, tal cual las órdenes de Binance: lo que te entró por ventas menos lo que pagaste (con su 4x1000)
   const received = sales.reduce((a, m) => a + (m.total ?? 0), 0);
-  const paid = ((w.start?.cost ?? 0) + hist.filter((m) => m.kind === "compraste").reduce((a, m) => a + (m.total ?? 0), 0)) * (1 + gmf);
+  // lo que llegó de un cambio en Spot costó lo que habías pagado por lo que diste
+  const paid = ((w.start?.cost ?? 0) + hist.reduce((a, m) => a + (m.kind === "compraste" ? m.total ?? 0 : m.kind === "llego" ? m.cost ?? 0 : 0), 0)) * (1 + gmf);
   const cash = received - paid;
   const soldQty = sales.reduce((a, m) => a + (m.moved ?? m.qty ?? 0), 0);
-  const startQty = w.start?.qty ?? (hist[0] && hist[0].kind !== "editaste" ? hist[0].left + (hist[0].kind === "vendiste" ? 1 : -1) * (hist[0].moved ?? 0) : null);
-  const base = startQty != null ? startQty + hist.filter((m) => m.kind === "compraste").reduce((a, m) => a + (m.moved ?? 0), 0) : 0;
+  const startQty = w.start?.qty ?? (hist[0] && hist[0].kind !== "editaste" ? hist[0].left + (hist[0].kind === "vendiste" || hist[0].kind === "cambiaste" ? 1 : -1) * (hist[0].moved ?? 0) : null);
+  const base = startQty != null ? startQty + hist.filter((m) => m.kind === "compraste" || m.kind === "llego").reduce((a, m) => a + (m.moved ?? 0), 0) : 0;
   const soldPct = base > 0 ? Math.min(100, (soldQty / base) * 100) : 0;
   return (
     <div className="chist">
@@ -253,13 +255,17 @@ function CoinHistory({ w, hist, gmf, others, onMove }: { w: Watch; hist: WatchMo
           const g = m.kind === "vendiste" ? gainOf(m) : null;
           return (
             <li key={`${m.id ?? ""}${m.t}${i}`} className={`chist-item ${m.kind}`} style={{ animationDelay: `${Math.min(i, 10) * 40}ms` }}>
-              <span className="chist-dot"><Icon name={m.kind === "vendiste" ? "handCoins" : m.kind === "compraste" ? "cart" : "book"} size={12} /></span>
+              <span className="chist-dot"><Icon name={m.kind === "vendiste" ? "handCoins" : m.kind === "compraste" ? "cart" : m.kind === "cambiaste" || m.kind === "llego" ? "swap" : "book"} size={12} /></span>
               <div className="chist-txt">
-                <b>{m.kind === "editaste" ? "Lo editaste a mano" : `${m.kind === "vendiste" ? "Vendiste" : "Compraste"} ${num(m.qty ?? 0, 2)} ${w.asset}`}
+                <b>{m.kind === "editaste" ? "Lo editaste a mano"
+                  : m.kind === "cambiaste" ? `Cambiaste ${amountOf(w.asset, m.qty ?? 0)} por ${amountOf(m.to ?? "", m.got ?? 0)} en Spot`
+                  : m.kind === "llego" ? `Te llegaron ${amountOf(w.asset, m.qty ?? 0)} por ${amountOf(m.from ?? "", m.spent ?? 0)} en Spot`
+                  : `${m.kind === "vendiste" ? "Vendiste" : "Compraste"} ${num(m.qty ?? 0, 2)} ${w.asset}`}
                   {m.price ? <span className="dim"> a {money(m.price)}</span> : null}</b>
                 <small>
                   {hhmm(m.t)} · {new Date(m.t * 1000).toLocaleDateString("es-CO", { day: "numeric", month: "short" }).replace(".", "")}
                   {m.total ? ` · ${m.kind === "vendiste" ? "recibiste" : "pagaste"} ${money(m.total, 0)}` : ""}
+                  {(m.kind === "cambiaste" || m.kind === "llego") && m.cost != null ? ` · ${m.kind === "llego" ? "te costó" : "se lleva un costo de"} ${money(m.cost * (1 + gmf), 0)}` : ""}
                   {m.fee ? ` · comisión ${num(m.fee, 2)}` : ""}
                 </small>
               </div>
@@ -366,12 +372,12 @@ function CoinRow({ w, i, onEdit, others, held }: { w: Watch; i: number; onEdit: 
           <span className="wcard-coin"><Coin s={w.asset} size={28} /></span>
           <div className="crow-coin-txt">
             <b>{amount(w.asset, w.qty)}</b>
-            <small>{COIN_NAMES[w.asset] ?? w.asset}{w.auto && <span className="dim"> · anotada sola con tu compra</span>}</small>
+            <small>{COIN_NAMES[w.asset] ?? w.asset}{w.auto && <span className="dim"> · {hist[0]?.kind === "llego" ? `anotada sola: la cambiaste desde ${hist[0].from} en Spot` : "anotada sola con tu compra"}</span>}</small>
             {(w.synced || hist.length > 0) && (
               <button className={`crow-synced ${last?.kind ?? w.synced?.kind ?? ""} as-btn ${showHist ? "on" : ""}`} onClick={() => setShowHist(!showHist)}
                 aria-expanded={showHist} title="Ver el historial de esta moneda">
                 <Icon name="refresh" size={10} />
-                <span>{last && last.kind !== "editaste" ? `${last.kind === "vendiste" ? "−" : "+"}${num(last.qty ?? 0, 2)} · ${hhmm(last.t)}` : `${hist.length} movimiento${hist.length === 1 ? "" : "s"}`}</span>
+                <span>{last && last.kind !== "editaste" ? `${last.kind === "vendiste" || last.kind === "cambiaste" ? "−" : "+"}${num(last.qty ?? 0, 2)} · ${hhmm(last.t)}` : `${hist.length} movimiento${hist.length === 1 ? "" : "s"}`}</span>
                 <Icon name="chevronDown" size={10} className="chev" />
               </button>
             )}

@@ -242,7 +242,9 @@ export type AlertKind = "p2p" | "spot" | "system" | "test" | "sell" | "price";
 
 /** "Avísame cuando pueda vender sin perder": el servidor vigila cada 5 s. */
 export interface WatchMove {
-  id?: string; t: number; kind: "compraste" | "vendiste" | "editaste";
+  id?: string; t: number; kind: "compraste" | "vendiste" | "editaste" | "cambiaste" | "llego";
+  /** cambios en Spot: "cambiaste" (salió de esta fila hacia `to`, te llegaron `got`) o "llego" (entró desde `from`, diste `spent`) */
+  to?: string; got?: number; from?: string; spent?: number;
   /** orden: cantidad, comisión, precio y pesos; moved/cost = lo que salió o entró de la fila y su costo */
   qty?: number; fee?: number; price?: number; total?: number; moved?: number; cost?: number;
   /** lo que quedó en la fila después */
@@ -265,7 +267,7 @@ export interface Watch {
   /** Se agregó sola con una compra P2P de Binance (no la anotaste a mano). */
   auto?: boolean;
   /** Último ajuste automático con una orden P2P de Binance (vendiste una parte o compraste más). */
-  synced?: { t: number; kind: "compraste" | "vendiste"; qty: number; price: number; total: number; before?: { qty: number; cost: number } };
+  synced?: { t: number; kind: "compraste" | "vendiste" | "llego"; qty: number; price: number; total: number; before?: { qty: number; cost: number } };
   /** Cómo empezó la moneda y cada orden de Binance que la movió (o que la editaste a mano). */
   start?: { t: number; qty: number; cost: number };
   moves?: WatchMove[];
