@@ -301,8 +301,9 @@
 /* hojas de costos y medios */
 .mc-form { display: grid; gap: 14px; }
 .mc-account { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border, rgba(128,128,128,.2)); }
-.mc-since { display: grid; gap: 6px; }
-.mc-since input { max-width: 220px; }
+.mc-since { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.mc-since > span:first-child { display: grid; gap: 2px; }
+.mc-since .inline-field input { width: 84px; text-align: right; }
 .mc-blocked { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .mc-block { display: grid; gap: 10px; padding: 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface-2); animation: card-in .35s ease both; }
 .mc-block:nth-child(2) { animation-delay: 40ms; } .mc-block:nth-child(3) { animation-delay: 80ms; } .mc-block:nth-child(4) { animation-delay: 120ms; }

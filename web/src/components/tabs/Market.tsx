@@ -205,6 +205,15 @@ function MethodPick({ title, sub, icon, all, value, onChange }: { title: string;
   );
 }
 
+/** Días desde la fecha de registro (AAAA-MM-DD) y al revés: se escriben los días que muestra Binance y se guarda la fecha. */
+const DAY_MS = 86400000;
+const localDay = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+const daysOf = (since: string) => (since ? String(Math.max(0, Math.round((localDay(new Date()) - Date.parse(`${since}T00:00:00Z`)) / DAY_MS))) : "");
+const sinceOf = (days: string) => {
+  const n = Math.floor(Number(days));
+  return days.trim() === "" || !Number.isFinite(n) || n < 0 ? "" : new Date(localDay(new Date()) - n * DAY_MS).toISOString().slice(0, 10);
+};
+
 /** Con qué pagas al comprar y por dónde recibes al vender: solo se usan anuncios con esos medios. */
 function MethodsSheet({ s, onClose }: { s: State; onClose: () => void }) {
   const { saveSettings, toast } = useLive();
@@ -234,11 +243,15 @@ function MethodsSheet({ s, onClose }: { s: State; onClose: () => void }) {
         <MethodPick title="Recibo en" sub="Al vender: dónde te pueden pagar" icon="handCoins" all={all} value={recv} onChange={setRecv} />
         <p className="dim small"><Icon name="info" size={13} /> Sin elegir ninguno se usan todos. Las rutas de Inicio y los avisos también usan estos medios.</p>
         <div className="mc-account">
-          <label className="mc-since">
-            <span><b>Creé mi cuenta de Binance el</b></span>
-            <input type="date" value={since} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setSince(e.target.value)} />
-          </label>
-          <p className="dim small"><Icon name="info" size={13} /> Hay anuncios que piden 30, 60 o 90 días de registro: con la fecha, el panel no te muestra los que todavía no puedes tomar. En Binance: Perfil → Información de la cuenta.</p>
+          <div className="mc-since">
+            <span><b>Días de registro de tu cuenta de Binance</b><small className="dim">{since ? `Desde el ${new Date(`${since}T12:00:00`).toLocaleDateString("es-CO", { day: "numeric", month: "short", year: "numeric" }).replace(".", "")} · sube sola cada día` : "Sin anotar: se muestran todos los anuncios"}</small></span>
+            <span className="inline-field">
+              <input type="number" min={0} max={9999} step={1} inputMode="numeric" placeholder="23" value={daysOf(since)}
+                onChange={(e) => setSince(sinceOf(e.target.value))} aria-label="Días de registro" />
+              <span>días</span>
+            </span>
+          </div>
+          <p className="dim small"><Icon name="info" size={13} /> Hay anuncios que piden 30, 60 o 90 días de registro: con tus días, el panel no te muestra los que todavía no puedes tomar. En Binance: P2P → Publicar anuncio → Requisitos → "Cuenta registrada".</p>
           {blocked.length > 0 && (
             <div>
               <b>Anunciantes descartados</b> <span className="dim small">(no te dejaban tomar su anuncio)</span>
