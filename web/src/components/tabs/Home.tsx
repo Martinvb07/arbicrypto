@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { advertiserUrl, bestDeal, COIN_NAMES, copyQty, dealReceived, effBuy, gmfOf, isDollar, isMine, netOf, roundTrip, spotSells, spotUrl, takerFeeAt, usdtPrices, type Deal } from "@/lib/calc";
+import { advertiserUrl, bestDeal, COIN_NAMES, copyQty, dealReceived, effBuy, fitsAd, gmfOf, isDollar, isMine, netOf, roundTrip, spotSells, spotUrl, takerFeeAt, usdtPrices, walletQty, type Deal } from "@/lib/calc";
 import { money, num, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, Conversion, Route, State, Triangle } from "@/lib/types";
@@ -258,6 +258,7 @@ export function Steps({ row, s }: { row: Row; s: State }) {
                   <span className="muted">({num(st.ad.orders, 0)} órdenes, {num(st.ad.finish * 100, 0)} %)</span> · {st.ad.methods.slice(0, 3).join(", ")}
                   <span className="muted">
                     {" "}· acepta {money(st.ad.min, 0)} – {money(st.ad.max, 0)}
+                    {st.ad.available ? ` · ${st.kind === "sell" ? "compra" : "vende"} hasta ${isDollar(st.asset) ? num(st.ad.available, 2) : qty(st.ad.available)} ${st.asset} (es su máximo, no su mínimo)` : ""}
                     {st.ad.min_qty ? ` · mínimo ${qty(st.ad.min_qty)} ${st.asset}` : ""}
                     {st.ad.hold_btc ? ` · pide tener ${qty(st.ad.hold_btc)} BTC` : ""}
                   </span>
@@ -589,12 +590,31 @@ function Arbitrage({ s }: { s: State }) {
 const pairOf = (symbol: string | null): [string, string] | null =>
   !symbol ? null : symbol.endsWith("USDT") ? [symbol.slice(0, -4), "USDT"] : symbol.startsWith("USDT") ? ["USDT", symbol.slice(4)] : null;
 
-/** Pasos de una conversión: el cambio en Spot y a quién venderle (o comprarle) en P2P. */
-function ConvSteps({ r, side }: { r: Conversion; side: "sell" | "buy" }) {
+/** Pasos de una conversión: el cambio en Spot y a quién venderle (o comprarle) en P2P, con la cantidad y los límites del
+ *  anunciante. Al vender se usan los dólares que tienes en Binance (si no tienes, los de tu capital) y se avisa si ese
+ *  comprador no acepta lo que te llega. */
+function ConvSteps({ r, side, s }: { r: Conversion; side: "sell" | "buy"; s: State }) {
   const pair = pairOf(r.symbol);
   const from = side === "sell" ? "USDT" : r.asset;
   const to = side === "sell" ? r.asset : "USDT";
   const sells = pair ? pair[0] === from : false;
+  const held = side === "sell" ? walletQty(s, "USDT") : 0;
+  const usd = held || r.usd || 0;
+  const scale = r.usd ? usd / r.usd : 1;
+  const got = (r.qty ?? 0) * scale; // cripto que te llega a Spot
+  const net = got - (r.p2p_cut ?? 0) * scale; // lo que de verdad vende el comprador, ya sin la comisión P2P
+  const fiat = net * r.ad.price;
+  const dollar = isDollar(r.asset);
+  const fits = side === "buy" || !got || (fitsAd(r.ad, got * r.ad.price, got, r.asset === "BTC" ? got : 0)
+    && (r.asset === "USDT" || got * r.ad.price >= r.ad.min * (dollar ? 1.01 : 1.03)));
+  const limits = (
+    <span className="muted">
+      {" "}· acepta {money(r.ad.min, 0)} – {money(r.ad.max, 0)}
+      {r.ad.available ? ` · ${side === "sell" ? "compra" : "vende"} hasta ${dollar ? num(r.ad.available, 2) : qty(r.ad.available)} ${r.asset} (es su máximo, no su mínimo)` : ""}
+      {r.ad.min_qty ? ` · mínimo ${qty(r.ad.min_qty)} ${r.asset}` : ""}
+      {r.ad.hold_btc ? ` · pide tener ${qty(r.ad.hold_btc)} BTC` : ""}
+    </span>
+  );
   const spot = (
     <li>
       <div>
@@ -602,12 +622,14 @@ function ConvSteps({ r, side }: { r: Conversion; side: "sell" | "buy" }) {
         <div className="step-sub">
           Abre <b>{r.symbol}</b> · pestaña <b>Market</b> →{" "}
           {sells
-            ? <>abajo a la derecha: en <b>Cantidad</b> pon tus {from} → botón rojo <b>Vender {from}</b></>
-            : <>abajo a la izquierda: en <b>Total</b> pon tus {from} → botón verde <b>Comprar {to}</b></>}
+            ? <>abajo a la derecha: en <b>Cantidad</b> pon {side === "sell" && usd ? <b>{copyQty(usd, from)} {from}</b> : <>tus {from}</>} → botón rojo <b>Vender {from}</b></>
+            : <>abajo a la izquierda: en <b>Total</b> pon {side === "sell" && usd ? <b>{copyQty(usd, from)} {from}</b> : <>tus {from}</>} → botón verde <b>Comprar {to}</b></>}
           {" "}· <b>NO uses Convertir</b>
+          {side === "sell" && got > 0 && <> · te deben llegar mínimo <b>{amountTxt(got, to)}</b> (si llega menos, revisa antes de vender)</>}
         </div>
         <div className="step-actions">
           <GoButton href={spotUrl(pair)} icon="swap">{sells ? <>Vender <b>{from}</b></> : <>Comprar <b>{to}</b></>} en Spot ({r.symbol})</GoButton>
+          {side === "sell" && usd > 0 && <CopyButton text={copyQty(usd, from)}>Copiar {amountTxt(usd, from)}</CopyButton>}
         </div>
       </div>
     </li>
@@ -624,14 +646,21 @@ function ConvSteps({ r, side }: { r: Conversion; side: "sell" | "buy" }) {
     <li>
       <div>
         <div className="step-main">
-          {side === "sell" ? "Vende" : "Compra"} <Asset s={r.asset} size={18} /> en P2P a <b>{money(r.ad.price)}</b> por cada {r.asset}
+          {side === "sell" ? "Vende" : "Compra"} {side === "sell" && got > 0 ? <b>{amountTxt(got, r.asset)}</b> : null} <Asset s={r.asset} size={18} /> en P2P a <b>{money(r.ad.price)}</b> {dollar ? "cada dólar" : `por cada ${r.asset}`}
+          {side === "sell" && got > 0 && <span className="muted"> · recibes {money(fiat, 0)} (ya sin la comisión P2P)</span>}
         </div>
         <div className="step-sub">
           <b>{r.ad.nick}</b> <span className="muted">({num(r.ad.orders, 0)} órdenes, {num(r.ad.finish * 100, 0)} %)</span> · {r.ad.methods.slice(0, 3).join(", ")}
-          {side === "buy" && " · confirma el precio antes de pagar"}
+          {limits}
+          {" "}· confirma el precio antes de {side === "sell" ? "vender" : "pagar"}
         </div>
+        {!fits && (
+          <div className="step-sub val down">
+            Con tus {amountTxt(usd, "USDT")} te llegan {amountTxt(got, r.asset)} ({money(got * r.ad.price, 0)}): este comprador no los acepta con margen, busca otro en Binance o vende directo en USDT
+          </div>
+        )}
         <div className="step-actions">
-          <GoButton href={advertiserUrl(r.ad)} icon={side === "sell" ? "handCoins" : "cart"} strong>
+          <GoButton href={advertiserUrl(r.ad)} icon={side === "sell" ? "handCoins" : "cart"} strong={fits}>
             {side === "sell" ? "Vender" : "Comprar"} {r.asset} a <b>{r.ad.nick}</b>
           </GoButton>
         </div>
@@ -649,7 +678,7 @@ function ConvSteps({ r, side }: { r: Conversion; side: "sell" | "buy" }) {
   );
 }
 
-function ConvTable({ rows, side }: { rows: Conversion[]; side: "sell" | "buy" }) {
+function ConvTable({ rows, side, s }: { rows: Conversion[]; side: "sell" | "buy"; s: State }) {
   const [open, setOpen] = useState<string | null>(null);
   return (
     <div className="table-wrap">
@@ -680,7 +709,7 @@ function ConvTable({ rows, side }: { rows: Conversion[]; side: "sell" | "buy" })
                 <td className="num">{r.asset === "USDT" ? <span className="val flat">—</span> : <Usd v={r.vs_direct} />}</td>
                 <td className="num"><span className="link-btn">{open === r.asset ? "Ocultar" : "Pasos"}</span></td>
               </tr>
-              {open === r.asset && <tr className="detail"><td colSpan={4}><ConvSteps r={r} side={side} /></td></tr>}
+              {open === r.asset && <tr className="detail"><td colSpan={4}><ConvSteps r={r} side={side} s={s} /></td></tr>}
             </Fragment>
           ))}
         </tbody>
@@ -700,11 +729,11 @@ function YourDollars({ s }: { s: State }) {
       <div className="grid-2">
         <div>
           <h3 className="mini-title">Vender dólares</h3>
-          <ConvTable rows={conv.sell} side="sell" />
+          <ConvTable rows={conv.sell} side="sell" s={s} />
         </div>
         <div>
           <h3 className="mini-title">Comprar dólares</h3>
-          <ConvTable rows={conv.buy} side="buy" />
+          <ConvTable rows={conv.buy} side="buy" s={s} />
         </div>
       </div>
       <CostsNote s={s} extra="Verde = mejor que hacerlo directo." />

@@ -466,8 +466,9 @@ def usdt_conversions(market, graph, fee, gmf, capital, p2p_fee=0.0, p2p_min_usd=
                    if _fits(a, qty * a["price"], qty, qty if x == "BTC" else 0.0)
                    and (x == "USDT" or _clears_min(a, x, qty * a["price"]))), None)
         if ad:
-            net = (qty - p2p_taker_fee(graph, x, qty, p2p_fee, p2p_min_usd)) / usd  # comisión P2P al vender
-            sell.append({"asset": x, "per_usd": net * ad["price"], "ad": ad,
+            cut = p2p_taker_fee(graph, x, qty, p2p_fee, p2p_min_usd)  # comisión P2P al vender
+            # usd y qty: cuántos dólares cambias y cuánta cripto te llega a Spot, para mostrar en los pasos
+            sell.append({"asset": x, "per_usd": (qty - cut) / usd * ad["price"], "ad": ad, "usd": usd, "qty": qty, "p2p_cut": cut,
                          "symbol": graph["USDT"][x][2] if x != "USDT" else None})
 
     buy = []  # comprar dolares: pesos -> X en P2P -> (Spot) -> USDT
@@ -477,7 +478,7 @@ def usdt_conversions(market, graph, fee, gmf, capital, p2p_fee=0.0, p2p_min_usd=
         got = spot_fill(graph, x, "USDT", bought - p2p_taker_fee(graph, x, bought, p2p_fee, p2p_min_usd), fee) if ad else None
         if got:
             rate = got / bought  # dólares que de verdad te quedan por unidad comprada (ya con la comisión P2P)
-            buy.append({"asset": x, "per_usd": with_gmf(ad["price"], gmf) / rate, "ad": ad,
+            buy.append({"asset": x, "per_usd": with_gmf(ad["price"], gmf) / rate, "ad": ad, "usd": got, "qty": bought,
                         "symbol": graph[x]["USDT"][2] if x != "USDT" else None})
 
     direct_sell = next((r["per_usd"] for r in sell if r["asset"] == "USDT"), None)

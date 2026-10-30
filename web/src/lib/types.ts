@@ -69,6 +69,11 @@ export interface Conversion {
   vs_direct: number | null;
   ad: Ad;
   symbol: string | null;
+  /** Vender: dólares que cambias y cripto que te llega a Spot (antes de la comisión P2P). Comprar: dólares que te quedan y cripto que compras. */
+  usd?: number;
+  qty?: number;
+  /** Comisión P2P al vender, en cripto. */
+  p2p_cut?: number;
 }
 
 export interface MarketEntry {
