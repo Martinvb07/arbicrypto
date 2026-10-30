@@ -288,6 +288,8 @@ def _ad(a):
         "max_qty": float(adv.get("dynamicMaxSingleTransQuantity") or adv.get("maxSingleTransQuantity") or 0),
         # Condición del anunciante: solo deja tomar su anuncio a quien tenga al menos esa cantidad de BTC
         "hold_btc": float(adv.get("buyerBtcPositionLimit") or 0),
+        # Condición del anunciante: tu cuenta de Binance debe tener al menos estos días de registrada (30, 60, 90...)
+        "reg_days": int(float(adv.get("buyerRegDaysLimit") or adv.get("userRegDaysLimit") or 0)),
         "methods": [m.get("tradeMethodName") or m.get("identifier") for m in adv.get("tradeMethods") or []],
         "nick": user.get("nickName") or "?",
         "user": user.get("userNo"),
@@ -364,6 +366,20 @@ def _fits(ad, fiat_amount, crypto_qty, btc_held=0.0):
 SELL_MIN_MARGIN = 0.03
 SELL_MIN_MARGIN_USD = 0.01
 DOLLARS = ("USDT", "USDC", "FDUSD")
+
+
+def can_take(ad, days=None, blocked=()):
+    """Tu cuenta puede tomar el anuncio: tiene los días de registro que pide (sin saberlos no se descarta) y no
+    marcaste a ese anunciante como "no puedo con este"."""
+    return (days is None or days >= ad.get("reg_days", 0)) and ad.get("user") not in blocked
+
+
+def takeable(market, days=None, blocked=()):
+    """El libro P2P solo con los anuncios que tu cuenta puede tomar."""
+    if days is None and not blocked:
+        return market
+    return {a: {**m, **{side: [ad for ad in m.get(side) or [] if can_take(ad, days, blocked)] for side in ("BUY", "SELL")}}
+            for a, m in market.items()}
 
 
 def _clears_min(ad, asset, fiat_amount):
@@ -504,7 +520,8 @@ def _search_retry(asset, fiat, amount):
             time.sleep(1 + i)
 
 
-def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, min_finish, p2p_fee=0.0, p2p_min_usd=0.0):
+def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, min_finish, p2p_fee=0.0, p2p_min_usd=0.0,
+                 days=None, blocked=()):
     """Todas las formas de pasar `qty` de `asset` a pesos: vender directo en P2P o cambiar antes en Spot
     (directo o pasando por USDT) y vender esa. Cada opcion usa el mejor comprador real que acepta el monto
     y dice cuanto darian si ese comprador desaparece (el siguiente que acepta)."""
@@ -521,7 +538,8 @@ def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, mi
         to_usdt = usdt_value(graph, y, got)
         approx = to_usdt * usd_fiat if to_usdt and usd_fiat else 0
         try:
-            ads = [a for a in _search_retry(y, fiat, approx) if a["orders"] >= min_orders and a["finish"] >= min_finish]
+            ads = [a for a in _search_retry(y, fiat, approx)
+                   if a["orders"] >= min_orders and a["finish"] >= min_finish and can_take(a, days, blocked)]
         except (requests.RequestException, BinanceError):
             errors.append(y)
             continue

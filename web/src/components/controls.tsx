@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { money } from "@/lib/format";
 import { useLive } from "@/lib/live";
-import type { State } from "@/lib/types";
+import type { Ad, State } from "@/lib/types";
 import { Icon } from "./ui";
 
 const GMF = 0.004;
@@ -57,5 +57,39 @@ export function CapitalField() {
         onBlur={() => void commit()} onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />
       <span>COP</span>
     </label>
+  );
+}
+
+/** Condiciones del anunciante sobre tu cuenta (días de registro): si no anotaste cuándo la creaste, se avisa. */
+export function RegDays({ ad }: { ad: Ad }) {
+  const { state } = useLive();
+  if (!ad.reg_days) return null;
+  return (
+    <span className="muted">
+      {" "}· pide cuenta con {ad.reg_days} días de registro
+      {!state?.settings.binance_since && " (anota en Mis medios de pago cuándo creaste tu cuenta y el panel descarta los que no cumples)"}
+    </span>
+  );
+}
+
+/** "No puedo con este": Binance no te deja tomar su anuncio (días de registro, órdenes, restricciones de tu cuenta...).
+ *  Ese anunciante deja de salir en tus rutas, ventas y avisos; solo para ti. Se deshace en Mis medios de pago. */
+export function BlockAd({ ad }: { ad: Ad }) {
+  const { state, saveSettings, toast } = useLive();
+  const [busy, setBusy] = useState(false);
+  if (!state || !ad.user) return null;
+  const list = state.settings.blocked ?? [];
+  if (list.some((b) => b.user === ad.user)) return null;
+  const block = async () => {
+    setBusy(true);
+    const ok = await saveSettings({ blocked: [...list, { user: ad.user!, nick: ad.nick }] });
+    setBusy(false);
+    if (ok) toast("Anunciante descartado", `${ad.nick} ya no sale en tus rutas ni avisos. Puedes volver a usarlo en Mis medios de pago.`, "good", 3500);
+  };
+  return (
+    <button type="button" className="btn btn-sm" onClick={() => void block()} disabled={busy}
+      title="Si Binance no te deja tomar su anuncio (por ejemplo, tu cuenta tiene menos días de los que pide), descártalo y se usa el siguiente">
+      <Icon name="x" size={14} /> No puedo con {ad.nick}
+    </button>
   );
 }

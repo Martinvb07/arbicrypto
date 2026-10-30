@@ -5,7 +5,7 @@ import { advertiserUrl, bestAd, bestDeal, COIN_NAMES, copyQty, dealReceived, eff
 import { money, num, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, Conversion, Route, State, Triangle } from "@/lib/types";
-import { CapitalField, CostsNote, GmfToggle } from "../controls";
+import { BlockAd, CapitalField, CostsNote, GmfToggle, RegDays } from "../controls";
 import type { TabId } from "../Header";
 import { Select, Sheet } from "../overlay";
 import { Ago, Asset, Coin, CoinPath, CopyButton, GoButton, Icon, Segmented, Skeleton, Usd } from "../ui";
@@ -188,6 +188,7 @@ function P2PActions({ kind, asset, ad, qty: q, pay, strong }: { kind: "buy" | "s
       {kind === "buy"
         ? <CopyButton text={String(Math.round(pay))}>Copiar {money(pay, 0)}</CopyButton>
         : <CopyButton text={copyQty(q, asset)}>Copiar {amountTxt(q, asset)}</CopyButton>}
+      <BlockAd ad={ad} />
     </div>
   );
 }
@@ -262,6 +263,7 @@ export function Steps({ row, s }: { row: Row; s: State }) {
                     {st.ad.min_qty ? ` · mínimo ${qty(st.ad.min_qty)} ${st.asset}` : ""}
                     {st.ad.hold_btc ? ` · pide tener ${qty(st.ad.hold_btc)} BTC` : ""}
                   </span>
+                  <RegDays ad={st.ad} />
                 </div>
                 <P2PActions kind={st.kind} asset={st.asset} ad={st.ad} qty={st.qty} pay={row.route.paid} strong={row.opp} />
               </div>
@@ -634,6 +636,7 @@ function ConvSteps({ r, side, s }: { r: Conversion; side: "sell" | "buy"; s: Sta
       {r.ad.available ? ` · ${side === "sell" ? "compra" : "vende"} hasta ${dollar ? num(r.ad.available, 2) : qty(r.ad.available)} ${r.asset} (es su máximo, no su mínimo)` : ""}
       {r.ad.min_qty ? ` · mínimo ${qty(r.ad.min_qty)} ${r.asset}` : ""}
       {r.ad.hold_btc ? ` · pide tener ${qty(r.ad.hold_btc)} BTC` : ""}
+      <RegDays ad={r.ad} />
     </span>
   );
   const spot = (
@@ -685,6 +688,7 @@ function ConvSteps({ r, side, s }: { r: Conversion; side: "sell" | "buy"; s: Sta
             {side === "sell" ? "Vender" : "Comprar"} {r.asset} a <b>{r.ad.nick}</b>
           </GoButton>
           {side === "sell" && got > 0 && <CopyButton text={copyQty(got, r.asset)}>Copiar {amountTxt(got, r.asset)}</CopyButton>}
+          <BlockAd ad={r.ad} />
         </div>
       </div>
     </li>

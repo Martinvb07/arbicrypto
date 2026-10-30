@@ -12,6 +12,8 @@ export interface Ad {
   max_qty?: number;
   /** BTC que el anunciante exige tener para tomar su anuncio (0 = no exige). */
   hold_btc?: number;
+  /** Días que tu cuenta de Binance debe llevar registrada para tomar el anuncio (0 = no pide). */
+  reg_days?: number;
   methods: string[];
   nick: string;
   user: string | null;
@@ -210,6 +212,10 @@ export interface Settings {
   /** Avisos silenciados: por tipo ("spot", "p2p", "sell", "price") o rutas puntuales ("p2p:USDT>BTC"). */
   muted_kinds?: MutableKind[];
   muted_routes?: string[];
+  /** Fecha (AAAA-MM-DD) en que creaste tu cuenta de Binance: hay anuncios que piden 30, 60 o 90 días. */
+  binance_since?: string | null;
+  /** Anunciantes que no te dejan tomar su anuncio: no se usan en rutas, ventas ni avisos. */
+  blocked?: { user: string; nick: string }[];
 }
 
 export type MutableKind = "spot" | "p2p" | "sell" | "price";

@@ -7,6 +7,7 @@ Se enciende con PM2 (ver LEEME.md):
 import asyncio
 import base64
 import binascii
+import datetime
 import functools
 import hmac
 import html
@@ -182,6 +183,49 @@ def profile(name):
         out[k] = [str(m) for m in mine.get(k) or []]
     out["muted_kinds"] = [k for k in mine.get("muted_kinds") or [] if k in MUTABLE_KINDS]
     out["muted_routes"] = [str(r) for r in mine.get("muted_routes") or []]
+    out["binance_since"] = mine.get("binance_since") or None
+    out["blocked"] = [b for b in mine.get("blocked") or [] if isinstance(b, dict) and b.get("user")]
+    return out
+
+
+def account_days(pr):
+    """Días que lleva registrada su cuenta de Binance (None si no anotó la fecha): hay anuncios que piden 30, 60 o 90."""
+    try:
+        since = datetime.date.fromisoformat(pr.get("binance_since") or "")
+    except ValueError:
+        return None
+    return max((datetime.date.today() - since).days, 0)
+
+
+def can_take_of(pr):
+    """(días de registro, anunciantes bloqueados) de un usuario: lo que decide qué anuncios puede tomar."""
+    return account_days(pr), tuple(sorted(b["user"] for b in pr["blocked"]))
+
+
+def market_for(market, pr):
+    return engine.takeable(market, *can_take_of(pr))
+
+
+BLOCKED_MAX = 200
+
+
+def clean_account(raw):
+    """binance_since: fecha AAAA-MM-DD (o vacío para quitarla). blocked: [{user, nick}] de anunciantes que no te dejan."""
+    out = {}
+    if "binance_since" in raw:
+        v = str(raw.get("binance_since") or "").strip()
+        try:
+            out["binance_since"] = datetime.date.fromisoformat(v).isoformat() if v and datetime.date.fromisoformat(v) <= datetime.date.today() else None
+        except ValueError:
+            out["binance_since"] = None
+    if isinstance(raw.get("blocked"), list):
+        seen, rows = set(), []
+        for b in raw["blocked"]:
+            user = str((b or {}).get("user") or "").strip()[:64] if isinstance(b, dict) else ""
+            if user and re.fullmatch(r"[A-Za-z0-9_-]+", user) and user not in seen:
+                seen.add(user)
+                rows.append({"user": user, "nick": str(b.get("nick") or "?")[:60]})
+        out["blocked"] = rows[-BLOCKED_MAX:]
     return out
 
 
@@ -219,7 +263,8 @@ def effective_fee(pr):
 def route_key(pr):
     """Las rutas P2P cambian con el capital, el 4x1000, los costos y los medios de pago: una cuenta por combinacion."""
     fee, min_usd = taker_fee_of(pr)
-    return (pr["capital"], pr["gmf"], fee, pr["bank_fee"], pr["tax"], tuple(pr["pay_methods"]), tuple(pr["recv_methods"]), min_usd)
+    return (pr["capital"], pr["gmf"], fee, pr["bank_fee"], pr["tax"], tuple(pr["pay_methods"]), tuple(pr["recv_methods"]), min_usd,
+            *can_take_of(pr))
 
 
 def tag_of(key):
@@ -227,8 +272,8 @@ def tag_of(key):
 
 
 def routes_for(market, key):
-    cap, gmf, fee, bank, tax, pay, recv, min_usd = key
-    return engine.p2p_routes(market, graph, current_fee(), gmf, cap, FIAT, fee, bank_fee=bank, tax=tax, pay=pay, recv=recv,
+    cap, gmf, fee, bank, tax, pay, recv, min_usd, days, blocked = key
+    return engine.p2p_routes(engine.takeable(market, days, blocked), graph, current_fee(), gmf, cap, FIAT, fee, bank_fee=bank, tax=tax, pay=pay, recv=recv,
                              p2p_min_usd=min_usd)
 
 
@@ -639,7 +684,7 @@ def p2p_step():
     for gkey in groups:
         cap, gmf = gkey[0], gkey[1]
         routes = routes_for(market, gkey)
-        conversions = engine.usdt_conversions(market, graph, fee, gmf, cap, gkey[2], gkey[7])
+        conversions = engine.usdt_conversions(engine.takeable(market, gkey[8], gkey[9]), graph, fee, gmf, cap, gkey[2], gkey[7])
         for r in routes:
             r["per_usd"] = r["profit"] * ref
             for step in r["steps"]:
@@ -731,7 +776,7 @@ def watch_need(w, o):
 def watch_eval(w, targets):
     """Mejor salida para una vigilancia y si ya cumple (ganancia >= objetivo, con margen extra si pasa por Spot)."""
     options, failed = engine.exit_options(w["asset"], w["qty"], graph, current_fee(), FIAT, targets, usd_ref() or 0,
-                                          MIN_ORDERS, MIN_FINISH, *taker_fee_of(profile(w["user"])))
+                                          MIN_ORDERS, MIN_FINISH, *taker_fee_of(profile(w["user"])), *can_take_of(profile(w["user"])))
     best, best_gap = None, None
     for o in options:
         need = watch_need(w, o)
@@ -777,7 +822,7 @@ def watch_partial(w):
     $500.000): cuánto le vendes, cuánto recibes y cuánto ganas con esa parte, contra lo que te costó esa parte (con su
     4x1000). Solo venta directa en P2P. El mejor por ganancia; None si no hay."""
     p2p = state["p2p"]
-    ads = ((p2p or {}).get("market", {}).get(w["asset"]) or {}).get("SELL") or []
+    ads = ((market_for((p2p or {}).get("market", {}), profile(w["user"]))).get(w["asset"]) or {}).get("SELL") or []
     if not ads or not graph or w["qty"] <= 0:
         return None
     paid = paid_with_gmf(w["user"], w["cost"])
@@ -985,7 +1030,7 @@ def price_ads(alert, market):
         btc = held if alert["asset"] == "BTC" else 0.0
         return engine._fits(ad, held * ad["price"], held, btc) if held else engine._fits(ad, cap, cap / ad["price"])
     return [ad for ad in market.get(alert["asset"], {}).get(alert["side"]) or []
-            if not alert.get("mine", True) or (fits(ad) and engine._pays_with(ad, methods))]
+            if not alert.get("mine", True) or (fits(ad) and engine._pays_with(ad, methods) and engine.can_take(ad, *can_take_of(pr)))]
 
 
 def price_meets(alert, ad):
@@ -1838,7 +1883,7 @@ def api_exit():
     try:
         p2p_hold.set()  # el escaner P2P se pausa para no gastar el cupo de consultas de Binance
         options, failed = engine.exit_options(asset, amount, graph, current_fee(), FIAT, P2P_ASSETS, usd_ref() or 0,
-                                      MIN_ORDERS, MIN_FINISH, *taker_fee_of(profile(g.user["name"])))
+                                      MIN_ORDERS, MIN_FINISH, *taker_fee_of(profile(g.user["name"])), *can_take_of(profile(g.user["name"])))
     except (requests.RequestException, engine.BinanceError) as e:
         return jsonify(error=friendly_error(e)), 502
     finally:
@@ -2056,11 +2101,12 @@ def api_state():
             ref = usd_ref() or 0
             for r in routes:
                 r["per_usd"] = r["profit"] * ref
-            mine = {"routes": routes, "conversions": engine.usdt_conversions(p2p["market"], graph, current_fee(), me["gmf"], cap,
+            mine = {"routes": routes, "conversions": engine.usdt_conversions(market_for(p2p["market"], me), graph, current_fee(), me["gmf"], cap,
                                                                              rkey[2], rkey[7]),
                     "found": []}
         if p2p:
-            p2p = {**p2p, "routes": (mine or {}).get("routes", []), "conversions": (mine or {}).get("conversions")}
+            p2p = {**p2p, "market": market_for(p2p["market"], me),  # sin los anuncios que su cuenta no puede tomar
+                   "routes": (mine or {}).get("routes", []), "conversions": (mine or {}).get("conversions")}
         return jsonify({
             "boot": BOOT, "now": time.time(), "settings": public_settings(g.user), "fee": current_fee(), "p2p_fee": effective_fee(me),
             "p2p_fee_auto": effective_fee({**me, "taker_fee": -1}), "price_alerts": price_alert_view(name),
@@ -2090,6 +2136,7 @@ def api_settings():
     b = {k: v for k, v in raw.items() if k in PERSONAL}
     lists = {k: clean_methods(raw[k]) for k in METHOD_LISTS if k in raw}
     lists.update(clean_muted(raw))
+    lists.update(clean_account(raw))
     if not b and not lists:
         return jsonify(error="Nada que guardar."), 400
     # capital, 4x1000, "avisar desde", costos y medios son de cada usuario, tambien de los administradores
@@ -2718,7 +2765,7 @@ def sell_now(name, asset, qty):
     """Lo que de verdad recibe en pesos si vende ya `qty` de `asset` en P2P, igual que Mis monedas: el mejor comprador
     que acepta esa cantidad (de los anuncios que ya tiene el escaner) menos la comision al tomar su anuncio."""
     p2p = state["p2p"]
-    ads = (p2p["market"].get(asset) or {}).get("SELL") if p2p else None
+    ads = (market_for(p2p["market"], profile(name)).get(asset) or {}).get("SELL") if p2p else None
     if not ads or not graph or qty <= 0:
         return None
     ad = next((a for a in ads if engine._fits(a, qty * a["price"], qty, qty if asset == "BTC" else 0.0)), None)
@@ -2753,9 +2800,9 @@ def internal_account():
         account["gmf"] = profile(name)["gmf"]
         # para que la wallet diga en cada compra a cuánto vender y cuánto ganas si vendes ya (igual que Mis monedas)
         rate, min_usd = taker_fee_of(profile(name))
-        market = (state["p2p"] or {}).get("market") or {}
+        market = market_for((state["p2p"] or {}).get("market") or {}, profile(name))
         account["p2p"] = {"fee": rate, "min_usd": min_usd, "buyers": {
-            a: [{k: ad.get(k) for k in ("price", "nick", "min", "max", "available", "min_qty", "max_qty", "hold_btc")} for ad in (market.get(a) or {}).get("SELL", [])[:15]]
+            a: [{k: ad.get(k) for k in ("price", "nick", "min", "max", "available", "min_qty", "max_qty", "hold_btc", "reg_days")} for ad in (market.get(a) or {}).get("SELL", [])[:15]]
             for a in P2P_ASSETS}}
     resp = jsonify(connected=bool(name and name in accounts), account=account,
                    error=error["msg"] if error else None, fiat=FIAT)

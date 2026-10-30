@@ -211,10 +211,12 @@ function MethodsSheet({ s, onClose }: { s: State; onClose: () => void }) {
   const all = useMemo(() => allMethods(s), [s]);
   const [pay, setPay] = useState<string[]>(s.settings.pay_methods ?? []);
   const [recv, setRecv] = useState<string[]>(s.settings.recv_methods ?? []);
+  const [since, setSince] = useState(s.settings.binance_since ?? "");
+  const [blocked, setBlocked] = useState(s.settings.blocked ?? []);
   const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true);
-    const ok = await saveSettings({ pay_methods: pay, recv_methods: recv });
+    const ok = await saveSettings({ pay_methods: pay, recv_methods: recv, binance_since: since || null, blocked });
     setBusy(false);
     if (ok) {
       toast("Medios guardados", pay.length || recv.length ? "Solo verás rutas y avisos con anuncios que aceptan tus medios." : "Se usan anuncios con cualquier medio.", "good", 3000);
@@ -231,6 +233,25 @@ function MethodsSheet({ s, onClose }: { s: State; onClose: () => void }) {
         <MethodPick title="Pago con" sub="Al comprar: cómo le pagas al vendedor" icon="cart" all={all} value={pay} onChange={setPay} />
         <MethodPick title="Recibo en" sub="Al vender: dónde te pueden pagar" icon="handCoins" all={all} value={recv} onChange={setRecv} />
         <p className="dim small"><Icon name="info" size={13} /> Sin elegir ninguno se usan todos. Las rutas de Inicio y los avisos también usan estos medios.</p>
+        <div className="mc-account">
+          <label className="mc-since">
+            <span><b>Creé mi cuenta de Binance el</b></span>
+            <input type="date" value={since} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setSince(e.target.value)} />
+          </label>
+          <p className="dim small"><Icon name="info" size={13} /> Hay anuncios que piden 30, 60 o 90 días de registro: con la fecha, el panel no te muestra los que todavía no puedes tomar. En Binance: Perfil → Información de la cuenta.</p>
+          {blocked.length > 0 && (
+            <div>
+              <b>Anunciantes descartados</b> <span className="dim small">(no te dejaban tomar su anuncio)</span>
+              <div className="mc-blocked">
+                {blocked.map((b) => (
+                  <button key={b.user} type="button" className="btn btn-sm" title="Volver a usarlo" onClick={() => setBlocked(blocked.filter((x) => x.user !== b.user))}>
+                    {b.nick} <Icon name="x" size={13} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </Sheet>
   );

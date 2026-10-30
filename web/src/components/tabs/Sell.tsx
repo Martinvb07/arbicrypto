@@ -6,6 +6,7 @@ import { advertiserUrl, COIN_NAMES, copyQty, isDollar, spotUrl } from "@/lib/cal
 import { hhmm, money, num, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { ExitOption, Watch, WatchMove } from "@/lib/types";
+import { BlockAd } from "../controls";
 import { ask, Select, Sheet } from "../overlay";
 import { Asset, Coin, CopyButton, GoButton, Icon, Toggle } from "../ui";
 
@@ -70,6 +71,7 @@ function SellSteps({ asset, qty: have, o }: { asset: string; qty: number; o: Pic
           <div className="step-actions">
             <GoButton href="https://www.binance.com/es/my/wallet/account/main" icon="wallet">Pasar a Fondos</GoButton>
             <CopyButton text={copyQty(o.qty, o.to)}>Copiar {isDollar(o.to) ? num(o.qty, 2) : qty(o.qty)} {o.to}</CopyButton>
+            <BlockAd ad={o.ad} />
           </div>
         </div>
       </li>
@@ -85,6 +87,7 @@ function SellSteps({ asset, qty: have, o }: { asset: string; qty: number; o: Pic
           <div className="step-actions">
             <GoButton href={advertiserUrl(o.ad)} icon="handCoins" strong>Vender {o.to} a <b>{o.ad.nick}</b></GoButton>
             <CopyButton text={copyQty(o.qty, o.to)}>Copiar {isDollar(o.to) ? num(o.qty, 2) : qty(o.qty)} {o.to}</CopyButton>
+            <BlockAd ad={o.ad} />
           </div>
         </div>
       </li>
