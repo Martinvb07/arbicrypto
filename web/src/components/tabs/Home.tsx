@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { advertiserUrl, bestDeal, COIN_NAMES, copyQty, dealReceived, effBuy, fitsAd, gmfOf, isDollar, isMine, netOf, roundTrip, spotSells, spotUrl, takerFeeAt, usdtPrices, walletQty, type Deal } from "@/lib/calc";
+import { advertiserUrl, bestAd, bestDeal, COIN_NAMES, copyQty, dealReceived, effBuy, fitsAd, gmfOf, isDollar, isMine, netOf, roundTrip, spotSells, spotUrl, takerFeeAt, usdtPrices, walletQty, type Deal } from "@/lib/calc";
 import { money, num, perUsd, qty, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, Conversion, Route, State, Triangle } from "@/lib/types";
@@ -599,14 +599,35 @@ function ConvSteps({ r, side, s }: { r: Conversion; side: "sell" | "buy"; s: Sta
   const to = side === "sell" ? r.asset : "USDT";
   const sells = pair ? pair[0] === from : false;
   const held = side === "sell" ? walletQty(s, "USDT") : 0;
-  const usd = held || r.usd || 0;
-  const scale = r.usd ? usd / r.usd : 1;
-  const got = (r.qty ?? 0) * scale; // cripto que te llega a Spot
-  const net = got - (r.p2p_cut ?? 0) * scale; // lo que de verdad vende el comprador, ya sin la comisión P2P
-  const fiat = net * r.ad.price;
+  // dólares de tu capital al precio con que el servidor los calcula (por si la respuesta aún no trae `usd`)
+  const capUsd = r.usd ?? s.settings.capital / (bestAd(s, "USDT", "BUY")?.price || Infinity);
+  const usd = held || capUsd || 0;
+  const scale = capUsd ? usd / capUsd : 1;
+  // per_usd ya trae la comisión de Spot y la P2P: de ahí sale lo que vendes neto aunque falte `qty`
+  const net = (r.qty != null ? r.qty - (r.p2p_cut ?? 0) : usd ? (r.per_usd / r.ad.price) * capUsd : 0) * scale;
+  const got = r.qty != null ? r.qty * scale : net; // cripto que te llega a Spot y la que pones al vender
+  const fiat = net * r.ad.price; // lo que te pagan, ya sin la comisión P2P
   const dollar = isDollar(r.asset);
-  const fits = side === "buy" || !got || (fitsAd(r.ad, got * r.ad.price, got, r.asset === "BTC" ? got : 0)
-    && (r.asset === "USDT" || got * r.ad.price >= r.ad.min * (dollar ? 1.01 : 1.03)));
+  const sellFiat = got * r.ad.price;
+  const fits = side === "buy" || !got || (fitsAd(r.ad, sellFiat, got, r.asset === "BTC" ? got : 0)
+    && (r.asset === "USDT" || sellFiat >= r.ad.min * (dollar ? 1.01 : 1.03)));
+  const over = r.ad.min ? sellFiat / r.ad.min - 1 : null; // cuánto te sobra sobre el mínimo del comprador
+  const summary = side === "sell" && got > 0 && (
+    <div className={`conv-sum ${fits ? "ok" : "bad"}`}>
+      <div>
+        {r.asset !== "USDT" && <>Pones <b>{amountTxt(usd, "USDT")}</b>{held ? " (lo que tienes en Binance)" : " (tu capital)"} → te llegan <b>{amountTxt(got, r.asset)}</b> → </>}
+        vendes <b>{amountTxt(got, r.asset)}</b> a <b>{r.ad.nick}</b> → recibes <b>{money(fiat, 0)}</b>
+      </div>
+      <div>
+        <Icon name={fits ? "checkCircle" : "alert"} size={14} />{" "}
+        Mínimo de {r.ad.nick}: <b>{money(r.ad.min, 0)}</b> (≈ {amountTxt(r.ad.min_qty || r.ad.min / r.ad.price, r.asset)}) · máximo {money(r.ad.max, 0)}
+        {" "}· tú le vendes {money(sellFiat, 0)}
+        {fits
+          ? <> · te sobra {over != null ? `${num(over * 100, 0)} %` : ""} sobre su mínimo ✓</>
+          : <> · <b>no te sirve</b>: no alcanza su mínimo con margen o se pasa de lo que acepta</>}
+      </div>
+    </div>
+  );
   const limits = (
     <span className="muted">
       {" "}· acepta {money(r.ad.min, 0)} – {money(r.ad.max, 0)}
@@ -663,13 +684,15 @@ function ConvSteps({ r, side, s }: { r: Conversion; side: "sell" | "buy"; s: Sta
           <GoButton href={advertiserUrl(r.ad)} icon={side === "sell" ? "handCoins" : "cart"} strong={fits}>
             {side === "sell" ? "Vender" : "Comprar"} {r.asset} a <b>{r.ad.nick}</b>
           </GoButton>
+          {side === "sell" && got > 0 && <CopyButton text={copyQty(got, r.asset)}>Copiar {amountTxt(got, r.asset)}</CopyButton>}
         </div>
       </div>
     </li>
   );
-  if (r.asset === "USDT") return <ol className="steps-list">{move("USDT", "Spot", "Fondos")}{p2p}</ol>;
+  if (r.asset === "USDT") return <>{summary}<ol className="steps-list">{move("USDT", "Spot", "Fondos")}{p2p}</ol></>;
   return (
     <>
+      {summary}
       <ol className="steps-list">
         {side === "sell" ? <>{spot}{move(r.asset, "Spot", "Fondos")}{p2p}</> : <>{p2p}{move(r.asset, "Fondos", "Spot")}{spot}</>}
       </ol>
