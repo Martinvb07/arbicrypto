@@ -58,8 +58,8 @@ function bucketLabel(b: number, g: Group, long = false) {
 interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; received: string | null; cost: number; gross: number; fee: number; gain: number; missing: boolean;
   /** 4x1000 de lo vendido, ganancia ya sin él y de qué compras salió */
   gmf: number; net: number; sources: SaleSource[];
-  /** venta de algo que llegó por permuta: la vuelta completa contra los pesos que pagaste al principio */
-  origin?: { cost: number; gmf: number; net: number };
+  /** cambio en Spot (permuta): aquí no gana ni pierde, la ganancia se ve cuando vendes lo que te llegó */
+  swap?: boolean;
   /** venta: su movimiento (para elegir de qué compra salió) */
   id?: number;
   /** venta: costo escrito a mano */
@@ -162,9 +162,16 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
 
   const ops = useMemo<Op[]>(() => {
     if (!report) return [];
-    const sales = report.disposals.map((d) => ({ key: `d${d.id}-${d.t}`, t: d.t, kind: d.kind, asset: d.asset, qty: d.qty, received: d.received,
-      cost: d.cost, gross: d.gross, fee: d.fee, gain: d.gain, missing: d.missing > 1e-9,
-      gmf: d.gmf ?? 0, net: d.net ?? d.gain, sources: d.sources ?? [], id: d.id, manual: !!d.manual, origin: d.origin }));
+    const sales = report.disposals.map((d): Op => {
+      const o: Op = { key: `d${d.id}-${d.t}`, t: d.t, kind: d.kind, asset: d.asset, qty: d.qty, received: d.received,
+        cost: d.cost, gross: d.gross, fee: d.fee, gain: d.gain, missing: d.missing > 1e-9,
+        gmf: d.gmf ?? 0, net: d.net ?? d.gain, sources: d.sources ?? [], id: d.id, manual: !!d.manual };
+      // aquí solo cuenta cuánto pagaste y cuánto recibiste: un cambio en Spot no gana ni pierde (para la DIAN sí, eso va
+      // en Declaración y en el Excel), y lo que vendes después se mide contra los pesos que pagaste al principio
+      if (d.kind === "permuta") return { ...o, swap: true, gain: 0, net: 0, gmf: 0 };
+      if (d.origin) return { ...o, cost: d.origin.cost, gmf: d.origin.gmf, gain: d.proceeds - d.origin.cost, net: d.origin.net };
+      return o;
+    });
     const incomes = report.incomes.map((x) => ({ key: `i${x.id}`, t: x.t, kind: x.kind, asset: x.asset, qty: x.qty, received: null,
       cost: 0, gross: x.value, fee: 0, gain: x.value, missing: false, gmf: 0, net: x.value, sources: [] }));
     return [...sales, ...incomes].sort((p, q) => q.t - p.t);
@@ -178,7 +185,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
   const gmfOther = useMemo(() => mine.reduce((s, m) => s + (m.kind !== "compra" && inRange(m.t) ? m.gmf_cop || 0 : 0), 0), [mine, a, b]);
 
   const sum = useMemo(() => {
-    const sales = inPeriod.filter((o) => o.kind === "venta" || o.kind === "permuta");
+    const sales = inPeriod.filter((o) => o.kind === "venta");
     const gain = inPeriod.reduce((s, o) => s + o.gain, 0);
     const cost = sales.reduce((s, o) => s + o.cost, 0);
     const gmf = inPeriod.reduce((s, o) => s + o.gmf, 0) + gmfOther;
@@ -199,7 +206,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
       const k = bucketOf(d, group);
       if (!map.has(k)) map.set(k, { gain: 0, n: 0, bought: 0 });
     }
-    for (const o of inPeriod) { const x = map.get(bucketOf(dayOf(o.t), group)); if (x) { x.gain += o.net; x.n++; } }
+    for (const o of inPeriod) { const x = map.get(bucketOf(dayOf(o.t), group)); if (x) { x.gain += o.net; if (!o.swap) x.n++; } }
     for (const m of buys) { const x = map.get(bucketOf(dayOf(m.t), group)); if (x) x.bought += cashValue(m); }
     return [...map].sort((p, q) => p[0] - q[0]).map(([k, v]) => ({ k, ...v }));
   }, [inPeriod, buys, a, b, group]);
@@ -484,7 +491,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                     const k = bucketOf(dayOf(o.t), group);
                     const head = i === 0 || bucketOf(dayOf(slice[i - 1].t), group) !== k;
                     const g = bucketSum.get(k);
-                    const pct = o.cost > 0 ? (o.net / o.cost) * 100 : null;
+                    const pct = o.cost > 0 && !o.swap ? (o.net / o.cost) * 100 : null;
                     return [
                       head && g && (
                         <tr key={`h${k}`} className="group-row">
@@ -578,12 +585,6 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                               </button>
                             ) : <span className="cell-sub">{sourceText(o)}</span>;
                           })()}
-                          {o.origin && (
-                            <span className={`cell-sub op-origin ${o.origin.net >= 0 ? "up" : "down"}`}
-                              title="Las permutas valen a precio de mercado (así lo pide la DIAN) y por eso esta venta sola puede salir en rojo. Esto es la vuelta completa: lo que recibiste contra los pesos que pagaste al principio, con su 4x1000">
-                              Vuelta completa: pagaste {money(o.origin.cost + o.origin.gmf)} → recibiste {money(o.cost + o.gain)} → <b>{o.origin.net >= 0 ? "+" : "−"}{money(Math.abs(o.origin.net))}</b>
-                            </span>
-                          )}
                           {o.id != null && !o.manual && (o.kind === "venta" || o.kind === "permuta") && (
                             <button className={`cell-sub op-adjust ${o.missing ? "warn" : ""}`} onClick={() => setCostOf(o)}>
                               <Icon name="edit" size={12} /> {o.missing ? "Escribir cuánto te costó" : "Ajustar costo"}
@@ -591,13 +592,13 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                           )}
                         </td>
                         <td className="r">{o.cost ? money(o.cost) : <span className="muted">—</span>}</td>
-                        <td className="r hide-sm">{money(o.gross - o.fee)}
-                          {o.fee >= 1 && (() => {
+                        <td className="r hide-sm">{o.swap ? <span className="muted">{o.received ? `→ ${o.received}` : "—"}</span> : money(o.gross - o.fee)}
+                          {!o.swap && o.fee >= 1 && (() => {
                             const fq = o.id != null ? moveById.get(o.id)?.fee_qty : 0;
                             return <span className="cell-sub" title="La comisión de Binance sale en cripto: ya está dentro de lo que vendiste y no te llega">
                               comisión {fq ? `${num(fq, 2)} ${o.asset}` : money(o.fee)}</span>;
                           })()}</td>
-                        <td className="r"><b><Pnl v={o.net} /></b>
+                        <td className="r">{o.swap ? <span className="muted" title="Un cambio en Spot no gana ni pierde: la ganancia sale cuando vendes lo que te llegó">—</span> : <b><Pnl v={o.net} /></b>}
                           {o.gmf >= 1 && (
                             <span className="cell-sub" title="La ganancia de verdad: lo que recibiste menos lo que te costó, menos la parte del 4x1000 que pagaste al comprar lo que vendiste (las comisiones de Binance ya van en el costo y en lo recibido)">
                               {signedMoney(o.gain)} − 4x1000 {money(o.gmf)}
