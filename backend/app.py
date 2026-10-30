@@ -1623,6 +1623,59 @@ def api_avatar(uid):
     return resp
 
 
+COND_KEYS = re.compile(r"limit|reg|kyc|verif|tradable|condition|filter|count|rate|require|privilege|taker|position", re.I)
+
+
+def _cond_fields(obj, prefix=""):
+    """Campos de un anuncio que parecen condiciones para quien lo toma (días de registro, KYC, órdenes...)."""
+    out = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            path = f"{prefix}{k}"
+            if isinstance(v, (dict, list)):
+                out.update(_cond_fields(v, path + "."))
+            elif COND_KEYS.search(k) and v not in (None, "", []):
+                out[path] = v
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj[:3]):
+            out.update(_cond_fields(v, f"{prefix}{i}."))
+    return out
+
+
+@app.get("/api/admin/ad-conditions")
+@admin_only
+def api_ad_conditions():
+    """Diagnóstico: qué condiciones manda Binance en cada anuncio (para filtrar los que tu cuenta no puede tomar).
+    ?asset=USDT&side=BUY · prueba también el detalle del primer anuncio."""
+    asset = (request.args.get("asset") or "USDT").upper()[:10]
+    side = "SELL" if (request.args.get("side") or "").upper() == "SELL" else "BUY"
+    body_ = {"asset": asset, "fiat": FIAT, "tradeType": side, "page": 1, "rows": 10, "payTypes": []}
+    try:
+        data = engine._json(engine.http().post(f"{engine.P2P}/friendly/c2c/adv/search", json=body_, timeout=15))
+    except Exception as e:
+        return jsonify(error=str(e)), 502
+    ads = data.get("data") or []
+    rows = [{"nick": (a.get("advertiser") or {}).get("nickName"), "advNo": (a.get("adv") or {}).get("advNo"),
+             "price": (a.get("adv") or {}).get("price"), "conditions": _cond_fields(a)} for a in ads]
+    detail = []
+    adv_no = rows[0]["advNo"] if rows else None
+    if adv_no:
+        for method, url, kw in (("GET", f"{engine.P2P}/public/c2c/adv/selected-adv/{adv_no}", {}),
+                                ("POST", f"{engine.P2P}/public/c2c/adv/selected-adv/{adv_no}", {"json": {}}),
+                                ("GET", f"{engine.P2P}/public/c2c/adv/detail", {"params": {"advNo": adv_no}}),
+                                ("POST", f"{engine.P2P}/friendly/c2c/adv/detail", {"json": {"advNo": adv_no}})):
+            try:
+                r = engine.http().request(method, url, timeout=15, **kw)
+                j = r.json() if "json" in (r.headers.get("content-type") or "") else {}
+                detail.append({"try": f"{method} {url.replace(engine.P2P, '')}", "status": r.status_code, "code": j.get("code"),
+                               "conditions": _cond_fields(j.get("data") or {})})
+            except Exception as e:
+                detail.append({"try": f"{method} {url.replace(engine.P2P, '')}", "error": str(e)[:200]})
+    me = profile(g.user["name"])
+    return jsonify(asset=asset, side=side, my_days=account_days(me), binance_since=me.get("binance_since"),
+                   all_keys_first_ad=sorted((ads[0].get("adv") or {}).keys()) if ads else [], ads=rows, detail=detail)
+
+
 @app.get("/api/team")
 @admin_only
 def api_team():
