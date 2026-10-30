@@ -222,10 +222,14 @@ function MethodsSheet({ s, onClose }: { s: State; onClose: () => void }) {
   const [recv, setRecv] = useState<string[]>(s.settings.recv_methods ?? []);
   const [since, setSince] = useState(s.settings.binance_since ?? "");
   const [blocked, setBlocked] = useState(s.settings.blocked ?? []);
+  const [orders, setOrders] = useState(s.settings.binance_orders != null ? String(s.settings.binance_orders) : "");
+  const [rate, setRate] = useState(s.settings.binance_rate != null ? String(Math.round(s.settings.binance_rate * 1000) / 10) : "");
   const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true);
-    const ok = await saveSettings({ pay_methods: pay, recv_methods: recv, binance_since: since || null, blocked });
+    const ok = await saveSettings({ pay_methods: pay, recv_methods: recv, binance_since: since || null, blocked,
+      binance_orders: orders.trim() === "" ? null : Math.max(0, Math.round(Number(orders))),
+      binance_rate: rate.trim() === "" ? null : Math.min(100, Math.max(0, Number(rate.replace(",", ".")))) / 100 });
     setBusy(false);
     if (ok) {
       toast("Medios guardados", pay.length || recv.length ? "Solo verás rutas y avisos con anuncios que aceptan tus medios." : "Se usan anuncios con cualquier medio.", "good", 3000);
@@ -251,7 +255,21 @@ function MethodsSheet({ s, onClose }: { s: State; onClose: () => void }) {
               <span>días</span>
             </span>
           </div>
-          <p className="dim small"><Icon name="info" size={13} /> Hay anuncios que piden 30, 60 o 90 días de registro: con tus días, el panel no te muestra los que todavía no puedes tomar. En Binance: P2P → Publicar anuncio → Requisitos → "Cuenta registrada".</p>
+          <div className="mc-since">
+            <span><b>Órdenes P2P completadas</b><small className="dim">Hay anuncios que piden un mínimo</small></span>
+            <span className="inline-field">
+              <input type="number" min={0} step={1} inputMode="numeric" placeholder="76" value={orders} onChange={(e) => setOrders(e.target.value)} aria-label="Órdenes completadas" />
+              <span>órdenes</span>
+            </span>
+          </div>
+          <div className="mc-since">
+            <span><b>Tasa de finalización de 30 días</b><small className="dim">Hay anuncios que piden un mínimo</small></span>
+            <span className="inline-field">
+              <input type="text" inputMode="decimal" placeholder="98,8" value={rate} onChange={(e) => setRate(e.target.value)} aria-label="Tasa de finalización" />
+              <span>%</span>
+            </span>
+          </div>
+          <p className="dim small"><Icon name="info" size={13} /> Con estos datos el panel no te muestra los anuncios que todavía no puedes tomar (en Arbitraje, Tus dólares, ¿Dónde vendo?, el libro y los avisos). Los ves en Binance: P2P → Publicar anuncio → Requisitos. Las órdenes y la tasa cambian: actualízalas de vez en cuando.</p>
           {blocked.length > 0 && (
             <div>
               <b>Anunciantes descartados</b> <span className="dim small">(no te dejaban tomar su anuncio)</span>

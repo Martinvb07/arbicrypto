@@ -60,14 +60,24 @@ export function CapitalField() {
   );
 }
 
-/** Condiciones del anunciante sobre tu cuenta (días de registro): si no anotaste cuándo la creaste, se avisa. */
+/** Lo que el anunciante le pide a quien toma su anuncio (días de registro, órdenes, tasa, verificación). Lo que no
+ *  anotaste en Mis medios no se puede revisar: se avisa para que lo anotes. */
 export function RegDays({ ad }: { ad: Ad }) {
   const { state } = useLive();
-  if (!ad.reg_days) return null;
+  const st = state?.settings;
+  const asks = [
+    ad.reg_days ? `cuenta con ${ad.reg_days} días de registro` : "",
+    ad.orders_min ? `mínimo ${ad.orders_min} órdenes completadas` : "",
+    ad.orders_max ? `máximo ${ad.orders_max} órdenes` : "",
+    ad.rate_min ? `${Math.round(ad.rate_min * 1000) / 10} % de finalización` : "",
+    ad.kyc_extra ? "verificación adicional" : "",
+  ].filter(Boolean);
+  if (!asks.length) return null;
+  const unknown = (ad.reg_days && !st?.binance_since) || ((ad.orders_min || ad.orders_max) && st?.binance_orders == null) || (ad.rate_min && st?.binance_rate == null);
   return (
     <span className="muted">
-      {" "}· pide cuenta con {ad.reg_days} días de registro
-      {!state?.settings.binance_since && " (anota en Mis medios de pago cuándo creaste tu cuenta y el panel descarta los que no cumples)"}
+      {" "}· pide {asks.join(", ")}
+      {unknown && " (anota tus datos en Precios P2P → Mis medios y el panel descarta los que no cumples)"}
     </span>
   );
 }

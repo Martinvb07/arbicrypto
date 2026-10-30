@@ -14,6 +14,14 @@ export interface Ad {
   hold_btc?: number;
   /** Días que tu cuenta de Binance debe llevar registrada para tomar el anuncio (0 = no pide). */
   reg_days?: number;
+  /** Órdenes P2P completadas que pide (mínimo y máximo; 0 = no pide) y tasa de finalización mínima (0 a 1). */
+  orders_min?: number;
+  orders_max?: number;
+  rate_min?: number;
+  /** Pide verificación adicional (KYC) a quien toma el anuncio. */
+  kyc_extra?: boolean;
+  /** Ya se leyeron sus condiciones del detalle del anuncio. */
+  known?: boolean;
   methods: string[];
   nick: string;
   user: string | null;
@@ -216,6 +224,9 @@ export interface Settings {
   muted_routes?: string[];
   /** Fecha (AAAA-MM-DD) en que creaste tu cuenta de Binance: hay anuncios que piden 30, 60 o 90 días. */
   binance_since?: string | null;
+  /** Órdenes P2P completadas y tasa de finalización de 30 días (0 a 1), como las muestra Binance: hay anuncios que piden un mínimo. */
+  binance_orders?: number | null;
+  binance_rate?: number | null;
   /** Anunciantes que no te dejan tomar su anuncio: no se usan en rutas, ventas ni avisos. */
   blocked?: { user: string; nick: string }[];
 }

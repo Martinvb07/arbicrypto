@@ -185,6 +185,8 @@ def profile(name):
     out["muted_kinds"] = [k for k in mine.get("muted_kinds") or [] if k in MUTABLE_KINDS]
     out["muted_routes"] = [str(r) for r in mine.get("muted_routes") or []]
     out["binance_since"] = mine.get("binance_since") or None
+    out["binance_orders"] = mine.get("binance_orders")  # órdenes P2P completadas (lo que muestra Binance en tu perfil)
+    out["binance_rate"] = mine.get("binance_rate")  # tasa de finalización de 30 días, de 0 a 1
     out["blocked"] = [b for b in mine.get("blocked") or [] if isinstance(b, dict) and b.get("user")]
     return out
 
@@ -199,8 +201,10 @@ def account_days(pr):
 
 
 def can_take_of(pr):
-    """(días de registro, anunciantes bloqueados) de un usuario: lo que decide qué anuncios puede tomar."""
-    return account_days(pr), tuple(sorted(b["user"] for b in pr["blocked"]))
+    """((días de registro, órdenes completadas, tasa de finalización), anunciantes bloqueados) de un usuario: lo que
+    decide qué anuncios puede tomar. Lo que no haya anotado va en None y no se revisa."""
+    me = (account_days(pr), pr.get("binance_orders"), pr.get("binance_rate"))
+    return (None if me == (None, None, None) else me), tuple(sorted(b["user"] for b in pr["blocked"]))
 
 
 def market_for(market, pr):
@@ -211,7 +215,8 @@ BLOCKED_MAX = 200
 
 
 def clean_account(raw):
-    """binance_since: fecha AAAA-MM-DD (o vacío para quitarla). blocked: [{user, nick}] de anunciantes que no te dejan."""
+    """binance_since: fecha AAAA-MM-DD (o vacío para quitarla). binance_orders: órdenes P2P completadas. binance_rate:
+    tasa de finalización de 0 a 1. blocked: [{user, nick}] de anunciantes que no te dejan."""
     out = {}
     if "binance_since" in raw:
         v = str(raw.get("binance_since") or "").strip()
@@ -219,6 +224,18 @@ def clean_account(raw):
             out["binance_since"] = datetime.date.fromisoformat(v).isoformat() if v and datetime.date.fromisoformat(v) <= datetime.date.today() else None
         except ValueError:
             out["binance_since"] = None
+    if "binance_orders" in raw:
+        try:
+            n = int(raw["binance_orders"]) if raw["binance_orders"] not in (None, "") else None
+            out["binance_orders"] = n if n is None or 0 <= n <= 10**7 else None
+        except (TypeError, ValueError):
+            out["binance_orders"] = None
+    if "binance_rate" in raw:
+        try:
+            r = float(raw["binance_rate"]) if raw["binance_rate"] not in (None, "") else None
+            out["binance_rate"] = r if r is None or 0 <= r <= 1 else None
+        except (TypeError, ValueError):
+            out["binance_rate"] = None
     if isinstance(raw.get("blocked"), list):
         seen, rows = set(), []
         for b in raw["blocked"]:
@@ -1371,6 +1388,24 @@ def friendly_error(e):
     if status and status >= 500:
         return f"Binance tiene problemas en este momento (HTTP {status}). Se reintenta solo."
     return msg
+
+
+CONDITIONS_EVERY = 1.5  # un detalle de anuncio cada 1,5 s: la búsqueda ya usa casi todo el cupo de Binance
+
+
+def conditions_loop():
+    """Lee en segundo plano las condiciones de cada anuncio (días de registro, órdenes, tasa de finalización), primero
+    los de mejor precio. Si Binance pide esperar (429), espera un rato."""
+    while True:
+        time.sleep(CONDITIONS_EVERY)
+        if not redis.leader() or p2p_hold.is_set():
+            continue
+        try:
+            todo = engine.missing_conditions(p2p_cache["market"], 1)
+            if todo:
+                engine.CONDITIONS[todo[0]] = (time.time(), engine.ad_conditions(todo[0]))
+        except Exception as e:  # 429 u otro fallo: se intenta más tarde
+            time.sleep(30 if "429" in str(e) else 5)
 
 
 def run_loop(name, step, interval):
@@ -3061,6 +3096,7 @@ def main():
                                  ("account", account_step, ACCOUNT_INTERVAL), ("watch", watch_step, WATCH_INTERVAL)):
         threading.Thread(target=run_loop, args=(name, step, interval), daemon=True).start()
     threading.Thread(target=watchdog, daemon=True).start()
+    threading.Thread(target=conditions_loop, daemon=True).start()
 
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     url = f"http://127.0.0.1:{PORT}"

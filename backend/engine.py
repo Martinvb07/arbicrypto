@@ -287,9 +287,9 @@ def _ad(a):
         "min_qty": float(adv.get("minSingleTransQuantity") or 0),
         "max_qty": float(adv.get("dynamicMaxSingleTransQuantity") or adv.get("maxSingleTransQuantity") or 0),
         # Condición del anunciante: solo deja tomar su anuncio a quien tenga al menos esa cantidad de BTC
-        "hold_btc": float(adv.get("buyerBtcPositionLimit") or 0),
-        # Condición del anunciante: tu cuenta de Binance debe tener al menos estos días de registrada (30, 60, 90...)
-        "reg_days": int(float(adv.get("buyerRegDaysLimit") or adv.get("userRegDaysLimit") or 0)),
+        "hold_btc": _limit(adv.get("buyerBtcPositionLimit")),
+        # Condiciones del anunciante (días de registro, órdenes...): la búsqueda no las trae, se leen del detalle
+        "reg_days": int(_limit(adv.get("buyerRegDaysLimit"))),
         "methods": [m.get("tradeMethodName") or m.get("identifier") for m in adv.get("tradeMethods") or []],
         "nick": user.get("nickName") or "?",
         "user": user.get("userNo"),
@@ -303,6 +303,57 @@ def _ad(a):
 
 RAW_ADS = {}  # (asset, side) -> últimos anuncios crudos de Binance
 
+# Condiciones que pone cada anunciante a quien toma su anuncio. La búsqueda no las trae (llegan vacías); el detalle del
+# anuncio sí (GET /public/c2c/adv/detail). Se leen de a una, en segundo plano, y se guardan unas horas por anuncio.
+CONDITIONS = {}  # advNo -> (cuándo, {reg_days, orders_min, orders_max, rate_min, kyc_extra, hold_btc})
+CONDITIONS_TTL = 6 * 3600
+
+
+def _limit(v, none_at=None):
+    """-1 (y el tope de 1.000.000 en los máximos) es 'sin límite' en Binance: 0."""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0 if x < 0 or (none_at is not None and x >= none_at) else x
+
+
+def ad_conditions(adv_no):
+    """Lee del detalle del anuncio lo que le pide a quien lo toma."""
+    data = _json(http().get(f"{P2P}/public/c2c/adv/detail", params={"advNo": adv_no}, timeout=15))
+    if data.get("code") not in (None, "000000") or not isinstance(data.get("data"), dict):
+        raise BinanceError(data.get("message") or data.get("code") or "detalle sin datos")
+    d = data["data"]
+    mins = [_limit(d.get(k)) for k in ("userAllTradeCountMin", "userBuyTradeCountMin", "userSellTradeCountMin", "userTradeCompleteCountMin")]
+    return {"reg_days": int(_limit(d.get("buyerRegDaysLimit"))), "orders_min": int(max(mins)),
+            "orders_max": int(_limit(d.get("userAllTradeCountMax"), 1e6)), "rate_min": _limit(d.get("userTradeCompleteRateMin")),
+            "kyc_extra": bool(d.get("takerAdditionalKycRequired")), "hold_btc": _limit(d.get("buyerBtcPositionLimit"))}
+
+
+def with_conditions(ad):
+    """Le pone al anuncio las condiciones ya leídas de su detalle (si no se han leído, quedan como 'no pide')."""
+    hit = CONDITIONS.get(ad.get("adv"))
+    if hit:
+        ad.update(hit[1], known=True)
+    return ad
+
+
+def missing_conditions(market, limit=20):
+    """Anuncios sin condiciones leídas (o viejas), primero los de mejor precio de cada lista: los que más se usan."""
+    now, out, seen = time.time(), [], set()
+    lists = [m.get(side) or [] for m in market.values() for side in ("BUY", "SELL")]
+    for i in range(max((len(x) for x in lists), default=0)):
+        for ads in lists:
+            if i < len(ads):
+                no = ads[i].get("adv")
+                hit = CONDITIONS.get(no)
+                if no and no not in seen and (not hit or now - hit[0] > CONDITIONS_TTL):
+                    seen.add(no)
+                    out.append(no)
+                    if len(out) >= limit:
+                        return out
+    return out
+
 
 def p2p_search(asset, side, fiat, amount=0, pay_types=(), merchant=False):
     """side=BUY: anuncios donde tu compras (precio que pagas). SELL: donde tu vendes."""
@@ -314,7 +365,7 @@ def p2p_search(asset, side, fiat, amount=0, pay_types=(), merchant=False):
     if data.get("code") not in (None, "000000"):
         raise BinanceError(data.get("message") or data.get("code"))
     RAW_ADS[(asset, side)] = data.get("data") or []  # tal cual llegó: para el diagnóstico de condiciones
-    return [_ad(a) for a in data.get("data") or []]
+    return [with_conditions(_ad(a)) for a in data.get("data") or []]
 
 
 def p2p_pay_methods(fiat):
@@ -372,17 +423,23 @@ SELL_MIN_MARGIN_USD = 0.01
 DOLLARS = ("USDT", "USDC", "FDUSD")
 
 
-def can_take(ad, days=None, blocked=()):
-    """Tu cuenta puede tomar el anuncio: tiene los días de registro que pide (sin saberlos no se descarta) y no
-    marcaste a ese anunciante como "no puedo con este"."""
-    return (days is None or days >= ad.get("reg_days", 0)) and ad.get("user") not in blocked
+def can_take(ad, me=None, blocked=()):
+    """Tu cuenta puede tomar el anuncio: cumple lo que pide el anunciante (días de registro, órdenes completadas, tasa de
+    finalización; lo que no hayas anotado no se revisa) y no lo marcaste como "no puedo con este".
+    me = (días de registro, órdenes completadas, tasa de finalización de 0 a 1), cada uno None si no se sabe."""
+    if ad.get("user") in blocked:
+        return False
+    days, orders, rate = me or (None, None, None)
+    return ((days is None or days >= ad.get("reg_days", 0))
+            and (orders is None or (orders >= ad.get("orders_min", 0) and (not ad.get("orders_max") or orders <= ad["orders_max"])))
+            and (rate is None or rate >= ad.get("rate_min", 0)))
 
 
-def takeable(market, days=None, blocked=()):
+def takeable(market, me=None, blocked=()):
     """El libro P2P solo con los anuncios que tu cuenta puede tomar."""
-    if days is None and not blocked:
+    if (not me or me == (None, None, None)) and not blocked:
         return market
-    return {a: {**m, **{side: [ad for ad in m.get(side) or [] if can_take(ad, days, blocked)] for side in ("BUY", "SELL")}}
+    return {a: {**m, **{side: [ad for ad in m.get(side) or [] if can_take(ad, me, blocked)] for side in ("BUY", "SELL")}}
             for a, m in market.items()}
 
 
@@ -525,7 +582,7 @@ def _search_retry(asset, fiat, amount):
 
 
 def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, min_finish, p2p_fee=0.0, p2p_min_usd=0.0,
-                 days=None, blocked=()):
+                 me=None, blocked=()):
     """Todas las formas de pasar `qty` de `asset` a pesos: vender directo en P2P o cambiar antes en Spot
     (directo o pasando por USDT) y vender esa. Cada opcion usa el mejor comprador real que acepta el monto
     y dice cuanto darian si ese comprador desaparece (el siguiente que acepta)."""
@@ -543,7 +600,7 @@ def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, mi
         approx = to_usdt * usd_fiat if to_usdt and usd_fiat else 0
         try:
             ads = [a for a in _search_retry(y, fiat, approx)
-                   if a["orders"] >= min_orders and a["finish"] >= min_finish and can_take(a, days, blocked)]
+                   if a["orders"] >= min_orders and a["finish"] >= min_finish and can_take(a, me, blocked)]
         except (requests.RequestException, BinanceError):
             errors.append(y)
             continue
