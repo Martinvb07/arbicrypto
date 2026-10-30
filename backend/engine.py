@@ -301,6 +301,9 @@ def _ad(a):
     }
 
 
+RAW_ADS = {}  # (asset, side) -> últimos anuncios crudos de Binance
+
+
 def p2p_search(asset, side, fiat, amount=0, pay_types=(), merchant=False):
     """side=BUY: anuncios donde tu compras (precio que pagas). SELL: donde tu vendes."""
     body = {"asset": asset, "fiat": fiat, "tradeType": side, "page": 1, "rows": 20,
@@ -310,6 +313,7 @@ def p2p_search(asset, side, fiat, amount=0, pay_types=(), merchant=False):
     data = _json(http().post(f"{P2P}/friendly/c2c/adv/search", json=body, timeout=15))
     if data.get("code") not in (None, "000000"):
         raise BinanceError(data.get("message") or data.get("code"))
+    RAW_ADS[(asset, side)] = data.get("data") or []  # tal cual llegó: para el diagnóstico de condiciones
     return [_ad(a) for a in data.get("data") or []]
 
 
