@@ -222,7 +222,7 @@ export function AdSim() {
   if (!state) return <div className="card"><Skeleton rows={10} /></div>;
   const st = state.settings;
   const asset = st.p2p_assets.includes(prefs.asset) ? prefs.asset : "USDT";
-  const m = state.p2p?.market[asset];
+  const m = (state.p2p?.market_all ?? state.p2p?.market)?.[asset]; // tu anuncio compite con todos, aunque tú no puedas tomarlos
   const amountStr = amountTyped ?? String(st.capital);
   const amount = parse(amountStr);
   const rounds = Math.max(1, Math.round(parse(roundsTyped) ?? 1));

@@ -2211,8 +2211,10 @@ def api_state():
                                                                              rkey[2], rkey[7]),
                     "found": []}
         if p2p:
-            p2p = {**p2p, "market": market_for(p2p["market"], me),  # sin los anuncios que su cuenta no puede tomar
-                   "routes": (mine or {}).get("routes", []), "conversions": (mine or {}).get("conversions")}
+            mkt = market_for(p2p["market"], me)  # sin los anuncios que su cuenta no puede tomar
+            p2p = {**p2p, "market": mkt, "routes": (mine or {}).get("routes", []), "conversions": (mine or {}).get("conversions"),
+                   # al publicar tu anuncio compites con todos, también con los que tú no puedes tomar (Simular anuncios)
+                   **({"market_all": p2p["market"]} if mkt is not p2p["market"] else {})}
         return jsonify({
             "boot": BOOT, "now": time.time(), "settings": public_settings(g.user), "fee": current_fee(), "p2p_fee": effective_fee(me),
             "p2p_fee_auto": effective_fee({**me, "taker_fee": -1}), "price_alerts": price_alert_view(name),

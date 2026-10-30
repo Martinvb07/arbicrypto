@@ -89,6 +89,8 @@ export interface P2PState {
   market: Record<string, MarketEntry>;
   routes: Route[];
   conversions: { sell: Conversion[]; buy: Conversion[] };
+  /** El libro completo, con los anuncios que tu cuenta no puede tomar (solo llega si se quitó alguno): para simular tu anuncio. */
+  market_all?: Record<string, MarketEntry>;
   errors: string[];
   fiat: string;
 }
