@@ -265,7 +265,7 @@ def compute(movements, year, habitual=False, method="fifo"):
                     # el 4x1000 que pagaste al comprar lo que vendiste, y la ganancia ya sin él
                     "gmf": gmf_share, "net": gain - gmf_share, "sources": sources, "manual": manual is not None,
                 })
-                if kind == "venta" and root_out[2] and manual is None and not missing:
+                if kind == "venta" and root_out[2] and manual is None and missing <= 1e-9:
                     # salió de una permuta: la vuelta completa contra los pesos que pagaste al principio (no va a la DIAN)
                     disposals[-1]["origin"] = {"cost": root_out[0], "gmf": root_out[1], "net": proceeds - root_out[0] - root_out[1]}
                 if kind == "venta":
