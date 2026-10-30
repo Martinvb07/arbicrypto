@@ -616,8 +616,14 @@ function ConvSteps({ r, side, s }: { r: Conversion; side: "sell" | "buy"; s: Sta
   const over = r.ad.min ? sellFiat / r.ad.min - 1 : null; // cuánto te sobra sobre el mínimo del comprador
   const summary = side === "sell" && got > 0 && (
     <div className={`conv-sum ${fits ? "ok" : "bad"}`}>
+      {!held && s.account && (
+        <div className="conv-sum-note">
+          <Icon name="info" size={14} /> No tienes USDT en tu Binance ahora mismo: esto es un ejemplo con tu capital ({money(s.settings.capital, 0)}).
+          Cuando compres dólares, se calcula solo con los que te lleguen.
+        </div>
+      )}
       <div>
-        {r.asset !== "USDT" && <>Pones <b>{amountTxt(usd, "USDT")}</b>{held ? " (lo que tienes en Binance)" : " (tu capital)"} → te llegan <b>{amountTxt(got, r.asset)}</b> → </>}
+        {r.asset !== "USDT" && <>Pones <b>{amountTxt(usd, "USDT")}</b>{held ? " (lo que tienes en Binance)" : s.account ? " (ejemplo con tu capital)" : " (tu capital)"} → te llegan <b>{amountTxt(got, r.asset)}</b> → </>}
         vendes <b>{amountTxt(got, r.asset)}</b> a <b>{r.ad.nick}</b> → recibes <b>{money(fiat, 0)}</b>
       </div>
       <div>

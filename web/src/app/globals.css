@@ -251,6 +251,8 @@ table.clickable tbody tr { cursor: pointer; }
 .note svg { color: var(--up); }
 .conv-sum { display: grid; gap: 4px; margin: 4px 0 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px; border: 1px solid var(--up-line); background: var(--up-soft); }
 .conv-sum div:last-child { color: var(--muted); }
+.conv-sum-note { display: flex; gap: 6px; align-items: flex-start; color: var(--warn); font-weight: 600; }
+.conv-sum-note svg { flex: none; margin-top: 2px; }
 .conv-sum.ok svg { color: var(--up); vertical-align: -2px; }
 .conv-sum.bad { border-color: var(--down); background: var(--down-soft); }
 .conv-sum.bad svg, .conv-sum.bad b { color: var(--down); }
