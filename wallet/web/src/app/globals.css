@@ -1224,6 +1224,9 @@ main > .stack { animation: slide .28s cubic-bezier(.2, .8, .2, 1) both; }
 .op-source:hover { color: var(--text); border-bottom-color: var(--border-2); }
 .op-source .icon { flex: none; opacity: .7; }
 .op-source .tag { font-size: 11px; font-weight: 600; color: var(--brand); padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--brand) 12%, transparent); }
+.op-origin { display: block; margin-top: 2px; color: var(--muted); }
+.op-origin.up b { color: var(--up); }
+.op-origin.down b { color: var(--down); }
 .gmf-pick-empty { padding: 28px; text-align: center; color: var(--muted); }
 @keyframes gmf-row-in { from { opacity: 0; transform: translateY(6px); } }
 @media (max-width: 640px) {

@@ -230,9 +230,15 @@ def compute(movements, year, habitual=False, method="fifo"):
         fee = float(m.get("fee_cop") or 0) if kind in ("compra", "venta", "permuta") else 0.0
         value = float(m.get("cop_value") or 0)
 
+        root_out = None  # en una permuta: lo que de verdad pagaste en pesos (y su 4x1000) por lo que entregaste
         if kind in OUTFLOW and m.get("out_asset") and m["out_asset"] != COP:
             asset, qty = m["out_asset"], float(m["out_qty"])
             parts, missing = ledger.take(asset, qty, m.get("lot_from"))
+            # costo de origen: para la DIAN cada permuta vale a precio de mercado, pero para saber cuánto te dejó la
+            # vuelta completa (pesos → USDT → XRP → pesos) se sigue lo que pagaste en pesos a través de las permutas
+            root_out = (sum(src.get("root", src["cost"]) * q / src["qty"] if src and src.get("qty") else c for q, c, _t, src, _r in parts),
+                        sum(src.get("root_gmf", src["gmf"]) * q / src["qty"] if src and src.get("qty") else 0.0 for q, _c, _t, src, _r in parts),
+                        any(src and src.get("chain") for _q, _c, _t, src, _r in parts))
             manual = manual_cost(m)
             if manual is not None:
                 missing = 0.0  # le dijiste cuánto te costó: ya no falta la compra
@@ -259,6 +265,9 @@ def compute(movements, year, habitual=False, method="fifo"):
                     # el 4x1000 que pagaste al comprar lo que vendiste, y la ganancia ya sin él
                     "gmf": gmf_share, "net": gain - gmf_share, "sources": sources, "manual": manual is not None,
                 })
+                if kind == "venta" and root_out[2] and manual is None and not missing:
+                    # salió de una permuta: la vuelta completa contra los pesos que pagaste al principio (no va a la DIAN)
+                    disposals[-1]["origin"] = {"cost": root_out[0], "gmf": root_out[1], "net": proceeds - root_out[0] - root_out[1]}
                 if kind == "venta":
                     totals["sold_cop"] += value
                 totals["fees"] += fee
@@ -266,8 +275,11 @@ def compute(movements, year, habitual=False, method="fifo"):
         if kind in INFLOW and m.get("in_asset") and m["in_asset"] != COP:
             asset, qty = m["in_asset"], float(m["in_qty"])
             cost = value + fee if kind == "compra" else value  # en permuta la comision ya resto en la venta
-            ledger.add(asset, qty, cost, m["t"], {"id": m.get("id"), "t": m["t"], "kind": kind, "qty": qty, "cost": cost,
-                                                  "gmf": float(m.get("gmf_cop") or 0) if kind == "compra" else 0.0})
+            meta = {"id": m.get("id"), "t": m["t"], "kind": kind, "qty": qty, "cost": cost,
+                    "gmf": float(m.get("gmf_cop") or 0) if kind == "compra" else 0.0}
+            if kind == "permuta" and root_out:
+                meta.update(root=root_out[0], root_gmf=root_out[1], chain=True)
+            ledger.add(asset, qty, cost, m["t"], meta)
             if in_year:
                 if kind == "compra":
                     totals["bought_cop"] += value + fee

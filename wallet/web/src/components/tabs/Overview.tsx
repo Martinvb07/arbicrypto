@@ -58,6 +58,8 @@ function bucketLabel(b: number, g: Group, long = false) {
 interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; received: string | null; cost: number; gross: number; fee: number; gain: number; missing: boolean;
   /** 4x1000 de lo vendido, ganancia ya sin él y de qué compras salió */
   gmf: number; net: number; sources: SaleSource[];
+  /** venta de algo que llegó por permuta: la vuelta completa contra los pesos que pagaste al principio */
+  origin?: { cost: number; gmf: number; net: number };
   /** venta: su movimiento (para elegir de qué compra salió) */
   id?: number;
   /** venta: costo escrito a mano */
@@ -162,7 +164,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
     if (!report) return [];
     const sales = report.disposals.map((d) => ({ key: `d${d.id}-${d.t}`, t: d.t, kind: d.kind, asset: d.asset, qty: d.qty, received: d.received,
       cost: d.cost, gross: d.gross, fee: d.fee, gain: d.gain, missing: d.missing > 1e-9,
-      gmf: d.gmf ?? 0, net: d.net ?? d.gain, sources: d.sources ?? [], id: d.id, manual: !!d.manual }));
+      gmf: d.gmf ?? 0, net: d.net ?? d.gain, sources: d.sources ?? [], id: d.id, manual: !!d.manual, origin: d.origin }));
     const incomes = report.incomes.map((x) => ({ key: `i${x.id}`, t: x.t, kind: x.kind, asset: x.asset, qty: x.qty, received: null,
       cost: 0, gross: x.value, fee: 0, gain: x.value, missing: false, gmf: 0, net: x.value, sources: [] }));
     return [...sales, ...incomes].sort((p, q) => q.t - p.t);
@@ -576,6 +578,12 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                               </button>
                             ) : <span className="cell-sub">{sourceText(o)}</span>;
                           })()}
+                          {o.origin && (
+                            <span className={`cell-sub op-origin ${o.origin.net >= 0 ? "up" : "down"}`}
+                              title="Las permutas valen a precio de mercado (así lo pide la DIAN) y por eso esta venta sola puede salir en rojo. Esto es la vuelta completa: lo que recibiste contra los pesos que pagaste al principio, con su 4x1000">
+                              Vuelta completa: pagaste {money(o.origin.cost + o.origin.gmf)} → recibiste {money(o.cost + o.gain)} → <b>{o.origin.net >= 0 ? "+" : "−"}{money(Math.abs(o.origin.net))}</b>
+                            </span>
+                          )}
                           {o.id != null && !o.manual && (o.kind === "venta" || o.kind === "permuta") && (
                             <button className={`cell-sub op-adjust ${o.missing ? "warn" : ""}`} onClick={() => setCostOf(o)}>
                               <Icon name="edit" size={12} /> {o.missing ? "Escribir cuánto te costó" : "Ajustar costo"}

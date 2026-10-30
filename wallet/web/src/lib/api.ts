@@ -94,6 +94,8 @@ export interface Disposal {
   net?: number;
   /** de qué compras salió: cuánto se usó de cada una y cuánto quedó */
   sources?: SaleSource[];
+  /** venta de algo que llegó por permuta: lo que pagaste en pesos al principio (con su 4x1000) y lo que te dejó la vuelta completa */
+  origin?: { cost: number; gmf: number; net: number };
   /** costo escrito a mano */
   manual?: boolean;
 }
