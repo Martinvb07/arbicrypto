@@ -140,10 +140,12 @@ class ImportJob:
             client.check_read_only()
             end = time.time()
             cursor.setdefault("spot", {})
+            # Spot y Convert antes que P2P: si cambiaste USDT por BNB y vendiste el BNB, el cambio ya está cuando llega la
+            # venta (si no, mientras sincroniza, la venta sale sin costo y parece que todo fue ganancia)
             parts = [
-                ("p2p", "P2P", lambda: self.p2p(uid, client, cursor.get("p2p"), end, gmf), end),
-                ("convert", "Convert", lambda: self.convert(uid, client, cursor.get("convert"), end), end),
                 ("spot", "Spot", lambda: self.spot(uid, client, cursor["spot"]), None),
+                ("convert", "Convert", lambda: self.convert(uid, client, cursor.get("convert"), end), end),
+                ("p2p", "P2P", lambda: self.p2p(uid, client, cursor.get("p2p"), end, gmf), end),
                 ("earn", "Simple Earn", lambda: self.earn(uid, client, cursor.get("earn"), end), (end // DAY) * DAY),
                 ("dust", "Polvo a BNB", lambda: self.dust(uid, client), None),
             ]

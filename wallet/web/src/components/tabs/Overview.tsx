@@ -60,6 +60,8 @@ interface Op { key: string; t: number; kind: Kind; asset: string; qty: number; r
   gmf: number; net: number; sources: SaleSource[];
   /** cambio en Spot (permuta): aquí no gana ni pierde, la ganancia se ve cuando vendes lo que te llegó */
   swap?: boolean;
+  /** venta a la que le falta la compra: no suma ganancia hasta saber cuánto costó */
+  pending?: boolean;
   /** venta: su movimiento (para elegir de qué compra salió) */
   id?: number;
   /** venta: costo escrito a mano */
@@ -169,6 +171,8 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
       // aquí solo cuenta cuánto pagaste y cuánto recibiste: un cambio en Spot no gana ni pierde (para la DIAN sí, eso va
       // en Declaración y en el Excel), y lo que vendes después se mide contra los pesos que pagaste al principio
       if (d.kind === "permuta") return { ...o, swap: true, gain: 0, net: 0, gmf: 0 };
+      // sin la compra no se sabe cuánto ganaste: no suma (suele ser un cambio en Spot que aún no llega al sincronizar)
+      if (d.missing > 1e-9 && !d.manual) return { ...o, pending: true, gain: 0, net: 0, gmf: 0 };
       if (d.origin) return { ...o, cost: d.origin.cost, gmf: d.origin.gmf, gain: d.proceeds - d.origin.cost, net: d.origin.net };
       return o;
     });
@@ -491,7 +495,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                     const k = bucketOf(dayOf(o.t), group);
                     const head = i === 0 || bucketOf(dayOf(slice[i - 1].t), group) !== k;
                     const g = bucketSum.get(k);
-                    const pct = o.cost > 0 && !o.swap ? (o.net / o.cost) * 100 : null;
+                    const pct = o.cost > 0 && !o.swap && !o.pending ? (o.net / o.cost) * 100 : null;
                     return [
                       head && g && (
                         <tr key={`h${k}`} className="group-row">
@@ -565,7 +569,7 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                             {o.kind === "permuta" && o.received && <span className="muted nowrap">→ {o.received}</span>}
                             {(o.kind === "venta" || o.kind === "permuta") && o.id != null && <HideBtn onClick={() => void markThird(o, true)} />}
                           </span>
-                          {o.missing && <span className="cell-sub warn">Falta la compra: la ganancia puede salir más alta</span>}
+                          {o.missing && <span className="cell-sub warn">Falta la compra: si acabas de cambiar en Spot, llega al terminar de sincronizar. Si no, escribe cuánto te costó</span>}
                           {o.qty > 0 && o.kind === "venta" && o.cost > 0 && (
                             <span className="cell-sub op-prices">
                               Compraste a <b>{unitPrice(o.cost / o.qty)}</b> → vendiste a <b>{unitPrice(o.gross / o.qty)}</b> por {o.asset}
@@ -598,7 +602,9 @@ export function Overview({ onDetail }: { onDetail: () => void }) {
                             return <span className="cell-sub" title="La comisión de Binance sale en cripto: ya está dentro de lo que vendiste y no te llega">
                               comisión {fq ? `${num(fq, 2)} ${o.asset}` : money(o.fee)}</span>;
                           })()}</td>
-                        <td className="r">{o.swap ? <span className="muted" title="Un cambio en Spot no gana ni pierde: la ganancia sale cuando vendes lo que te llegó">—</span> : <b><Pnl v={o.net} /></b>}
+                        <td className="r">{o.swap ? <span className="muted" title="Un cambio en Spot no gana ni pierde: la ganancia sale cuando vendes lo que te llegó">—</span>
+                          : o.pending ? <span className="muted" title="Falta la compra de lo que vendiste: no suma hasta saber cuánto te costó">Pendiente<span className="cell-sub">falta la compra</span></span>
+                          : <b><Pnl v={o.net} /></b>}
                           {o.gmf >= 1 && (
                             <span className="cell-sub" title="La ganancia de verdad: lo que recibiste menos lo que te costó, menos la parte del 4x1000 que pagaste al comprar lo que vendiste (las comisiones de Binance ya van en el costo y en lo recibido)">
                               {signedMoney(o.gain)} − 4x1000 {money(o.gmf)}
