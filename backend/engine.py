@@ -423,12 +423,15 @@ SELL_MIN_MARGIN_USD = 0.01
 DOLLARS = ("USDT", "USDC", "FDUSD")
 
 
-def can_take(ad, me=None, blocked=()):
+def can_take(ad, me=None, blocked=(), strict=True):
     """Tu cuenta puede tomar el anuncio: cumple lo que pide el anunciante (días de registro, órdenes completadas, tasa de
     finalización; lo que no hayas anotado no se revisa) y no lo marcaste como "no puedo con este".
-    me = (días de registro, órdenes completadas, tasa de finalización de 0 a 1), cada uno None si no se sabe."""
+    me = (días de registro, órdenes completadas, tasa de finalización de 0 a 1), cada uno None si no se sabe.
+    strict: si anotaste tus datos, un anuncio cuyas condiciones aún no se leyeron no cuenta."""
     if ad.get("user") in blocked:
         return False
+    if me and strict and not ad.get("known"):
+        return False  # sus condiciones aún no se han leído: mejor no proponerlo que mandarte a uno que no te deja
     days, orders, rate = me or (None, None, None)
     return ((days is None or days >= ad.get("reg_days", 0))
             and (orders is None or (orders >= ad.get("orders_min", 0) and (not ad.get("orders_max") or orders <= ad["orders_max"])))
@@ -600,7 +603,7 @@ def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, mi
         approx = to_usdt * usd_fiat if to_usdt and usd_fiat else 0
         try:
             ads = [a for a in _search_retry(y, fiat, approx)
-                   if a["orders"] >= min_orders and a["finish"] >= min_finish and can_take(a, me, blocked)]
+                   if a["orders"] >= min_orders and a["finish"] >= min_finish and can_take(a, me, blocked, strict=False)]
         except (requests.RequestException, BinanceError):
             errors.append(y)
             continue

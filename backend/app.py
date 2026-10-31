@@ -687,6 +687,8 @@ def p2p_step():
     else:
         batch = P2P_ALWAYS + [rest[cache["turn"] % len(rest)]]
         cache["turn"] += 1
+    if cache["market"]:
+        read_conditions(cache["market"])  # antes de buscar: así el detalle no compite con la búsqueda por el cupo
     fresh, errors = engine.p2p_market(batch, FIAT, 0, [], False, MIN_ORDERS, MIN_FINISH)
     if errors and len(errors) == 2 * len(batch):
         raise engine.BinanceError(errors[0])
@@ -1390,22 +1392,23 @@ def friendly_error(e):
     return msg
 
 
-CONDITIONS_EVERY = 1.5  # un detalle de anuncio cada 1,5 s: la búsqueda ya usa casi todo el cupo de Binance
+CONDITIONS_PER_SCAN = 2  # detalles de anuncio que lee el escáner en cada vuelta (comparten su cupo con la búsqueda)
+cond_state = {"read": 0, "error": None, "error_t": 0.0}
 
 
-def conditions_loop():
-    """Lee en segundo plano las condiciones de cada anuncio (días de registro, órdenes, tasa de finalización), primero
-    los de mejor precio. Si Binance pide esperar (429), espera un rato."""
-    while True:
-        time.sleep(CONDITIONS_EVERY)
-        if not redis.leader() or p2p_hold.is_set():
-            continue
+def read_conditions(market):
+    """Lee las condiciones de los anuncios que faltan (primero los de mejor precio). Si Binance pide esperar, para."""
+    for no in engine.missing_conditions(market, CONDITIONS_PER_SCAN):
         try:
-            todo = engine.missing_conditions(p2p_cache["market"], 1)
-            if todo:
-                engine.CONDITIONS[todo[0]] = (time.time(), engine.ad_conditions(todo[0]))
-        except Exception as e:  # 429 u otro fallo: se intenta más tarde
-            time.sleep(30 if "429" in str(e) else 5)
+            engine.CONDITIONS[no] = (time.time(), engine.ad_conditions(no))
+            cond_state["read"] += 1
+        except Exception as e:
+            cond_state.update(error=str(e)[:200], error_t=time.time())
+            break
+    for m in market.values():  # lo leído vale ya, sin esperar a que esa cripto se vuelva a buscar
+        for side in ("BUY", "SELL"):
+            for ad in m.get(side) or []:
+                engine.with_conditions(ad)
 
 
 def run_loop(name, step, interval):
@@ -1697,7 +1700,14 @@ def api_ad_conditions():
         finally:
             p2p_hold.clear()
     me = profile(g.user["name"])
-    return jsonify(asset=asset, side=side, adv=adv_no, my_days=account_days(me), binance_since=me.get("binance_since"),
+    market = p2p_cache["market"]
+    known = sum(1 for m in market.values() for k in ("BUY", "SELL") for ad in m.get(k) or [] if ad.get("known"))
+    total = sum(len(m.get(k) or []) for m in market.values() for k in ("BUY", "SELL"))
+    return jsonify(conditions={"leidos": cond_state["read"], "en_memoria": len(engine.CONDITIONS), "anuncios_revisados": known,
+                               "anuncios_total": total, "ultimo_error": cond_state["error"],
+                               "hace_s": round(time.time() - cond_state["error_t"]) if cond_state["error_t"] else None},
+                   me=can_take_of(profile(g.user["name"]))[0],
+                   asset=asset, side=side, adv=adv_no, my_days=account_days(me), binance_since=me.get("binance_since"),
                    all_keys_first_ad=sorted((ads[0].get("adv") or {}).keys()) if ads else [], ads=rows, detail=detail)
 
 
@@ -3096,7 +3106,6 @@ def main():
                                  ("account", account_step, ACCOUNT_INTERVAL), ("watch", watch_step, WATCH_INTERVAL)):
         threading.Thread(target=run_loop, args=(name, step, interval), daemon=True).start()
     threading.Thread(target=watchdog, daemon=True).start()
-    threading.Thread(target=conditions_loop, daemon=True).start()
 
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     url = f"http://127.0.0.1:{PORT}"
