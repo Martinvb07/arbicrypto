@@ -1706,9 +1706,30 @@ def api_ad_conditions():
     return jsonify(conditions={"leidos": cond_state["read"], "en_memoria": len(engine.CONDITIONS), "anuncios_revisados": known,
                                "anuncios_total": total, "ultimo_error": cond_state["error"],
                                "hace_s": round(time.time() - cond_state["error_t"]) if cond_state["error_t"] else None},
-                   me=can_take_of(profile(g.user["name"]))[0],
+                   me=can_take_of(profile(g.user["name"]))[0], ocultos_para_ti=_hidden_for(profile(g.user["name"]), market),
                    asset=asset, side=side, adv=adv_no, my_days=account_days(me), binance_since=me.get("binance_since"),
                    all_keys_first_ad=sorted((ads[0].get("adv") or {}).keys()) if ads else [], ads=rows, detail=detail)
+
+
+def _hidden_for(pr, market):
+    """Anuncios que no se le muestran a este usuario y por qué (para revisar que el filtro haga lo correcto)."""
+    me, blocked = can_take_of(pr)
+    out = []
+    for asset, m in market.items():
+        for side in ("BUY", "SELL"):
+            for ad in m.get(side) or []:
+                if engine.can_take(ad, me, blocked):
+                    continue
+                why = [w for w, bad in (
+                    ("lo descartaste", ad.get("user") in blocked),
+                    ("aún sin revisar", me and not ad.get("known")),
+                    (f"pide {ad.get('reg_days')} días", me and me[0] is not None and me[0] < ad.get("reg_days", 0)),
+                    (f"pide {ad.get('orders_min')} órdenes", me and me[1] is not None and me[1] < ad.get("orders_min", 0)),
+                    (f"máximo {ad.get('orders_max')} órdenes", me and me[1] is not None and ad.get("orders_max") and me[1] > ad["orders_max"]),
+                    (f"pide {round(ad.get('rate_min', 0) * 100, 1)} %", me and me[2] is not None and me[2] < ad.get("rate_min", 0))) if bad]
+                out.append({"asset": asset, "lado": "comprar" if side == "BUY" else "vender", "nick": ad["nick"],
+                            "precio": ad["price"], "por": ", ".join(why)})
+    return out[:60]
 
 
 def _ad_detail_tries(adv_no):
