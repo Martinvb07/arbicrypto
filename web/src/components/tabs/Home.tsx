@@ -614,8 +614,13 @@ function ConvSteps({ r, side, s }: { r: Conversion; side: "sell" | "buy"; s: Sta
   const fits = side === "buy" || !got || (fitsAd(r.ad, sellFiat, got, r.asset === "BTC" ? got : 0)
     && (r.asset === "USDT" || sellFiat >= r.ad.min * (dollar ? 1.01 : 1.03)));
   const over = r.ad.min ? sellFiat / r.ad.min - 1 : null; // cuánto te sobra sobre el mínimo del comprador
+  // lo que te costaron esos dólares (¿Dónde vendo?), con el 4x1000 si lo pagas: para decir si de verdad ganas o pierdes
+  const mine = held ? (s.watches ?? []).filter((w) => w.asset === "USDT" && (w.status === "vigilando" || w.status === "lista") && w.qty > 0) : [];
+  const mineQty = mine.reduce((a, w) => a + w.qty, 0);
+  const paid = mineQty > 0 ? (mine.reduce((a, w) => a + w.cost, 0) / mineQty) * Math.min(usd, mineQty) * (1 + s.settings.gmf) : null;
+  const result = paid != null && usd <= mineQty * 1.01 ? fiat - paid : null;
   const summary = side === "sell" && got > 0 && (
-    <div className={`conv-sum ${fits ? "ok" : "bad"}`}>
+    <div className={`conv-sum ${!fits ? "bad" : result != null && result < 0 ? "loss" : "ok"}`}>
       {!held && s.account && (
         <div className="conv-sum-note">
           <Icon name="info" size={14} /> No tienes USDT en tu Binance ahora mismo: esto es un ejemplo con tu capital ({money(s.settings.capital, 0)}).
@@ -626,6 +631,12 @@ function ConvSteps({ r, side, s }: { r: Conversion; side: "sell" | "buy"; s: Sta
         {r.asset !== "USDT" && <>Pones <b>{amountTxt(usd, "USDT")}</b>{held ? " (lo que tienes en Binance)" : s.account ? " (ejemplo con tu capital)" : " (tu capital)"} → te llegan <b>{amountTxt(got, r.asset)}</b> → </>}
         vendes <b>{amountTxt(got, r.asset)}</b> a <b>{r.ad.nick}</b> → recibes <b>{money(fiat, 0)}</b>
       </div>
+      {result != null && paid != null && (
+        <div className={`conv-sum-result ${result < 0 ? "down" : "up"}`}>
+          Esos dólares te costaron {money(paid, 0)}{s.settings.gmf > 0 ? " (con 4x1000)" : ""} → {result < 0 ? <>con este camino <b>pierdes {money(-result, 0)}</b></> : <>con este camino <b>ganas {money(result, 0)}</b></>}
+          {result < 0 && " · es lo mejor que hay ahora, pero todavía no recuperas lo que pagaste (mira ¿Dónde vendo?)"}
+        </div>
+      )}
       <div>
         <Icon name={fits ? "checkCircle" : "alert"} size={14} />{" "}
         Mínimo de {r.ad.nick}: <b>{money(r.ad.min, 0)}</b> (≈ {amountTxt(r.ad.min_qty || r.ad.min / r.ad.price, r.asset)}) · máximo {money(r.ad.max, 0)}
