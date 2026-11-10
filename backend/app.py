@@ -241,7 +241,11 @@ def clean_account(raw):
             out["binance_rate"] = None
     if "binance_kyc" in raw:
         out["binance_kyc"] = bool(raw["binance_kyc"])
-    if "p2p_profile" in raw:  # el enlace de tu perfil P2P, tu número de anunciante o tu apodo (vacío = quitar)
+    pick = raw.get("p2p_pick")
+    if isinstance(pick, dict) and re.fullmatch(r"[A-Za-z0-9_-]{6,64}", str(pick.get("user") or "")):
+        out["p2p_user"], out["p2p_nick"] = str(pick["user"]), str(pick.get("nick") or "")[:60] or None  # lo eligió de la lista
+        my_ads.pop(raw.get("_user"), None)
+    elif "p2p_profile" in raw:  # el enlace de tu perfil P2P, tu número de anunciante o tu apodo (vacío = quitar)
         v = str(raw.get("p2p_profile") or "").strip()[:300]
         m = re.search(r"advertiserNo=([A-Za-z0-9_-]{6,64})", v)
         if m or re.fullmatch(r"s[0-9a-f]{20,63}", v):
@@ -748,11 +752,11 @@ def my_ads_update(market, now):
             continue
         if not user:
             low = nick.lower()
-            user = next((ad.get("user") for m in market.values() for sd in ("BUY", "SELL") for ad in m.get(sd) or []
+            user = next((ad.get("user") for a in market for sd in ("BUY", "SELL") for ad in book_of(market, a, sd)
                          if ad.get("user") and (ad.get("nick") or "").lower() == low), None)
             if not user:
                 my_ads[name] = {"t": now, "user": None, "nick": nick, "ads": [],
-                                "error": f"No encuentro a {nick} entre los anuncios de ahora. Pega mejor el enlace de tu perfil P2P."}
+                                "error": f"No encuentro a {nick} entre los anuncios de ahora: publica un anuncio (o revisa que el apodo esté igual que en Binance) y lo encuentro solo."}
                 continue
             with lock:
                 prefs[name] = {**prefs.get(name, {}), "p2p_user": user}

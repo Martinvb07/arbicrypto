@@ -625,6 +625,27 @@ function Published({ s, asset, m, amount, makerFee, onUse }: {
   const [busy, setBusy] = useState(false);
   const mine = s.my_ads;
   const set = !!(s.settings.p2p_user || s.settings.p2p_nick);
+  // anunciantes que están ahora en el mercado (todas las criptos y ambos lados), para que toques el tuyo
+  const found = useMemo(() => {
+    const q = typed.trim().toLowerCase();
+    if (q.length < 2 || q.startsWith("http")) return [];
+    const seen = new Map<string, Ad>();
+    for (const e of Object.values(s.p2p?.market_all ?? s.p2p?.market ?? {})) {
+      for (const l of [e.all?.BUY, e.all?.SELL, e.BUY, e.SELL]) {
+        for (const x of l ?? []) if (x.user && x.nick.toLowerCase().includes(q) && !seen.has(x.user)) seen.set(x.user, x);
+      }
+    }
+    return [...seen.values()].sort((x, y) => Number(y.nick.toLowerCase() === q) - Number(x.nick.toLowerCase() === q)).slice(0, 8);
+  }, [typed, s.p2p]);
+  const pick = async (x: Ad) => {
+    setBusy(true);
+    const ok = await saveSettings({ p2p_pick: { user: x.user!, nick: x.nick } });
+    setBusy(false);
+    if (ok) {
+      setTyped("");
+      toast("Listo", `Leo los anuncios de ${x.nick} en unos segundos.`, "good", 3000);
+    }
+  };
   const save = async (v: string) => {
     setBusy(true);
     const ok = await saveSettings({ p2p_profile: v });
@@ -640,7 +661,7 @@ function Published({ s, asset, m, amount, makerFee, onUse }: {
       <div>
         <h2>Tus anuncios publicados</h2>
         <p className="sub">{set ? <>Leídos de tu perfil de P2P{mine?.nick ? <> (<b>{mine.nick}</b>)</> : null} cada 30 s{mine?.t ? <> · <Ago t={mine.t} /></> : null}</>
-          : "Pega el enlace de tu perfil de P2P y leo tus anuncios solos: en qué puesto vas, cuánto tardan y a cuánto moverlos"}</p>
+          : "Escribe tu apodo de P2P y leo tus anuncios solos: en qué puesto vas, cuánto tardan y a cuánto moverlos"}</p>
       </div>
       {set && <button className="btn btn-sm" disabled={busy} onClick={() => void save("")}>Cambiar perfil</button>}
     </div>
@@ -651,10 +672,27 @@ function Published({ s, asset, m, amount, makerFee, onUse }: {
         {head}
         <div className="adv-watch-form">
           <span className="mc-input adv-profile-in"><Icon name="search" size={15} /><input type="text" value={typed} onChange={(e) => setTyped(e.target.value)}
-            placeholder="https://p2p.binance.com/…/advertiserDetail?advertiserNo=… o tu apodo" aria-label="Tu perfil de P2P" /></span>
-          <button className="btn btn-brand" disabled={busy || !typed.trim()} onClick={() => void save(typed.trim())}><Icon name="check" size={16} /> Leer mis anuncios</button>
+            placeholder="Tu apodo en Binance P2P" aria-label="Tu apodo en Binance P2P" /></span>
+          <button className="btn" disabled={busy || !typed.trim()} onClick={() => void save(typed.trim())}><Icon name="check" size={16} /> Guardar apodo</button>
         </div>
-        <p className="sim-hint">En la app de Binance: P2P → tu perfil (arriba) → Compartir → copiar enlace. Es público: no hace falta ninguna llave.</p>
+        {found.length > 0 && (
+          <div className="adv-found">
+            <small>¿Eres alguno de estos? Toca el tuyo:</small>
+            <div className="sim-chips">
+              {found.map((x) => (
+                <button key={x.user} type="button" className="btn btn-sm btn-brand" disabled={busy} onClick={() => void pick(x)}>
+                  <Icon name="checkCircle" size={14} /> {x.nick} <span className="dim">· {num(x.orders, 0)} órdenes</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {typed.trim().length >= 2 && !found.length && !typed.startsWith("http") && (
+          <p className="sim-hint">No veo a nadie con ese nombre en los anuncios de ahora. Revisa que esté igual que en Binance y toca <b>Guardar apodo</b>:
+            apenas publiques un anuncio te encuentro solo.</p>
+        )}
+        <p className="sim-hint">Tu apodo es el nombre que ven los demás en tus anuncios (en Binance: P2P → el ícono de tu perfil). No hace falta ninguna llave:
+          tus anuncios se leen de tu perfil público.</p>
       </section>
     );
   }

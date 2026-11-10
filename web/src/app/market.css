@@ -517,3 +517,6 @@
 .adv-profile-in input { width: 100%; }
 .pa-cell .dim.up { color: var(--up); }
 .pa-cell .dim.down { color: var(--down); }
+.adv-found { display: grid; gap: 6px; margin-bottom: 10px; }
+.adv-found small { color: var(--muted); font-size: 12.5px; }
+.adv-found .btn .dim { font-weight: 500; opacity: .8; }

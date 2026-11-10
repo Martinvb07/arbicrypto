@@ -236,6 +236,8 @@ export interface Settings {
   p2p_nick?: string | null;
   /** Solo al guardar: el enlace de tu perfil P2P, tu número de anunciante o tu apodo (vacío = quitar). */
   p2p_profile?: string;
+  /** Solo al guardar: el anunciante que elegiste de la lista ("ese soy yo"). */
+  p2p_pick?: { user: string; nick: string };
   /** Anunciantes que no te dejan tomar su anuncio: no se usan en rutas, ventas ni avisos. */
   blocked?: { user: string; nick: string }[];
 }
