@@ -83,8 +83,8 @@ export const api = {
   chatSend: (peer: string, body: string, extra: { reply_to?: number | null; image?: string | null } = {}) =>
     post<{ ok: boolean; message: ChatMessage }>("/api/chat/send", { peer, body, ...extra }),
   chatReact: (id: number, emoji: string) => post("/api/chat/react", { id, emoji }),
-  addPriceAlert: (a: Pick<PriceAlert, "asset" | "side" | "target" | "mine" | "once">) => post<{ ok: boolean; id: string }>("/api/price-alerts", a),
-  updatePriceAlert: (id: string, patch: Partial<Pick<PriceAlert, "asset" | "side" | "target" | "mine" | "on" | "once">>) =>
+  addPriceAlert: (a: Pick<PriceAlert, "asset" | "side" | "target" | "mine" | "once"> & Pick<Partial<PriceAlert>, "kind" | "ahead_ok">) => post<{ ok: boolean; id: string }>("/api/price-alerts", a),
+  updatePriceAlert: (id: string, patch: Partial<Pick<PriceAlert, "asset" | "side" | "target" | "mine" | "on" | "once" | "ahead_ok">>) =>
     post("/api/price-alerts/update", { id, ...patch }),
   deletePriceAlert: (id: string) => post("/api/price-alerts/delete", { id }),
   chatRead: (peer: string, id: number) => post("/api/chat/read", { peer, id }),

@@ -18,7 +18,7 @@ export const TABS: { id: TabId; label: string; icon: IconName; sub: string; grou
   { id: "mercado", label: "Precios P2P", icon: "chart", sub: "Compradores y vendedores de Binance P2P en pesos, en vivo" },
   { id: "vender", label: "¿Dónde vendo?", icon: "target", sub: "Tus monedas, cuánto te costaron y cuánto ganas si vendes ya" },
   { id: "inicio", label: "Arbitraje", icon: "bolt", sub: "Comprar barato y vender más caro, con todos los costos" },
-  { id: "anuncios", label: "Simular anuncios", icon: "megaphone", sub: "Cuánto ganas publicando tus propios anuncios" },
+  { id: "anuncios", label: "Mis anuncios", icon: "megaphone", sub: "A cuánto publicar según el mercado en vivo y cuánto ganas" },
   { id: "historial", label: "Historial", icon: "clock", sub: "Oportunidades pasadas y las mejores horas" },
   { id: "chat", label: "Chat", icon: "chat", sub: "Habla con tu equipo", group: "cuenta" },
   { id: "cuenta", label: "Mi Binance", icon: "candles", sub: "Tus saldos y órdenes, solo los ves tú", group: "cuenta" },

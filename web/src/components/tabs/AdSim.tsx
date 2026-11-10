@@ -7,7 +7,14 @@ import { useLive } from "@/lib/live";
 import type { Ad, MarketEntry, Side, State } from "@/lib/types";
 import { GmfToggle } from "../controls";
 import { EmptyBox, Icon, Segmented, Skeleton, Usd } from "../ui";
+import { AdAdvisor } from "./AdAdvisor";
 import { CoinPicker } from "./Market";
+
+type View = "advisor" | "sim";
+const VIEWS = [
+  ["advisor", <span key="a" className="mkt-switch-opt"><Icon name="sparkle" size={15} />Asesor · a cuánto publicar</span>],
+  ["sim", <span key="s" className="mkt-switch-opt"><Icon name="sliders" size={15} />Simular</span>],
+] as const;
 
 type Mode = "mine" | "take";
 const MODES = [["mine", "Mi anuncio"], ["take", "Tomar un anuncio"]] as const;
@@ -108,14 +115,16 @@ function SideBox({ side, asset, mode, onMode, price, onPrice, rivals, taken, fee
 
 // ---------------------------------------------------------------- simulador de una cripto
 
-function Simulator({ s, asset, m, amount, rounds, makerFee }: {
+function Simulator({ s, asset, m, amount, rounds, makerFee, seed }: {
   s: State; asset: string; m: MarketEntry; amount: number | null; rounds: number; makerFee: number;
+  /** Lo que mandó el asesor: precio de tu anuncio de cada lado, o null = tomar un anuncio. */
+  seed?: { buy: number | null; sell: number | null } | null;
 }) {
-  const [buyMode, setBuyMode] = useState<Mode>("mine");
-  const [sellMode, setSellMode] = useState<Mode>("mine");
+  const [buyMode, setBuyMode] = useState<Mode>(seed && seed.buy == null ? "take" : "mine");
+  const [sellMode, setSellMode] = useState<Mode>(seed && seed.sell == null ? "take" : "mine");
   // null = sin tocar: sigue en vivo al 1.º de los anuncios con los que compite
-  const [buyTyped, setBuyTyped] = useState<string | null>(null);
-  const [sellTyped, setSellTyped] = useState<string | null>(null);
+  const [buyTyped, setBuyTyped] = useState<string | null>(seed?.buy != null ? String(seed.buy) : null);
+  const [sellTyped, setSellTyped] = useState<string | null>(seed?.sell != null ? String(seed.sell) : null);
   const gmf = s.settings.gmf;
 
   // compra: tu anuncio compite con los que compran (m.SELL); si tomas uno, le compras a los que venden (m.BUY)
@@ -219,6 +228,8 @@ export function AdSim() {
   const [amountTyped, setAmountTyped] = useState<string | null>(null);
   const [roundsTyped, setRoundsTyped] = useState("1");
   const [feeTyped, setFeeTyped] = useState<string | null>(null);
+  const [view, setView] = useState<View>("advisor");
+  const [seed, setSeed] = useState<{ buy: number | null; sell: number | null; n: number } | null>(null);
   if (!state) return <div className="card"><Skeleton rows={10} /></div>;
   const st = state.settings;
   const asset = st.p2p_assets.includes(prefs.asset) ? prefs.asset : "USDT";
@@ -237,8 +248,8 @@ export function AdSim() {
           <div className="mkt-sec-title">
             <span className="sec-ico"><Icon name="megaphone" /></span>
             <div>
-              <h2>Simular anuncios</h2>
-              <p className="sub">Cuánto ganas si publicas tus propios anuncios de compra y venta en P2P</p>
+              <h2>Mis anuncios</h2>
+              <p className="sub">A cuánto poner tus anuncios de compra y venta en P2P según el mercado en vivo, y cuánto ganas</p>
             </div>
           </div>
           <div className="toolbar mkt-tools"><GmfToggle /></div>
@@ -270,6 +281,9 @@ export function AdSim() {
             </small>
           </label>
         </div>
+        <div className="mkt-tabs">
+          <Segmented label="Vista" value={view} onChange={setView} options={VIEWS} />
+        </div>
         <div className="sim-links">
           {BINANCE_LINKS.map(([href, icon, label]) => (
             <a key={href} className="btn btn-sm" href={href} target="_blank" rel="noopener noreferrer">
@@ -279,10 +293,18 @@ export function AdSim() {
         </div>
       </section>
 
-      {m ? (
-        <Simulator key={asset} s={state} asset={asset} m={m} amount={amount && amount > 0 ? amount : null} rounds={rounds} makerFee={fee} />
-      ) : (
+      {!m ? (
         <div className="card"><Skeleton rows={8} /></div>
+      ) : view === "advisor" ? (
+        <AdAdvisor s={state} asset={asset} m={m} amount={amount && amount > 0 ? amount : null} makerFee={fee}
+          onUse={(buy, sell) => {
+            setSeed((p) => ({ buy, sell, n: (p?.n ?? 0) + 1 }));
+            setView("sim");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }} />
+      ) : (
+        <Simulator key={`${asset}:${seed?.n ?? 0}`} s={state} asset={asset} m={m} amount={amount && amount > 0 ? amount : null} rounds={rounds}
+          makerFee={fee} seed={seed} />
       )}
     </div>
   );

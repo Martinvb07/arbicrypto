@@ -192,7 +192,7 @@ function AlertRow({ a, s, i, onEdit }: { a: PriceAlert; s: State; i: number; onE
 
 export function PriceAlerts({ s, asset }: { s: State; asset: string }) {
   const [form, setForm] = useState<{ edit: PriceAlert | null } | null>(null);
-  const rows = s.price_alerts ?? [];
+  const rows = (s.price_alerts ?? []).filter((a) => a.kind !== "outbid"); // las de "mi anuncio" viven en Mis anuncios
   const live = rows.filter((a) => a.on);
   const hits = live.filter((a) => progress(a.side, bestFor(s, a.asset, a.side, a.mine)?.price, a.target).hit).length;
   const buyNow = bestFor(s, asset, "BUY", true)?.price;

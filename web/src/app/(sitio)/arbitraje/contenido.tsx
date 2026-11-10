@@ -37,7 +37,7 @@ export default function Contenido() {
             { ic: "listChecks", h: "Paso a paso", p: "A quién comprarle, qué tocar en Spot y a quién venderle, con enlaces directos." },
             { ic: "swap", h: "Rutas en Spot", p: "Entre USDT, BTC, ETH y las demás, medidas con la profundidad real del libro." },
             { ic: "history", h: "Historial hora por hora", p: "Cuántas oportunidades hubo, cuánto duraron y a qué hora se dan más." },
-            { ic: "megaphone", h: "Simular anuncios", p: "Cuánto ganarías publicando tus propios anuncios en P2P." },
+            { ic: "megaphone", h: "Mis anuncios", p: "A cuánto publicar tus anuncios P2P según el mercado en vivo y cuánto ganarías." },
             { ic: "chat", h: "Chat del equipo", p: "Canal general y privados. Capital y cuenta siguen siendo de cada quien." },
           ]} />
         </div>

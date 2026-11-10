@@ -250,7 +250,12 @@ export interface PriceAlert {
   created: number;
   hits: number;
   last_hit?: number | null;
-  last: { t: number; price: number | null; nick: string | null; hit: boolean } | null;
+  last: { t: number; price: number | null; nick: string | null; hit: boolean; ahead?: number } | null;
+  /** "price" (o vacío): comprar barato / vender caro. "outbid": vigila TU anuncio (side = lo que hace tu anuncio, target = su
+   *  precio) y avisa cuando alguien lo supera. */
+  kind?: "price" | "outbid";
+  /** Solo "outbid": cuántos anuncios te pueden ir adelante sin avisar (0 = avisa apenas dejas de ser 1.º). */
+  ahead_ok?: number;
 }
 
 export type AlertKind = "p2p" | "spot" | "system" | "test" | "sell" | "price";

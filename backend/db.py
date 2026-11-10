@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS chat_reads (
 """
 
 # Columnas que se agregaron despues de crear la tabla: una base vieja (por ejemplo, la del VPS) las recibe sola
-ADDED_COLUMNS = (("p2p_orders", "user", "{keytext}"), ("p2p_orders", "commission", "REAL"), ("alerts", "audience", "TEXT"),
+ADDED_COLUMNS = (("p2p_orders", "user", "{keytext}"), ("p2p_orders", "commission", "REAL"), ("p2p_orders", "ad_role", "TEXT"), ("alerts", "audience", "TEXT"),
                  ("messages", "reply_to", "{bigint}"), ("messages", "image", "{keytext}"))
 
 KEEP_DAYS = 120  # historial de oportunidades y horas
@@ -199,8 +199,10 @@ class DB:
 
     def save_orders(self, user, orders):
         cols = ("id", "side", "asset", "fiat", "amount", "price", "total", "status", "time", "counterpart", "commission")
-        self.sql.many(self.sql.upsert("p2p_orders", cols + ('"user"',), ("id",), {"status": "new", "commission": "new"}),
-                      [tuple(o.get(c) for c in cols) + (user,) for o in orders if o.get("id")])
+        # ad_role: MAKER = la orden salio de tu propio anuncio (el asesor de anuncios aprende de esas)
+        self.sql.many(self.sql.upsert("p2p_orders", cols + ("ad_role", '"user"'), ("id",),
+                                      {"status": "new", "commission": "new", "ad_role": "new"}),
+                      [tuple(o.get(c) for c in cols) + (o.get("role"), user) for o in orders if o.get("id")])
 
     def orders(self, user):
         """Solo las ordenes de la cuenta de Binance de ese usuario."""
