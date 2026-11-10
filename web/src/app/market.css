@@ -531,3 +531,9 @@
 @media (max-width: 1080px) { .pa-row.adv-pub { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 @media (max-width: 640px) { .pa-row.adv-pub { grid-template-columns: minmax(0, 1fr); } }
 .mkt-sec-title + .pa-list, .mkt-sec-title + .sim-warn { margin-top: 14px; }
+.adv-alert-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 14px 0 4px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.adv-alert-bar > small { flex: 1 1 100%; font-size: 12px; }
+.pa-row.adv-row.off-ish { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.pa-coin small b { font-weight: 700; }
+.adv-pub .pa-cell .dim { white-space: normal; overflow: visible; }
+.pa-cell .dim b { font-size: inherit; }

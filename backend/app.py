@@ -189,7 +189,9 @@ def profile(name):
     out["binance_rate"] = mine.get("binance_rate")  # tasa de finalización de 30 días, de 0 a 1
     out["binance_kyc"] = bool(mine.get("binance_kyc"))
     out["p2p_user"] = mine.get("p2p_user") or None  # tu número de anunciante en P2P: para leer tus anuncios publicados
-    out["p2p_nick"] = mine.get("p2p_nick") or None  # ya hizo la verificación adicional que piden algunos anuncios
+    out["p2p_nick"] = mine.get("p2p_nick") or None
+    out["ads_alert"] = mine.get("ads_alert", True) is not False  # avisarme cuando deba mover mis anuncios publicados
+    out["ads_pos"] = mine.get("ads_pos") or 1  # el puesto en que quiere sus anuncios (1, 3 o 5)  # ya hizo la verificación adicional que piden algunos anuncios
     out["blocked"] = [b for b in mine.get("blocked") or [] if isinstance(b, dict) and b.get("user")]
     return out
 
@@ -241,6 +243,10 @@ def clean_account(raw):
             out["binance_rate"] = None
     if "binance_kyc" in raw:
         out["binance_kyc"] = bool(raw["binance_kyc"])
+    if "ads_alert" in raw:
+        out["ads_alert"] = bool(raw["ads_alert"])
+    if "ads_pos" in raw:
+        out["ads_pos"] = raw["ads_pos"] if raw["ads_pos"] in (1, 3, 5) else 1
     pick = raw.get("p2p_pick")
     if isinstance(pick, dict) and re.fullmatch(r"[A-Za-z0-9_-]{6,64}", str(pick.get("user") or "")):
         out["p2p_user"], out["p2p_nick"] = str(pick["user"]), str(pick.get("nick") or "")[:60] or None  # lo eligió de la lista
@@ -773,6 +779,98 @@ def own_user(name):
     return (my_ads.get(name) or {}).get("user") or (prefs.get(name) or {}).get("p2p_user")
 
 
+# ---------------------------------------------------------------- avisos de TUS anuncios publicados
+# Con tus anuncios leídos del perfil: si te pasaron, a cuánto subirlo (o bajarlo) para volver a tu puesto y si con ese
+# precio todavía ganas contra tu otro anuncio (o contra el mercado); si vas de primero pagando de más, cuánto puedes
+# ajustarlo sin perder el puesto. Avisa una vez por situación y otra si el precio justo cambia.
+
+ADS_QUIET = 60
+ads_notice = {}  # usuario -> {advNo: {"kind", "ideal", "t"}}
+
+
+def ad_margin(buy, sell, fee, gmf):
+    """Lo que deja comprar con tu anuncio a `buy` y vender con tu anuncio a `sell` (como simulateAds del navegador)."""
+    return (sell / buy) * (1 - fee) / (1 + fee) - 1 - gmf if buy and sell else None
+
+
+def ad_counter(name, ad, market, me):
+    """Contra qué se mide la ganancia de un anuncio: tu anuncio del otro lado, o publicar uno un paso mejor que el 1.º."""
+    other = "SELL" if ad["side"] == "BUY" else "BUY"
+    own = next((x for x in (my_ads.get(name) or {}).get("ads") or [] if x["asset"] == ad["asset"] and x["side"] == other), None)
+    if own:
+        return own["price"], f"con tu {'venta' if other == 'SELL' else 'compra'} a {money(own['price'])}"
+    top = next((x for x in book_of(market, ad["asset"], rival_side(other)) if x.get("user") != me), None)
+    if not top:
+        return None, ""
+    p = top["price"] + (1 if other == "BUY" else -1) * ad_tick(top["price"])
+    return p, f"si {'vendes' if other == 'SELL' else 'compras'} con anuncio a {money(p)}"
+
+
+def ads_check(market, now):
+    main_name = main_user()
+    for name, mine in list(my_ads.items()):
+        pr = profile(name)
+        if not pr.get("ads_alert") or not mine.get("ads"):
+            continue
+        me, want = mine.get("user"), pr.get("ads_pos") or 1
+        fee, gmf = maker_fee(name) or 0.0035, pr["gmf"]
+        notes = ads_notice.setdefault(name, {})
+        live = set()
+        for ad in mine["ads"]:
+            if ad["asset"] not in market:
+                continue
+            key = str(ad.get("adv") or f"{ad['asset']}:{ad['side']}")
+            live.add(key)
+            buys = ad["side"] == "BUY"
+            rivals = [x for x in book_of(market, ad["asset"], rival_side(ad["side"])) if x.get("user") != me]
+            if not rivals:
+                notes.pop(key, None)
+                continue
+            better = (lambda p, q: p > q) if buys else (lambda p, q: p < q)
+            pos = sum(1 for x in rivals if better(x["price"], ad["price"])) + 1
+            at = rivals[want - 1] if len(rivals) >= want else rivals[-1]
+            ideal = at["price"] + (1 if buys else -1) * ad_tick(at["price"]) if len(rivals) >= want else at["price"]
+            room = (ad["price"] - ideal) * (1 if buys else -1)  # > 0: pagas de más (compra) o cobras de menos (venta)
+            gap = max(2 * ad_tick(ad["price"]), ad["price"] * OUTBID_GAP)
+            kind = "lost" if pos > want else "room" if room >= gap else None
+            if not kind:
+                notes.pop(key, None)
+                continue
+            prev = notes.get(key) or {}
+            if prev.get("kind") == kind and abs(prev.get("ideal", 0) - ideal) < ad_tick(ideal) / 2:
+                continue  # ya avisado con ese mismo precio
+            if now - prev.get("t", 0) < ADS_QUIET:
+                continue
+            notes[key] = {"kind": kind, "ideal": ideal, "t": now}
+            counter, how = ad_counter(name, ad, market, me)
+            m_now = ad_margin(ad["price"], counter, fee, gmf) if buys else ad_margin(counter, ad["price"], fee, gmf)
+            m_new = ad_margin(ideal, counter, fee, gmf) if buys else ad_margin(counter, ideal, fee, gmf)
+            unit = "cada dólar" if ad["asset"] in ("USDT", "USDC", "FDUSD") else f"por {ad['asset']}"
+            what = f"tu {'compra' if buys else 'venta'} de {ad['asset']}"
+            where = "1.º" if want == 1 else f"en el top {want}"
+            pct_ = lambda v: f"{'+' if v >= 0 else '−'}{abs(v) * 100:.2f} %".replace(".", ",")
+            gain = f" {how[0].upper() + how[1:]} te queda {pct_(m_new)}." if m_new is not None else ""
+            if kind == "lost":
+                verb = "Súbela" if buys else "Bájala"
+                if m_new is not None and m_new <= 0:
+                    title = f"Te pasaron {what}, pero moverla ya no da"
+                    body = (f"Está en {money(ad['price'])} {unit} y vas {pos}.º. Para quedar {where} tendrías que ponerla en "
+                            f"{money(ideal)}, y {how} perderías ({pct_(m_new)}). Mejor no la muevas o ajusta el otro lado.")
+                else:
+                    title = f"{verb} a {money(ideal)}: te pasaron {what}"
+                    body = f"Está en {money(ad['price'])} {unit} y vas {pos}.º. {verb} a {money(ideal)} para quedar {where}.{gain}"
+            else:
+                verb = "Bájala" if buys else "Súbela"
+                extra = f" (hoy {pct_(m_now)})" if m_now is not None else ""
+                title = f"{verb} a {money(ideal)} y ganas más con {what}"
+                body = (f"Vas {pos}.º en {money(ad['price'])} {unit}, pero para seguir {where} basta con {money(ideal)}: "
+                        f"{'pagas' if buys else 'cobras'} {money(room)} {'de más' if buys else 'de menos'}.{gain}{extra}")
+            raise_alert(f"myad:{name}:{key}:{int(now)}", "price", title, body, users=[name], telegram_too=name == main_name,
+                        links=[("Editar mis anuncios", "https://p2p.binance.com/es/myads")])
+        for k in [k for k in notes if k not in live]:
+            notes.pop(k, None)
+
+
 def flow_view():
     """Por cripto y lado: la última hora de movimiento por puesto y por anunciante, para estimar cuánto tarda en
     llenarse un anuncio según el puesto en que quede."""
@@ -824,6 +922,7 @@ def p2p_step():
         logging.getLogger("arbicrypto").warning("flujo P2P: %s", e)
     try:
         my_ads_update(market, now)
+        ads_check(market, now)
     except Exception as e:
         logging.getLogger("arbicrypto").warning("mis anuncios: %s", e)
     usdt_ads = market.get("USDT", {}).get("BUY") or market.get("USDT", {}).get("SELL") or []

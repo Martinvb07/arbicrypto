@@ -234,6 +234,9 @@ export interface Settings {
   /** Tu perfil de anunciante en P2P (número y apodo) para leer tus anuncios publicados. */
   p2p_user?: string | null;
   p2p_nick?: string | null;
+  /** Avisarme cuando deba mover mis anuncios publicados (te pasaron / puedes ganar más), y en qué puesto los quiero. */
+  ads_alert?: boolean;
+  ads_pos?: number;
   /** Solo al guardar: el enlace de tu perfil P2P, tu número de anunciante o tu apodo (vacío = quitar). */
   p2p_profile?: string;
   /** Solo al guardar: el anunciante que elegiste de la lista ("ese soy yo"). */

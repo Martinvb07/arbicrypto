@@ -697,6 +697,14 @@ function Published({ s, asset, m, amount, makerFee, onUse }: {
     );
   }
   const ads = (mine?.ads ?? []).filter((x) => x.asset === asset);
+  const want = s.settings.ads_pos ?? 1;
+  const gmf = s.settings.gmf;
+  /** Lo que deja comprar con tu anuncio a `b` y vender con tu anuncio a `v`. */
+  const marginOf = (b: number, v: number) => simulateAds(1e6, b, v, makerFee, makerFee, gmf, true).ratio;
+  const alertOn = s.settings.ads_alert !== false;
+  const setAlert = async (p: { ads_alert?: boolean; ads_pos?: number }) => {
+    if (await saveSettings(p)) toast("Guardado", undefined, "good", 1800);
+  };
   const others = (mine?.ads ?? []).length - ads.length;
   const buyAd = ads.find((x) => x.side === "BUY");
   const sellAd = ads.find((x) => x.side === "SELL");
@@ -704,6 +712,14 @@ function Published({ s, asset, m, amount, makerFee, onUse }: {
   return (
     <section className="card">
       {head}
+      <div className="adv-alert-bar">
+        <Toggle on={alertOn} onChange={(v) => void setAlert({ ads_alert: v })} label="Avisarme cuando deba mover mis anuncios" />
+        <span className="adv-keep"><small>Los quiero</small>
+          <Segmented label="Puesto que quiero" value={want} onChange={(v) => void setAlert({ ads_pos: v })}
+            options={[[1, "1.º"], [3, "Top 3"], [5, "Top 5"]] as const} />
+        </span>
+        <small className="dim">Te aviso (campana, notificación y Telegram) si te pasan, con el precio para volver y si todavía ganas, o si puedes ajustarlo y ganar más.</small>
+      </div>
       {mine?.error && <p className="sim-warn"><Icon name="alert" size={15} /> {mine.error}</p>}
       {!mine && <p className="sim-hint adv-gap">Leyendo tus anuncios…</p>}
       {mine && !ads.length && !mine.error && (
@@ -712,36 +728,51 @@ function Published({ s, asset, m, amount, makerFee, onUse }: {
       {ads.length > 0 && (
         <div className="pa-list">
           {ads.map((x) => {
-            const all = rivalsOf(m, x.side);
-            const rivals = all;
+            const buys = x.side === "BUY";
+            const rivals = rivalsOf(m, x.side);
             const r = rankIn(rivals, x.price, x.side);
             const top = rivals[0];
-            const beat = top ? top.price + (x.side === "BUY" ? 1 : -1) * advTick(top.price) : null;
-            const first = r.pos === 1;
-            // si vas 1.º: lo que te sobra frente al 2.º (podrías ganar más sin perder el puesto)
-            const room = first && top ? (x.side === "BUY" ? x.price - beat! : beat! - x.price) : 0;
+            // precio justo para el puesto que quieres: un paso mejor que el que hoy está en ese puesto
+            const at = rivals[want - 1];
+            const ideal = at ? at.price + (buys ? 1 : -1) * advTick(at.price) : rivals[rivals.length - 1]?.price ?? null;
+            const lost = r.pos > want;
+            const room = ideal != null && !lost ? (buys ? x.price - ideal : ideal - x.price) : 0;
+            const more = room >= roomGap(x.price);
+            // contra qué se gana: tu anuncio del otro lado, o publicar uno un paso mejor que el 1.º de ese lado
+            const own = ads.find((y) => y.side !== x.side);
+            const otherTop = rivalsOf(m, buys ? "SELL" : "BUY")[0];
+            const counter = own?.price ?? (otherTop ? otherTop.price + (buys ? -1 : 1) * advTick(otherTop.price) : null);
+            const how = own ? `con tu ${buys ? "venta" : "compra"} a ${money(own.price)}` : `si ${buys ? "vendes" : "compras"} con anuncio a ${money(counter)}`;
+            const margin = (p: number | null) => (p == null || counter == null ? null : buys ? marginOf(p, counter) : marginOf(counter, p));
+            const mNew = margin(ideal);
+            const mNow = margin(x.price);
             const left = x.available * x.price;
-            const pos = all.filter((y) => beats(x.side, y.price, x.price)).length + 1;
-            const t = etaAt(flowOf(s, asset, x.side), pos, Math.min(amount, left || amount));
+            const t = etaAt(flowOf(s, asset, x.side), r.pos, Math.min(amount, left || amount));
+            const where = want === 1 ? "1.º" : `en el top ${want}`;
+            const noGo = lost && mNew != null && mNew <= 0;
             return (
-              <div key={x.adv ?? x.side} className={`pa-row adv-row adv-pub ${first ? (room >= roomGap(x.price) ? "more" : "ok") : "lost"}`}>
+              <div key={x.adv ?? x.side} className={`pa-row adv-row adv-pub ${lost ? (noGo ? "off-ish" : "lost") : more ? "more" : "ok"}`}>
                 <div className="pa-coin">
-                  <span className={`mkt-col-ico ${x.side}`}><Icon name={x.side === "BUY" ? "cart" : "handCoins"} size={16} /></span>
-                  <div><b>{x.side === "BUY" ? "Compras" : "Vendes"} {asset} a {money(x.price)}</b>
-                    <small>quedan {isDollar(asset) ? num(x.available, 2) : num(x.available, 6)} {asset} (≈ {money(left, 0)}) · {money(x.min, 0)} – {money(x.max, 0)}</small></div>
+                  <span className={`mkt-col-ico ${x.side}`}><Icon name={buys ? "cart" : "handCoins"} size={16} /></span>
+                  <div><b>{buys ? "Compras" : "Vendes"} {asset} a {money(x.price)}</b>
+                    <small>quedan {isDollar(asset) ? num(x.available, 2) : num(x.available, 6)} {asset} (≈ {money(left, 0)}) · {money(x.min, 0)} – {money(x.max, 0)}</small>
+                    {mNow != null && <small>hoy te deja <b className={tone(mNow)}>{pct(mNow)}</b> {how}</small>}</div>
                 </div>
                 <div className="pa-cell">
                   <small>Puesto ahora</small>
-                  <b className={first ? "up" : "down"}>{rankText(r)}</b>
-                  <span className="dim">{top ? `mejor rival: ${top.nick} · ${money(top.price)}` : "nadie compite por tu monto"}</span>
+                  <b className={lost ? "down" : "up"}>{rankText(r)}</b>
+                  <span className="dim">{top ? `mejor rival: ${top.nick} · ${money(top.price)}` : "nadie más en la lista"}</span>
                 </div>
                 <div className="pa-cell">
-                  <small>{first ? (room >= roomGap(x.price) ? "Puedes ganar más" : "Bien puesto") : "Para quedar 1.º"}</small>
-                  <b className={first ? "up" : ""}>
-                    {first ? (room >= roomGap(x.price) ? `${x.side === "BUY" ? "Bájalo" : "Súbelo"} a ${money(beat)}` : "No lo toques")
-                      : `${x.side === "BUY" ? "Súbelo" : "Bájalo"} a ${money(beat)}`}
+                  <small>{lost ? (noGo ? `Para quedar ${where} ya no da` : `Para quedar ${where}`) : more ? "Puedes ganar más" : "Bien puesto"}</small>
+                  <b className={noGo ? "down" : lost ? "" : "up"}>
+                    {lost ? (noGo ? "No la muevas" : `${buys ? "Súbela" : "Bájala"} a ${money(ideal)}`)
+                      : more ? `${buys ? "Bájala" : "Súbela"} a ${money(ideal)}` : "No la toques"}
                   </b>
-                  <span className="dim"><Icon name="timer" size={12} /> se llena {eta(t)}</span>
+                  <span className="dim">
+                    {(lost || more) && mNew != null ? <>{noGo ? `en ${money(ideal)} perderías ` : "con eso te queda "}<b className={tone(mNew)}>{pct(mNew)}</b> · </> : null}
+                    <Icon name="timer" size={12} /> se llena {eta(t)}
+                  </span>
                 </div>
                 <div className="pa-tags">
                   <a className="btn btn-sm" href="https://p2p.binance.com/es/myads" target="_blank" rel="noopener noreferrer"><Icon name="pencil" size={14} /> Editar <Icon name="external" size={12} /></a>
