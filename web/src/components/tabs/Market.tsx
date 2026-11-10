@@ -223,12 +223,14 @@ function MethodsSheet({ s, onClose }: { s: State; onClose: () => void }) {
   const [since, setSince] = useState(s.settings.binance_since ?? "");
   const [blocked, setBlocked] = useState(s.settings.blocked ?? []);
   const [orders, setOrders] = useState(s.settings.binance_orders != null ? String(s.settings.binance_orders) : "");
+  const [kyc, setKyc] = useState(!!s.settings.binance_kyc);
   const [rate, setRate] = useState(s.settings.binance_rate != null ? String(Math.round(s.settings.binance_rate * 1000) / 10) : "");
   const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true);
     const ok = await saveSettings({ pay_methods: pay, recv_methods: recv, binance_since: since || null, blocked,
       binance_orders: orders.trim() === "" ? null : Math.max(0, Math.round(Number(orders))),
+      binance_kyc: kyc,
       binance_rate: rate.trim() === "" ? null : Math.min(100, Math.max(0, Number(rate.replace(",", ".")))) / 100 });
     setBusy(false);
     if (ok) {
@@ -268,6 +270,10 @@ function MethodsSheet({ s, onClose }: { s: State; onClose: () => void }) {
               <input type="text" inputMode="decimal" placeholder="98,8" value={rate} onChange={(e) => setRate(e.target.value)} aria-label="Tasa de finalización" />
               <span>%</span>
             </span>
+          </div>
+          <div className="mc-since">
+            <span><b>Hice la verificación adicional</b><small className="dim">Algunos anuncios la piden ("Verificación requerida"); sin marcarla no te salen</small></span>
+            <Toggle on={kyc} onChange={setKyc} label="Verificación adicional" />
           </div>
           <p className="dim small"><Icon name="info" size={13} /> Con estos datos el panel no te muestra los anuncios que todavía no puedes tomar (en Arbitraje, Tus dólares, ¿Dónde vendo?, el libro y los avisos). Los ves en Binance: P2P → Publicar anuncio → Requisitos. Las órdenes y la tasa cambian: actualízalas de vez en cuando.</p>
           {blocked.length > 0 && (

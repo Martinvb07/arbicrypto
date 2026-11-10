@@ -187,6 +187,7 @@ def profile(name):
     out["binance_since"] = mine.get("binance_since") or None
     out["binance_orders"] = mine.get("binance_orders")  # órdenes P2P completadas (lo que muestra Binance en tu perfil)
     out["binance_rate"] = mine.get("binance_rate")  # tasa de finalización de 30 días, de 0 a 1
+    out["binance_kyc"] = bool(mine.get("binance_kyc"))  # ya hizo la verificación adicional que piden algunos anuncios
     out["blocked"] = [b for b in mine.get("blocked") or [] if isinstance(b, dict) and b.get("user")]
     return out
 
@@ -201,10 +202,10 @@ def account_days(pr):
 
 
 def can_take_of(pr):
-    """((días de registro, órdenes completadas, tasa de finalización), anunciantes bloqueados) de un usuario: lo que
+    """((días de registro, órdenes completadas, tasa de finalización, verificación adicional), anunciantes bloqueados): lo que
     decide qué anuncios puede tomar. Lo que no haya anotado va en None y no se revisa."""
-    me = (account_days(pr), pr.get("binance_orders"), pr.get("binance_rate"))
-    return (None if me == (None, None, None) else me), tuple(sorted(b["user"] for b in pr["blocked"]))
+    me = (account_days(pr), pr.get("binance_orders"), pr.get("binance_rate"), bool(pr.get("binance_kyc")))
+    return (None if me[:3] == (None, None, None) else me), tuple(sorted(b["user"] for b in pr["blocked"]))
 
 
 def market_for(market, pr):
@@ -236,6 +237,8 @@ def clean_account(raw):
             out["binance_rate"] = r if r is None or 0 <= r <= 1 else None
         except (TypeError, ValueError):
             out["binance_rate"] = None
+    if "binance_kyc" in raw:
+        out["binance_kyc"] = bool(raw["binance_kyc"])
     if isinstance(raw.get("blocked"), list):
         seen, rows = set(), []
         for b in raw["blocked"]:
@@ -1726,7 +1729,8 @@ def _hidden_for(pr, market):
                     (f"pide {ad.get('reg_days')} días", me and me[0] is not None and me[0] < ad.get("reg_days", 0)),
                     (f"pide {ad.get('orders_min')} órdenes", me and me[1] is not None and me[1] < ad.get("orders_min", 0)),
                     (f"máximo {ad.get('orders_max')} órdenes", me and me[1] is not None and ad.get("orders_max") and me[1] > ad["orders_max"]),
-                    (f"pide {round(ad.get('rate_min', 0) * 100, 1)} %", me and me[2] is not None and me[2] < ad.get("rate_min", 0))) if bad]
+                    (f"pide {round(ad.get('rate_min', 0) * 100, 1)} %", me and me[2] is not None and me[2] < ad.get("rate_min", 0)),
+                    ("pide verificación adicional", ad.get("kyc_extra") and not (me and me[3]))) if bad]
                 out.append({"asset": asset, "lado": "comprar" if side == "BUY" else "vender", "nick": ad["nick"],
                             "precio": ad["price"], "por": ", ".join(why)})
     return out[:60]

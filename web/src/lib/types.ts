@@ -227,6 +227,8 @@ export interface Settings {
   /** Órdenes P2P completadas y tasa de finalización de 30 días (0 a 1), como las muestra Binance: hay anuncios que piden un mínimo. */
   binance_orders?: number | null;
   binance_rate?: number | null;
+  /** Ya hiciste la verificación adicional (KYC) que piden algunos anuncios. */
+  binance_kyc?: boolean;
   /** Anunciantes que no te dejan tomar su anuncio: no se usan en rutas, ventas ni avisos. */
   blocked?: { user: string; nick: string }[];
 }

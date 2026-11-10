@@ -426,13 +426,16 @@ DOLLARS = ("USDT", "USDC", "FDUSD")
 def can_take(ad, me=None, blocked=(), strict=True):
     """Tu cuenta puede tomar el anuncio: cumple lo que pide el anunciante (días de registro, órdenes completadas, tasa de
     finalización; lo que no hayas anotado no se revisa) y no lo marcaste como "no puedo con este".
-    me = (días de registro, órdenes completadas, tasa de finalización de 0 a 1), cada uno None si no se sabe.
+    me = (días de registro, órdenes completadas, tasa de finalización de 0 a 1, hiciste la verificación adicional),
+    cada uno None si no se sabe; la verificación sin marcar cuenta como no hecha.
     strict: si anotaste tus datos, un anuncio cuyas condiciones aún no se leyeron no cuenta."""
     if ad.get("user") in blocked:
         return False
     if me and strict and not ad.get("known"):
         return False  # sus condiciones aún no se han leído: mejor no proponerlo que mandarte a uno que no te deja
-    days, orders, rate = me or (None, None, None)
+    days, orders, rate, kyc = (tuple(me or ()) + (None,) * 4)[:4]
+    if me and ad.get("kyc_extra") and not kyc:
+        return False  # pide verificación adicional y no has dicho que la hiciste
     return ((days is None or days >= ad.get("reg_days", 0))
             and (orders is None or (orders >= ad.get("orders_min", 0) and (not ad.get("orders_max") or orders <= ad["orders_max"])))
             and (rate is None or rate >= ad.get("rate_min", 0)))
@@ -440,7 +443,7 @@ def can_take(ad, me=None, blocked=(), strict=True):
 
 def takeable(market, me=None, blocked=()):
     """El libro P2P solo con los anuncios que tu cuenta puede tomar."""
-    if (not me or me == (None, None, None)) and not blocked:
+    if not me and not blocked:
         return market
     return {a: {**m, **{side: [ad for ad in m.get(side) or [] if can_take(ad, me, blocked)] for side in ("BUY", "SELL")}}
             for a, m in market.items()}
@@ -584,6 +587,9 @@ def _search_retry(asset, fiat, amount):
             time.sleep(1 + i)
 
 
+EXIT_READ = 4  # condiciones que se leen en el momento por cada búsqueda de "¿Dónde vendo?"
+
+
 def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, min_finish, p2p_fee=0.0, p2p_min_usd=0.0,
                  me=None, blocked=()):
     """Todas las formas de pasar `qty` de `asset` a pesos: vender directo en P2P o cambiar antes en Spot
@@ -602,11 +608,18 @@ def exit_options(asset, qty, graph, fee, fiat, targets, usd_fiat, min_orders, mi
         to_usdt = usdt_value(graph, y, got)
         approx = to_usdt * usd_fiat if to_usdt and usd_fiat else 0
         try:
-            ads = [a for a in _search_retry(y, fiat, approx)
-                   if a["orders"] >= min_orders and a["finish"] >= min_finish and can_take(a, me, blocked, strict=False)]
+            ads = [a for a in _search_retry(y, fiat, approx) if a["orders"] >= min_orders and a["finish"] >= min_finish]
         except (requests.RequestException, BinanceError):
             errors.append(y)
             continue
+        if me:  # esta búsqueda trae anunciantes que el escáner quizá no ha revisado: se leen ya los primeros que falten
+            for a in [a for a in ads if not a.get("known")][:EXIT_READ]:
+                try:
+                    CONDITIONS[a["adv"]] = (time.time(), ad_conditions(a["adv"]))
+                    with_conditions(a)
+                except (requests.RequestException, BinanceError):
+                    break  # Binance pide esperar: los que falten no se proponen (can_take los descarta)
+        ads = [a for a in ads if can_take(a, me, blocked)]
         ok = [a for a in ads if _fits(a, got * a["price"], got, got if y == "BTC" else 0.0)
               and (len(path) == 1 or _clears_min(a, y, got * a["price"]))]  # pasando por Spot: con holgura sobre su mínimo
         if not ok:
