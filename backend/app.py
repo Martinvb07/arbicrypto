@@ -1150,8 +1150,6 @@ def price_ads(alert, market):
     """Anuncios que cuentan para esa alerta, del mejor al peor: BUY = los mas baratos para comprar, SELL = los que mas
     pagan al vender. Con mine=True solo los que te sirven por monto y medio de pago: al vender, los que reciben lo que
     tienes en tu Binance; sin saldo (o al comprar), los que aceptan tu capital."""
-    if alert.get("kind") == "outbid":  # "mi anuncio": compite con todos, también con los que tú no puedes tomar
-        return market.get(alert["asset"], {}).get(rival_side(alert["side"])) or []
     pr = profile(alert["user"])
     cap = pr["capital"]
     held = wallet_qty(alert["user"], alert["asset"]) if alert["side"] == "SELL" else 0.0
@@ -1165,8 +1163,6 @@ def price_ads(alert, market):
 
 
 def price_meets(alert, ad):
-    if alert.get("kind") == "outbid":  # te pasó: paga más que tu anuncio de compra o cobra menos que el de venta (empatar no cuenta)
-        return ad["price"] > alert["target"] if alert["side"] == "BUY" else ad["price"] < alert["target"]
     return ad["price"] <= alert["target"] if alert["side"] == "BUY" else ad["price"] >= alert["target"]
 
 
@@ -1185,14 +1181,19 @@ def price_check(market):
         for a in price_alerts:
             if not a.get("on", True) or a["asset"] not in market:
                 continue
+            if a.get("kind") == "outbid":
+                note = outbid_check(a, market)
+                if note:
+                    fired.append((a, note))
+                    changed = True
+                continue
             ads = price_ads(a, market)
             ad = ads[0] if ads else None
             meeting = [x for x in ads if price_meets(a, x)]
-            hit = len(meeting) > (a.get("ahead_ok") or 0)  # "mi anuncio": cuántos te pueden ir adelante sin avisar
-            a["last"] = {"t": time.time(), "price": ad["price"] if ad else None, "nick": ad["nick"] if ad else None, "hit": hit,
-                         **({"ahead": len(meeting)} if a.get("kind") == "outbid" else {})}
+            hit = bool(meeting)
+            a["last"] = {"t": time.time(), "price": ad["price"] if ad else None, "nick": ad["nick"] if ad else None, "hit": hit}
             seen = a.get("seen") or {}  # {anunciante: precio con el que ya se aviso}
-            low = (a["side"] == "BUY") != (a.get("kind") == "outbid")  # el mejor precio para la alerta es el más bajo
+            low = a["side"] == "BUY"  # el mejor precio para la alerta es el más bajo
             better = (lambda new, old: new < old) if low else (lambda new, old: new > old)
             fresh = [x for x in meeting if ad_who(x) not in seen or better(x["price"], seen[ad_who(x)])]
             now_seen = {ad_who(x): min(x["price"], seen.get(ad_who(x), x["price"])) if low
@@ -1201,11 +1202,10 @@ def price_check(market):
                 a["seen"] = now_seen  # los que ya no cumplen salen: si vuelven, avisa otra vez
                 changed = True
             a["armed_off"] = hit
-            if fresh and hit:
+            if fresh:
                 a["hits"] = a.get("hits", 0) + 1
                 a["last_hit"] = time.time()
-                # el mejor de los nuevos; en "mi anuncio", el que hay que superar para volver a tu puesto
-                fired.append((a, meeting[a.get("ahead_ok") or 0] if a.get("kind") == "outbid" else fresh[0]))
+                fired.append((a, fresh[0]))  # el mejor de los nuevos
                 changed = True
                 if a.get("once"):
                     a["on"] = False
@@ -1214,15 +1214,19 @@ def price_check(market):
     for a, ad in fired:
         unit = "cada dólar" if a["asset"] in ("USDT", "USDC", "FDUSD") else f"por {a['asset']}"
         if a.get("kind") == "outbid":
-            buys = a["side"] == "BUY"
-            beat = ad["price"] + ad_tick(ad["price"]) * (1 if buys else -1)
-            pos = (a.get("ahead_ok") or 0) + 1
-            title = f"Te pasaron tu anuncio de {'compra' if buys else 'venta'} de {a['asset']}"
-            body = (f"{ad['nick']} {'paga' if buys else 'cobra'} {money(ad['price'])} {unit} y el tuyo está en {money(a['target'])}.\n"
-                    f"Para volver a quedar {pos}.º ponlo en {money(beat)} (revisa que te siga dejando ganancia).")
+            buys, n = a["side"] == "BUY", ad
+            what = f"tu anuncio de {'compra' if buys else 'venta'} de {a['asset']}"
+            where = "1.º" if n["want"] == 1 else f"en el top {n['want']}"
+            if n["lost"]:
+                title = f"Te pasaron {what}"
+                body = (f"{n['nick']} {'paga' if buys else 'cobra'} {money(n['top'])} {unit} y el tuyo está en {money(a['target'])} "
+                        f"(vas {n['pos']}.º).\nPara quedar {where} ponlo en {money(n['ideal'])}; revisa que te siga dejando ganancia.")
+            else:
+                title = f"Puedes ganar más con {what}"
+                body = (f"Estás en {money(a['target'])} y para seguir {where} basta con {money(n['ideal'])}: "
+                        f"{'pagas' if buys else 'cobras'} {money(abs(a['target'] - n['ideal']))} {'de más' if buys else 'de menos'} {unit}.")
             raise_alert(f"price:{a['id']}:{a['hits']}", "price", title, body, users=[a["user"]],
-                        telegram_too=a["user"] == main_name,
-                        links=[("Editar mis anuncios", "https://p2p.binance.com/es/myads"), (f"Ver a {ad['nick']}", advertiser_url(ad))])
+                        telegram_too=a["user"] == main_name, links=[("Editar mis anuncios", "https://p2p.binance.com/es/myads")])
             continue
         verb = "Compra" if a["side"] == "BUY" else "Vende"
         title = f"{a['asset']} {'barato' if a['side'] == 'BUY' else 'caro'}: {money(ad['price'])} {unit}"
@@ -1231,6 +1235,54 @@ def price_check(market):
         raise_alert(f"price:{a['id']}:{a['hits']}", "price", title, body, users=[a["user"]],
                     telegram_too=a["user"] == main_name,
                     links=[(f"{verb} {a['asset']} a {ad['nick']}", advertiser_url(ad))])
+
+
+def outbid_state(a, market):
+    """Dónde está TU anuncio (a["target"]) frente a los que compiten por tu monto, y el precio justo para el puesto que
+    quieres (ahead_ok + 1): `lost` = te pasaron; `room` > 0 = pagas de más (compra) o cobras de menos (venta) para ese puesto."""
+    buys, want = a["side"] == "BUY", (a.get("ahead_ok") or 0) + 1
+    amount = a.get("amount") or profile(a["user"])["capital"]  # las vigilancias viejas no guardaban el monto
+    rivals = [x for x in market.get(a["asset"], {}).get(rival_side(a["side"])) or [] if x["price"] != a["target"]
+              and (not amount or (x["min"] <= amount and x["max"] >= amount * 0.1))
+              and (not x.get("available") or x["available"] * x["price"] >= x["min"])]  # igual que realRivals() del asesor
+    beats = (lambda p, q: p > q) if buys else (lambda p, q: p < q)
+    ahead = [x for x in rivals if beats(x["price"], a["target"])]
+    if not rivals:
+        return {"pos": 1, "want": want, "lost": False, "ideal": None, "room": 0.0, "top": None, "nick": None}
+    at = rivals[want - 1] if len(rivals) >= want else None
+    ideal = at["price"] + (1 if buys else -1) * ad_tick(at["price"]) if at else rivals[-1]["price"]
+    return {"pos": len(ahead) + 1, "want": want, "lost": len(ahead) >= want, "ideal": ideal, "top": rivals[0]["price"],
+            "nick": rivals[0]["nick"], "room": (a["target"] - ideal) * (1 if buys else -1)}
+
+
+OUTBID_GAP = 0.0003  # "puedes ganar más": solo si te ahorras al menos 0,03 % (y 2 pasos), para no avisar por centavos
+OUTBID_QUIET = 60    # segundos mínimos entre dos avisos del mismo anuncio
+
+
+def outbid_check(a, market):
+    """Avisa una vez por situación: te pasaron (y otra vez si te alejan más) o puedes ganar más (y otra vez si el margen
+    crece). Devuelve el estado si hay que avisar."""
+    n = outbid_state(a, market)
+    a["last"] = {"t": time.time(), "price": n["top"], "nick": n["nick"], "hit": n["lost"], "ahead": n["pos"] - 1,
+                 "ideal": n["ideal"], "room": n["room"]}
+    gap = max(2 * ad_tick(a["target"]), a["target"] * OUTBID_GAP)
+    prev = a.get("notice") or {}
+    kind = "lost" if n["lost"] else "room" if n["ideal"] is not None and n["room"] >= gap else None
+    if kind is None:
+        a["notice"] = None
+        return None
+    ideal = n["ideal"]
+    toward = (lambda new, old: new > old) if a["side"] == "BUY" else (lambda new, old: new < old)  # sube (compra) / baja (venta)
+    if prev.get("kind") == kind and (
+            (kind == "lost" and not toward(ideal, prev["ideal"]))  # ya avisado; solo de nuevo si te alejan más
+            or (kind == "room" and abs(ideal - prev["ideal"]) < gap)):  # o si el margen cambia de verdad
+        return None
+    if time.time() - (a.get("last_hit") or 0) < OUTBID_QUIET:
+        return None
+    a["notice"] = {"kind": kind, "ideal": ideal}
+    a["hits"] = a.get("hits", 0) + 1
+    a["last_hit"] = time.time()
+    return n
 
 
 def ad_tick(price):
@@ -2297,6 +2349,11 @@ def price_input(b, base=None):
         a["kind"] = "outbid" if b.get("kind") == "outbid" else "price"
     if a.get("kind") == "outbid":
         a["mine"] = False
+        if "amount" in b or not base:
+            try:
+                a["amount"] = max(float(b.get("amount") or 0), 0)
+            except (TypeError, ValueError):
+                a["amount"] = 0
         if "ahead_ok" in b or not base:
             try:
                 a["ahead_ok"] = min(max(int(b.get("ahead_ok") or 0), 0), 10)
@@ -2344,6 +2401,8 @@ def api_price_update():
             new = price_input(b, a)
         except ValueError as e:
             return jsonify(error=str(e)), 400
+        if any(new.get(k) != a.get(k) for k in ("asset", "side", "target", "mine", "kind", "amount", "ahead_ok")):
+            new["notice"] = None  # "mi anuncio" con otro precio o puesto: puede avisar de nuevo
         if any(new.get(k) != a.get(k) for k in ("asset", "side", "target", "mine", "kind")) or (new.get("on") and not a.get("on")):
             new["armed_off"], new["seen"] = False, {}  # meta nueva: puede avisar otra vez con todos
         a.update(new)

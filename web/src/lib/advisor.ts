@@ -11,7 +11,7 @@ export type Plan = "fast" | "mid" | "slow" | "take";
 export const PLANS: readonly { id: Plan; label: string; short: string; pos: number; speed: number }[] = [
   { id: "fast", label: "Rápido", short: "Sales 1.º", pos: 1, speed: 2 },
   { id: "mid", label: "Equilibrado", short: "Top 3", pos: 3, speed: 1 },
-  { id: "slow", label: "Paciente", short: "Puesto 8", pos: 8, speed: 0 },
+  { id: "slow", label: "Paciente", short: "Más atrás", pos: 8, speed: 0 },
   { id: "take", label: "Tomar ya", short: "Sin anuncio", pos: 0, speed: 3 },
 ];
 
@@ -225,3 +225,33 @@ export function makerStats(orders: Order[], hist: HistPoint[], asset: string, da
     spread: buy.avgPrice && sell.avgPrice ? sell.avgPrice / buy.avgPrice - 1 : null,
   };
 }
+
+// ---------------------------------------------------------------- vigilar tu anuncio (igual que outbid_state() del servidor)
+
+export interface WatchState {
+  /** Puesto de tu anuncio ahora y el que quieres. */
+  pos: number;
+  want: number;
+  /** Te pasaron: estás más atrás del puesto que quieres. */
+  lost: boolean;
+  /** Precio justo para quedar en el puesto que quieres. */
+  ideal: number | null;
+  /** > 0: pagas de más (compra) o cobras de menos (venta) por unidad para ese puesto. */
+  room: number;
+  top: Ad | undefined;
+  rivals: number;
+}
+
+export function watchState(m: MarketEntry, side: Side, target: number, amount: number, aheadOk: number): WatchState {
+  const want = aheadOk + 1;
+  const all = rivalsOf(m, side).filter((x) => x.price !== target);
+  const rivals = amount ? realRivals(all, amount).live : all;
+  const ahead = rivals.filter((x) => beats(side, x.price, target));
+  if (!rivals.length) return { pos: 1, want, lost: false, ideal: null, room: 0, top: undefined, rivals: 0 };
+  const at = rivals[want - 1];
+  const ideal = at ? at.price + (side === "BUY" ? 1 : -1) * advTick(at.price) : rivals[rivals.length - 1].price;
+  return { pos: ahead.length + 1, want, lost: ahead.length >= want, ideal, room: (target - ideal) * (side === "BUY" ? 1 : -1), top: rivals[0], rivals: rivals.length };
+}
+
+/** Desde cuánto avisa "puedes ganar más": 0,03 % y al menos dos pasos (OUTBID_GAP del servidor). */
+export const roomGap = (price: number) => Math.max(2 * advTick(price), price * 0.0003);
