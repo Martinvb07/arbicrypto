@@ -187,7 +187,9 @@ def profile(name):
     out["binance_since"] = mine.get("binance_since") or None
     out["binance_orders"] = mine.get("binance_orders")  # órdenes P2P completadas (lo que muestra Binance en tu perfil)
     out["binance_rate"] = mine.get("binance_rate")  # tasa de finalización de 30 días, de 0 a 1
-    out["binance_kyc"] = bool(mine.get("binance_kyc"))  # ya hizo la verificación adicional que piden algunos anuncios
+    out["binance_kyc"] = bool(mine.get("binance_kyc"))
+    out["p2p_user"] = mine.get("p2p_user") or None  # tu número de anunciante en P2P: para leer tus anuncios publicados
+    out["p2p_nick"] = mine.get("p2p_nick") or None  # ya hizo la verificación adicional que piden algunos anuncios
     out["blocked"] = [b for b in mine.get("blocked") or [] if isinstance(b, dict) and b.get("user")]
     return out
 
@@ -239,6 +241,16 @@ def clean_account(raw):
             out["binance_rate"] = None
     if "binance_kyc" in raw:
         out["binance_kyc"] = bool(raw["binance_kyc"])
+    if "p2p_profile" in raw:  # el enlace de tu perfil P2P, tu número de anunciante o tu apodo (vacío = quitar)
+        v = str(raw.get("p2p_profile") or "").strip()[:300]
+        m = re.search(r"advertiserNo=([A-Za-z0-9_-]{6,64})", v)
+        if m or re.fullmatch(r"s[0-9a-f]{20,63}", v):
+            out["p2p_user"], out["p2p_nick"] = m.group(1) if m else v, None
+        elif v and re.fullmatch(r"[\w .\-@*]{1,40}", v):
+            out["p2p_user"], out["p2p_nick"] = None, v  # apodo: el número se busca en los anuncios del mercado
+        else:
+            out["p2p_user"], out["p2p_nick"] = None, None
+        my_ads.pop(raw.get("_user"), None)
     if isinstance(raw.get("blocked"), list):
         seen, rows = set(), []
         for b in raw["blocked"]:
@@ -720,6 +732,43 @@ def flow_update(markets, now):
                 f["events"] = [e for e in events if now - e["t"] <= FLOW_KEEP and e["qty"] > 0]
 
 
+MY_ADS_EVERY = 30  # cada cuánto se leen los anuncios publicados de cada usuario
+my_ads = {}        # usuario -> {"t", "user", "nick", "ads", "error"}
+
+
+def my_ads_update(market, now):
+    """Lee los anuncios publicados de quien anotó su perfil P2P. Si solo anotó el apodo, busca su número en los anuncios
+    del mercado (aparece apenas tenga un anuncio entre los primeros)."""
+    for name, mine in list(prefs.items()):
+        user, nick = mine.get("p2p_user"), mine.get("p2p_nick")
+        if not user and not nick:
+            continue
+        cur = my_ads.get(name) or {}
+        if now - cur.get("t", 0) < MY_ADS_EVERY:
+            continue
+        if not user:
+            low = nick.lower()
+            user = next((ad.get("user") for m in market.values() for sd in ("BUY", "SELL") for ad in m.get(sd) or []
+                         if ad.get("user") and (ad.get("nick") or "").lower() == low), None)
+            if not user:
+                my_ads[name] = {"t": now, "user": None, "nick": nick, "ads": [],
+                                "error": f"No encuentro a {nick} entre los anuncios de ahora. Pega mejor el enlace de tu perfil P2P."}
+                continue
+            with lock:
+                prefs[name] = {**prefs.get(name, {}), "p2p_user": user}
+                save_json(PREFS_FILE, prefs)
+        try:
+            got_nick, ads = engine.advertiser_ads(user)
+            my_ads[name] = {"t": now, "user": user, "nick": got_nick or nick, "ads": [a for a in ads if (a.get("fiat") or FIAT) == FIAT],
+                            "error": None}
+        except (requests.RequestException, engine.BinanceError, ValueError) as e:
+            my_ads[name] = {**cur, "t": now, "user": user, "error": f"No se pudieron leer tus anuncios: {e}"}
+
+
+def own_user(name):
+    return (my_ads.get(name) or {}).get("user") or (prefs.get(name) or {}).get("p2p_user")
+
+
 def flow_view():
     """Por cripto y lado: la última hora de movimiento por puesto y por anunciante, para estimar cuánto tarda en
     llenarse un anuncio según el puesto en que quede."""
@@ -769,6 +818,10 @@ def p2p_step():
         flow_update({a: m for a, m in fresh.items() if not any(e.startswith(f"{a} ") for e in errors)}, now)
     except Exception as e:  # medir el movimiento nunca frena el escaneo
         logging.getLogger("arbicrypto").warning("flujo P2P: %s", e)
+    try:
+        my_ads_update(market, now)
+    except Exception as e:
+        logging.getLogger("arbicrypto").warning("mis anuncios: %s", e)
     usdt_ads = market.get("USDT", {}).get("BUY") or market.get("USDT", {}).get("SELL") or []
     ref = usdt_ads[0]["price"] if usdt_ads else (usd_ref() or 0)
     computed, keep = {}, set()
@@ -1250,6 +1303,12 @@ def price_check(market):
         for a in price_alerts:
             if not a.get("on", True) or a["asset"] not in market:
                 continue
+            if a.get("kind") == "move":
+                note = move_check(a, market)
+                if note:
+                    fired.append((a, note))
+                    changed = True
+                continue
             if a.get("kind") == "outbid":
                 note = outbid_check(a, market)
                 if note:
@@ -1282,6 +1341,24 @@ def price_check(market):
             save_json(PRICE_FILE, price_alerts)
     for a, ad in fired:
         unit = "cada dólar" if a["asset"] in ("USDT", "USDC", "FDUSD") else f"por {a['asset']}"
+        if a.get("kind") == "move":
+            lines, ups = [], []
+            for sd, (old, new) in ad.items():
+                who = "Los que compran" if sd == "BUY" else "Los que venden"
+                verb = "pagan" if sd == "BUY" else "cobran"
+                diff = new - old
+                ups.append(diff > 0)
+                beat = new + (1 if sd == "BUY" else -1) * ad_tick(new)
+                mine = next((x for x in (my_ads.get(a["user"]) or {}).get("ads") or [] if x["asset"] == a["asset"] and x["side"] == sd), None)
+                yours = (f" Tu anuncio de {'compra' if sd == 'BUY' else 'venta'} está en {money(mine['price'])}"
+                         f"{' (vas 1.º)' if (mine['price'] >= new if sd == 'BUY' else mine['price'] <= new) else ''}." if mine else "")
+                lines.append(f"{who} {a['asset']} {verb} {money(new)} {unit} ({'+' if diff > 0 else '−'}{money(abs(diff))}, antes {money(old)}).{yours}\n"
+                             f"Para que tu anuncio de {'compra' if sd == 'BUY' else 'venta'} quede 1.º: {money(beat)}.")
+            title = (f"{a['asset']} {'subió' if all(ups) else 'bajó' if not any(ups) else 'se movió'}: "
+                     + " · ".join(f"{'compran' if sd == 'BUY' else 'venden'} a {money(new)}" for sd, (_, new) in ad.items()))
+            raise_alert(f"price:{a['id']}:{a['hits']}", "price", title, "\n".join(lines), users=[a["user"]],
+                        telegram_too=a["user"] == main_name, links=[("Editar mis anuncios", "https://p2p.binance.com/es/myads")])
+            continue
         if a.get("kind") == "outbid":
             buys, n = a["side"] == "BUY", ad
             what = f"tu anuncio de {'compra' if buys else 'venta'} de {a['asset']}"
@@ -1306,12 +1383,54 @@ def price_check(market):
                     links=[(f"{verb} {a['asset']} a {ad['nick']}", advertiser_url(ad))])
 
 
+def move_top(a, market, side):
+    """Mejor precio de la lista con la que compite tu anuncio de `side`, contando solo los que compiten por tu monto
+    (igual que el asesor): side BUY = lo que pagan los que compran; SELL = lo que cobran los que venden."""
+    amount = a.get("amount") or profile(a["user"])["capital"]
+    me = own_user(a["user"])
+    for x in market.get(a["asset"], {}).get(rival_side(side)) or []:
+        if me and x.get("user") == me:
+            continue  # tu propio anuncio no cuenta: si cambias tu precio no es que el mercado se movió
+        if x["min"] <= amount and x["max"] >= amount * 0.1 and (not x.get("available") or x["available"] * x["price"] >= x["min"]):
+            return x["price"]
+    return None
+
+
+MOVE_QUIET = 30  # segundos mínimos entre dos avisos de "el precio se movió"
+
+
+def move_check(a, market):
+    """"Avísame cuando el precio se mueva": compara el mejor precio de cada lado con el último que te avisó (o el de
+    cuando la creaste) y avisa cuando se mueve `target` pesos o más, para arriba o para abajo. Devuelve {lado: (antes, ahora)}."""
+    ref = a.setdefault("ref", {})
+    now, moved = {}, {}
+    for sd in (("BUY", "SELL") if a["side"] == "BOTH" else (a["side"],)):
+        p = move_top(a, market, sd)
+        if p is None:
+            continue
+        now[sd] = p
+        if ref.get(sd) is None:
+            ref[sd] = p  # primera vez: este es el punto de partida
+        elif abs(p - ref[sd]) >= a["target"] - 1e-9:
+            moved[sd] = (ref[sd], p)
+    a["last"] = {"t": time.time(), "price": now.get("BUY", now.get("SELL")), "nick": None, "hit": bool(moved), "now": now}
+    if not moved or time.time() - (a.get("last_hit") or 0) < MOVE_QUIET:
+        return None
+    for sd, (_, p) in moved.items():
+        ref[sd] = p
+    a["hits"] = a.get("hits", 0) + 1
+    a["last_hit"] = time.time()
+    return moved
+
+
 def outbid_state(a, market):
     """Dónde está TU anuncio (a["target"]) frente a los que compiten por tu monto, y el precio justo para el puesto que
     quieres (ahead_ok + 1): `lost` = te pasaron; `room` > 0 = pagas de más (compra) o cobras de menos (venta) para ese puesto."""
     buys, want = a["side"] == "BUY", (a.get("ahead_ok") or 0) + 1
     amount = a.get("amount") or profile(a["user"])["capital"]  # las vigilancias viejas no guardaban el monto
+    me = own_user(a["user"])
     rivals = [x for x in market.get(a["asset"], {}).get(rival_side(a["side"])) or [] if x["price"] != a["target"]
+              and not (me and x.get("user") == me)
               and (not amount or (x["min"] <= amount and x["max"] >= amount * 0.1))
               and (not x.get("available") or x["available"] * x["price"] >= x["min"])]  # igual que realRivals() del asesor
     beats = (lambda p, q: p > q) if buys else (lambda p, q: p < q)
@@ -2414,9 +2533,11 @@ def price_input(b, base=None):
     for k in ("mine", "on", "once"):
         if k in b:
             a[k] = bool(b[k])
-    if "kind" in b or not base:  # "price": comprar barato / vender caro; "outbid": avisa si alguien supera tu anuncio
-        a["kind"] = "outbid" if b.get("kind") == "outbid" else "price"
-    if a.get("kind") == "outbid":
+    if "kind" in b or not base:  # "price": comprar barato / vender caro; "outbid": avisa si alguien supera tu anuncio;
+        a["kind"] = b.get("kind") if b.get("kind") in ("outbid", "move") else "price"  # "move": cada vez que el precio se mueva
+    if a.get("kind") == "move" and ("target" in b or "side" in b or "amount" in b):
+        a["ref"] = {}  # otro paso, lado o monto: arranca desde el precio de ahora
+    if a.get("kind") in ("outbid", "move"):
         a["mine"] = False
         if "amount" in b or not base:
             try:
@@ -2435,10 +2556,10 @@ def price_input(b, base=None):
             a["target"] = 0
     if a["asset"] not in P2P_ASSETS:
         raise ValueError("Esa cripto no está en P2P.")
-    if a["side"] not in ("BUY", "SELL"):
+    if a["side"] not in (("BUY", "SELL", "BOTH") if a.get("kind") == "move" else ("BUY", "SELL")):
         raise ValueError("Elige comprar o vender.")
     if not 0 < a["target"] < 1e12:
-        raise ValueError("Escribe el precio al que quieres que te avise.")
+        raise ValueError("Escribe cada cuánto quieres que te avise." if a.get("kind") == "move" else "Escribe el precio al que quieres que te avise.")
     return a
 
 
@@ -2520,7 +2641,7 @@ def api_state():
             "p2p_fee_auto": effective_fee({**me, "taker_fee": -1}), "price_alerts": price_alert_view(name),
             # porcentaje y minimo fijo por separado: con otro monto (simulador, otros montos) el minimo pesa distinto
             "p2p_fee_rate": taker_fee_of(me)[0], "p2p_fee_min_usd": taker_fee_of(me)[1],
-            "maker_fee": maker_fee(name), "flow": flow_view(), "spot": state["spot"], "p2p": p2p, "account": account_view(name),
+            "maker_fee": maker_fee(name), "flow": flow_view(), "my_ads": my_ads.get(name), "spot": state["spot"], "p2p": p2p, "account": account_view(name),
             "opps": sorted([o for o in (mine or {}).get("found", []) + opps["spot"] if o["per_usd"] >= me["min_per_usd"]],
                            key=lambda o: -o["per_usd"]),
             "connected": name in accounts, "key_hint": accounts[name].hint() if name in accounts else None,
@@ -2544,7 +2665,7 @@ def api_settings():
     b = {k: v for k, v in raw.items() if k in PERSONAL}
     lists = {k: clean_methods(raw[k]) for k in METHOD_LISTS if k in raw}
     lists.update(clean_muted(raw))
-    lists.update(clean_account(raw))
+    lists.update(clean_account({**raw, "_user": g.user["name"]}))
     if not b and not lists:
         return jsonify(error="Nada que guardar."), 400
     # capital, 4x1000, "avisar desde", costos y medios son de cada usuario, tambien de los administradores

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { advise, beats, flowOf, FLOW_MIN, hourSpreads, rivalFlow, makerStats, mergeOrders, PLANS, rivalsOf, roomGap, watchState, type Advice, type Combo, type Plan,
+import { advise, advTick, beats, etaAt, flowOf, FLOW_MIN, hourSpreads, realRivals, rivalFlow, makerStats, mergeOrders, PLANS, rivalsOf, roomGap, watchState, type Advice, type Combo, type Plan,
   type SideOption } from "@/lib/advisor";
 import { api } from "@/lib/api";
-import { advertiserUrl, adRank, isDollar } from "@/lib/calc";
+import { advertiserUrl, adRank, isDollar, simulateAds } from "@/lib/calc";
 import { money, num, pct, plural, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, MarketEntry, Order, PriceAlert, Side, State } from "@/lib/types";
@@ -146,7 +146,7 @@ function Verdict({ s, asset, a, c, picked, onReset, onUse, onWatch }: {
           </button>
         )}
         {mineSides.length > 0 && (
-          <button type="button" className="btn btn-sm" onClick={onWatch}><Icon name="bellRing" size={15} /> Ya lo publiqué: avisarme si me pasan</button>
+          <button type="button" className="btn btn-sm" onClick={onWatch}><Icon name="bellRing" size={15} /> Avisarme cuando el precio se mueva</button>
         )}
         <a className="btn btn-sm" href="https://p2p.binance.com/es/postAd" target="_blank" rel="noopener noreferrer"><Icon name="plus" size={15} /> Publicar en Binance <Icon name="external" size={13} /></a>
       </div>
@@ -422,7 +422,6 @@ function MyAds({ s, asset }: { s: State; asset: string }) {
 
 // ---------------------------------------------------------------- vigilar mi anuncio
 
-const KEEP = [[0, "1.º"], [2, "Top 3"], [4, "Top 5"]] as const;
 
 function WatchRow({ a, m, amount }: { a: PriceAlert; m: MarketEntry; amount: number | null }) {
   const { toast, refresh } = useLive();
@@ -488,24 +487,93 @@ function WatchRow({ a, m, amount }: { a: PriceAlert; m: MarketEntry; amount: num
   );
 }
 
-function Watch({ s, asset, m, seed, amount }: {
-  s: State; asset: string; m: MarketEntry; seed: { BUY: number | null; SELL: number | null }; amount: number;
-}) {
+/** "move" guarda BOTH en side (el tipo dice Side para no tocar las otras alertas). */
+type MoveSide = Side | "BOTH";
+const moveSide = (a: PriceAlert) => a.side as MoveSide;
+const MOVE_SIDES = [
+  ["BOTH", "Compra y venta"],
+  ["BUY", <span key="b" className="mkt-switch-opt"><Icon name="cart" size={15} />Compra</span>],
+  ["SELL", <span key="s" className="mkt-switch-opt"><Icon name="handCoins" size={15} />Venta</span>],
+] as const;
+const STEPS = [1, 3, 5, 10, 20] as const;
+
+/** El mejor precio de la lista con la que compite tu anuncio de ese lado, por tu monto (sin tu propio anuncio). */
+function topFor(m: MarketEntry, side: Side, amount: number) {
+  return realRivals(rivalsOf(m, side), amount).live[0];
+}
+
+function MoveRow({ a, m, amount }: { a: PriceAlert; m: MarketEntry; amount: number }) {
   const { toast, refresh } = useLive();
-  const [side, setSide] = useState<Side>("BUY");
-  const [typed, setTyped] = useState<string | null>(null);
-  const [keep, setKeep] = useState<number>(0);
   const [busy, setBusy] = useState(false);
-  const rows = (s.price_alerts ?? []).filter((a) => a.kind === "outbid" && a.asset === asset);
-  const price = typed ?? (seed[side] != null ? String(seed[side]).replace(".", ",") : "");
-  const add = async () => {
-    const t = parseCop(price);
-    if (!(t > 0)) return toast("Escribe el precio de tu anuncio", "El mismo que pusiste en Binance", "bad");
+  const sides: Side[] = moveSide(a) === "BOTH" ? ["BUY", "SELL"] : [a.side];
+  const run = async (f: () => Promise<unknown>) => {
     setBusy(true);
     try {
-      await api.addPriceAlert({ kind: "outbid", asset, side, target: t, mine: false, once: false, ahead_ok: keep, amount });
-      toast("Vigilando tu anuncio", `Te aviso si te pasan o si puedes ${side === "BUY" ? "pagar menos" : "cobrar más"} sin perder tu puesto.`, "good", 3500);
-      setTyped(null);
+      await f();
+      refresh();
+    } catch (e) {
+      toast("No se pudo guardar", (e as Error).message, "bad");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (await ask({ title: `¿Quitar el aviso de ${a.asset}?`, body: "Ya no te avisaré cuando el precio se mueva.", confirm: "Quitar", tone: "danger", icon: "trash" })) {
+      void run(() => api.deletePriceAlert(a.id));
+    }
+  };
+  return (
+    <div className={`pa-row ${a.on ? "" : "off"}`}>
+      <div className="pa-coin">
+        <span className="sec-ico"><Icon name="activity" size={16} /></span>
+        <div>
+          <b>{a.asset} · {moveSide(a) === "BOTH" ? "compra y venta" : a.side === "BUY" ? "compra" : "venta"}</b>
+          <small>cada vez que se mueva {money(a.target)}</small>
+          {a.hits ? <small>avisó {a.hits} {a.hits === 1 ? "vez" : "veces"}{a.last_hit ? <> · <Ago t={a.last_hit} /></> : null}</small> : null}
+        </div>
+      </div>
+      {sides.map((sd) => {
+        const now = topFor(m, sd, a.amount || amount)?.price ?? a.last?.now?.[sd];
+        const ref = a.ref?.[sd];
+        const d = now != null && ref != null ? now - ref : null;
+        return (
+          <div key={sd} className="pa-cell">
+            <small>{sd === "BUY" ? "Los que compran pagan" : "Los que venden cobran"}</small>
+            <b>{money(now)}</b>
+            <span className={`dim ${d ? (d > 0 ? "up" : "down") : ""}`}>
+              {d == null ? "esperando el primer precio" : d === 0 ? `igual que el último aviso` : `${d > 0 ? "+" : "−"}${money(Math.abs(d))} desde el último aviso`}
+            </span>
+          </div>
+        );
+      })}
+      <div className="pa-actions">
+        <Toggle on={a.on} onChange={(v) => void run(() => api.updatePriceAlert(a.id, { on: v }))} disabled={busy} label={a.on ? "Activa" : "Pausada"} />
+        <button className="icon-btn danger" onClick={() => void remove()} title="Quitar" aria-label={`Quitar el aviso de ${a.asset}`}><Icon name="trash" size={16} /></button>
+      </div>
+    </div>
+  );
+}
+
+function Watch({ s, asset, m, amount }: { s: State; asset: string; m: MarketEntry; amount: number }) {
+  const { toast, refresh } = useLive();
+  const [side, setSide] = useState<MoveSide>("BOTH");
+  const [step, setStep] = useState<number>(isDollar(asset) ? 3 : 0);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const all = s.price_alerts ?? [];
+  const moves = all.filter((a) => a.kind === "move" && a.asset === asset);
+  const old = all.filter((a) => a.kind === "outbid" && a.asset === asset);
+  const ref = topFor(m, "BUY", amount)?.price ?? topFor(m, "SELL", amount)?.price ?? 0;
+  // en BTC y otras caras, pasos proporcionales al precio
+  const steps = isDollar(asset) || ref < 1e5 ? STEPS.map((v) => v) : STEPS.map((v) => Math.round((ref * v) / 4000 / 1000) * 1000 || 1000);
+  const value = typed.trim() ? parseCop(typed) : step || steps[1];
+  const add = async () => {
+    if (!(value > 0)) return toast("Elige cada cuánto avisar", "Por ejemplo cada $3", "bad");
+    setBusy(true);
+    try {
+      await api.addPriceAlert({ kind: "move", asset, side: side as Side, target: value, mine: false, once: false, amount });
+      toast("Aviso creado", `Te aviso cada vez que ${side === "BOTH" ? "la compra o la venta" : side === "BUY" ? "la compra" : "la venta"} de ${asset} se mueva ${money(value)}.`, "good", 3500);
+      setTyped("");
       refresh();
     } catch (e) {
       toast("No se pudo guardar", (e as Error).message, "bad");
@@ -518,33 +586,153 @@ function Watch({ s, asset, m, seed, amount }: {
       <div className="mkt-sec-title">
         <span className="sec-ico"><Icon name="bellRing" /></span>
         <div>
-          <h2>Vigilar mi anuncio</h2>
-          <p className="sub">Escribe el precio con el que lo publicaste y en qué puesto lo quieres. Te aviso (campana, notificación y Telegram) si te pasan,
-            y también si puedes {side === "BUY" ? "pagar menos" : "cobrar más"} sin perder el puesto: así ganas más por vuelta</p>
+          <h2>Avisarme cuando el precio se mueva</h2>
+          <p className="sub">Cada vez que lo que pagan los que compran o lo que cobran los que venden suba o baje lo que elijas, te aviso (campana, notificación y Telegram)
+            con el precio nuevo y a cuánto poner tu anuncio para quedar 1.º</p>
         </div>
       </div>
       <div className="adv-watch-form">
-        <Segmented label="Mi anuncio" value={side} onChange={(v) => { setSide(v); setTyped(null); }}
-          options={[["BUY", <span key="b" className="mkt-switch-opt"><Icon name="cart" size={15} />De compra</span>],
-            ["SELL", <span key="s" className="mkt-switch-opt"><Icon name="handCoins" size={15} />De venta</span>]] as const} />
-        <span className="mc-input"><span>$</span><input type="text" inputMode="decimal" value={price} onChange={(e) => setTyped(e.target.value)}
-          placeholder={num(rivalsOf(m, side)[0]?.price, 2)} aria-label="Precio de mi anuncio" /></span>
-        <span className="adv-keep"><small>Lo quiero</small><Segmented label="Puesto que quiero" value={keep} onChange={setKeep} options={KEEP} /></span>
-        <button className="btn btn-brand" disabled={busy} onClick={() => void add()}><Icon name="bellPlus" size={16} /> Vigilar</button>
+        <Segmented label="Qué precio" value={side} onChange={setSide} options={MOVE_SIDES} />
+        <span className="adv-keep"><small>Cada</small>
+          <Segmented label="Cada cuánto" value={typed.trim() ? -1 : (step || steps[1])} onChange={(v) => { setStep(v); setTyped(""); }}
+            options={steps.map((v) => [v, money(v, 0)] as const)} />
+        </span>
+        <span className="mc-input adv-step-in"><span>$</span><input type="text" inputMode="decimal" value={typed} onChange={(e) => setTyped(e.target.value)}
+          placeholder="otro" aria-label="Otro monto" /></span>
+        <button className="btn btn-brand" disabled={busy} onClick={() => void add()}><Icon name="bellPlus" size={16} /> Avisarme</button>
       </div>
-      {rows.length > 0 && <div className="pa-list">{rows.map((a) => <WatchRow key={a.id} a={a} m={m} amount={amount} />)}</div>}
-      <p className="note"><Icon name="info" size={14} /> Solo cuentan los anuncios que compiten por tu monto ({money(amount, 0)}), igual que arriba. El panel solo lee:
-        cambiar el precio se hace en Binance (Mis anuncios); cuando lo cambies allá, toca «Ya lo puse» para que vigile el nuevo.</p>
+      {moves.length > 0 && <div className="pa-list">{moves.map((a) => <MoveRow key={a.id} a={a} m={m} amount={amount} />)}</div>}
+      {old.length > 0 && (
+        <>
+          <p className="sim-hint adv-gap">Avisos de puesto que creaste antes (puedes pausarlos o quitarlos):</p>
+          <div className="pa-list">{old.map((a) => <WatchRow key={a.id} a={a} m={m} amount={amount} />)}</div>
+        </>
+      )}
+      <p className="note"><Icon name="info" size={14} /> Cuenta el mejor precio de los anuncios que compiten por tu monto ({money(amount, 0)}), sin contar los tuyos:
+        si cambias tu propio anuncio no te avisa.</p>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- tus anuncios publicados
+
+function Published({ s, asset, m, amount, makerFee, onUse }: {
+  s: State; asset: string; m: MarketEntry; amount: number; makerFee: number; onUse: (buy: number | null, sell: number | null) => void;
+}) {
+  const { saveSettings, toast } = useLive();
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const mine = s.my_ads;
+  const set = !!(s.settings.p2p_user || s.settings.p2p_nick);
+  const save = async (v: string) => {
+    setBusy(true);
+    const ok = await saveSettings({ p2p_profile: v });
+    setBusy(false);
+    if (ok) {
+      setTyped("");
+      toast(v ? "Perfil guardado" : "Perfil quitado", v ? "Leo tus anuncios en unos segundos." : undefined, "good", 3000);
+    }
+  };
+  const head = (
+    <div className="mkt-sec-title">
+      <span className="sec-ico"><Icon name="megaphone" /></span>
+      <div>
+        <h2>Tus anuncios publicados</h2>
+        <p className="sub">{set ? <>Leídos de tu perfil de P2P{mine?.nick ? <> (<b>{mine.nick}</b>)</> : null} cada 30 s{mine?.t ? <> · <Ago t={mine.t} /></> : null}</>
+          : "Pega el enlace de tu perfil de P2P y leo tus anuncios solos: en qué puesto vas, cuánto tardan y a cuánto moverlos"}</p>
+      </div>
+      {set && <button className="btn btn-sm" disabled={busy} onClick={() => void save("")}>Cambiar perfil</button>}
+    </div>
+  );
+  if (!set) {
+    return (
+      <section className="card">
+        {head}
+        <div className="adv-watch-form">
+          <span className="mc-input adv-profile-in"><Icon name="search" size={15} /><input type="text" value={typed} onChange={(e) => setTyped(e.target.value)}
+            placeholder="https://p2p.binance.com/…/advertiserDetail?advertiserNo=… o tu apodo" aria-label="Tu perfil de P2P" /></span>
+          <button className="btn btn-brand" disabled={busy || !typed.trim()} onClick={() => void save(typed.trim())}><Icon name="check" size={16} /> Leer mis anuncios</button>
+        </div>
+        <p className="sim-hint">En la app de Binance: P2P → tu perfil (arriba) → Compartir → copiar enlace. Es público: no hace falta ninguna llave.</p>
+      </section>
+    );
+  }
+  const ads = (mine?.ads ?? []).filter((x) => x.asset === asset);
+  const others = (mine?.ads ?? []).length - ads.length;
+  const buyAd = ads.find((x) => x.side === "BUY");
+  const sellAd = ads.find((x) => x.side === "SELL");
+  const pair = buyAd && sellAd ? simulateAds(amount, buyAd.price, sellAd.price, makerFee, makerFee, s.settings.gmf, true) : null;
+  return (
+    <section className="card">
+      {head}
+      {mine?.error && <p className="sim-warn"><Icon name="alert" size={15} /> {mine.error}</p>}
+      {!mine && <p className="sim-hint adv-gap">Leyendo tus anuncios…</p>}
+      {mine && !ads.length && !mine.error && (
+        <p className="sim-hint adv-gap">No tienes anuncios de {asset} publicados ahora{others ? ` (tienes ${others} de otras criptos)` : ""}. Usa la recomendación de abajo para publicar.</p>
+      )}
+      {ads.length > 0 && (
+        <div className="pa-list">
+          {ads.map((x) => {
+            const all = rivalsOf(m, x.side);
+            const rivals = realRivals(all, amount).live;
+            const r = adRank(rivals, x.price, x.side);
+            const top = rivals[0];
+            const beat = top ? top.price + (x.side === "BUY" ? 1 : -1) * advTick(top.price) : null;
+            const first = r.pos === 1;
+            // si vas 1.º: lo que te sobra frente al 2.º (podrías ganar más sin perder el puesto)
+            const room = first && top ? (x.side === "BUY" ? x.price - beat! : beat! - x.price) : 0;
+            const left = x.available * x.price;
+            const pos = all.filter((y) => beats(x.side, y.price, x.price)).length + 1;
+            const t = etaAt(flowOf(s, asset, x.side), pos, Math.min(amount, left || amount));
+            return (
+              <div key={x.adv ?? x.side} className={`pa-row ${!first ? "hit" : ""}`}>
+                <div className="pa-coin">
+                  <span className={`mkt-col-ico ${x.side}`}><Icon name={x.side === "BUY" ? "cart" : "handCoins"} size={16} /></span>
+                  <div><b>{x.side === "BUY" ? "Compras" : "Vendes"} {asset} a {money(x.price)}</b>
+                    <small>quedan {isDollar(asset) ? num(x.available, 2) : num(x.available, 6)} {asset} (≈ {money(left, 0)}) · {money(x.min, 0)} – {money(x.max, 0)}</small></div>
+                </div>
+                <div className="pa-cell">
+                  <small>Puesto ahora</small>
+                  <b className={first ? "up" : "down"}>{r.pos}.º <span className="dim">de {r.of + 1}</span></b>
+                  <span className="dim">{top ? `mejor rival: ${top.nick} · ${money(top.price)}` : "nadie compite por tu monto"}</span>
+                </div>
+                <div className="pa-cell">
+                  <small>{first ? (room >= roomGap(x.price) ? "Puedes ganar más" : "Bien puesto") : "Para quedar 1.º"}</small>
+                  <b className={first ? "up" : ""}>
+                    {first ? (room >= roomGap(x.price) ? `${x.side === "BUY" ? "Bájalo" : "Súbelo"} a ${money(beat)}` : "No lo toques")
+                      : `${x.side === "BUY" ? "Súbelo" : "Bájalo"} a ${money(beat)}`}
+                  </b>
+                  <span className="dim"><Icon name="timer" size={12} /> se llena {eta(t)}</span>
+                </div>
+                <div className="pa-tags">
+                  <a className="btn btn-sm" href="https://p2p.binance.com/es/myads" target="_blank" rel="noopener noreferrer"><Icon name="pencil" size={14} /> Editar <Icon name="external" size={12} /></a>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {pair && (
+        <p className="sim-even">
+          <Icon name="trend" size={15} />
+          <span>Entre tus dos anuncios (compras a {money(buyAd!.price)} y vendes a {money(sellAd!.price)}), con {money(amount, 0)} por vuelta te
+            quedan <b className={tone(pair.net)}>{signedMoney(pair.net)}</b> ({pct(pair.ratio)}).{" "}
+            <button type="button" className="btn btn-sm" onClick={() => onUse(buyAd!.price, sellAd!.price)}><Icon name="sliders" size={14} /> Simular</button></span>
+        </p>
+      )}
     </section>
   );
 }
 
 // ---------------------------------------------------------------- vista
 
-export function AdAdvisor({ s, asset, m, amount, makerFee, onUse }: {
+export function AdAdvisor({ s, asset, m: book, amount, makerFee, onUse }: {
   s: State; asset: string; m: MarketEntry; amount: number | null; makerFee: number;
   onUse: (buy: number | null, sell: number | null) => void;
 }) {
+  // tus propios anuncios no son rivales: sin ellos se calcula todo
+  const me = s.my_ads?.user ?? s.settings.p2p_user;
+  const m = useMemo(() => (me ? { ...book, BUY: book.BUY.filter((x) => x.user !== me), SELL: book.SELL.filter((x) => x.user !== me) } : book), [book, me]);
   const a = useMemo(() => (amount ? advise(s, asset, m, amount, makerFee) : null), [s, asset, m, amount, makerFee]);
   // lo que elegiste en cada lado (undefined = el de la recomendada); se queda aunque el mercado se mueva
   const [pick, setPick] = useState<{ buy?: Plan; sell?: Plan }>({});
@@ -554,10 +742,10 @@ export function AdAdvisor({ s, asset, m, amount, makerFee, onUse }: {
   const bp = pick.buy ?? a.best?.buy.plan ?? "fast";
   const sp = pick.sell ?? a.best?.sell.plan ?? "fast";
   const shown = picked ? a.combos.find((c) => c.buy.plan === bp && c.sell.plan === sp) ?? null : a.best;
-  const seed = { BUY: shown && shown.buy.plan !== "take" ? shown.buy.price : null, SELL: shown && shown.sell.plan !== "take" ? shown.sell.price : null };
   const watch = () => document.getElementById("adv-watch")?.scrollIntoView({ behavior: "smooth", block: "start" });
   return (
     <>
+      <Published s={s} asset={asset} m={m} amount={a.amount} makerFee={makerFee} onUse={onUse} />
       <Verdict s={s} asset={asset} a={a} c={shown} picked={picked} onReset={() => setPick({})} onUse={onUse} onWatch={watch} />
       <section className="card">
         <div className="sim-sides">
@@ -568,7 +756,7 @@ export function AdAdvisor({ s, asset, m, amount, makerFee, onUse }: {
       <Matrix a={a} shown={shown} onPick={(b, v) => setPick({ buy: b, sell: v })} />
       <Hours s={s} asset={asset} makerFee={makerFee} />
       <MyAds s={s} asset={asset} />
-      <Watch key={asset} s={s} asset={asset} m={m} seed={seed} amount={a.amount} />
+      <Watch key={asset} s={s} asset={asset} m={m} amount={a.amount} />
     </>
   );
 }

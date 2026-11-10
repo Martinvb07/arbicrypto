@@ -330,6 +330,35 @@ def ad_conditions(adv_no):
             "kyc_extra": bool(d.get("takerAdditionalKycRequired")), "hold_btc": _limit(d.get("buyerBtcPositionLimit"))}
 
 
+def advertiser_ads(user_no):
+    """Los anuncios activos de un anunciante, de su perfil público de P2P (lo mismo que ve cualquiera al abrir su perfil).
+    side = lo que hace el anuncio: BUY = compra cripto (compite con los que compran), SELL = vende."""
+    data = _json(http().get(f"{P2P}/friendly/c2c/user/profile-and-ads-list", params={"userNo": user_no}, timeout=15))
+    if data.get("code") not in (None, "000000") or not isinstance(data.get("data"), dict):
+        raise BinanceError(data.get("message") or data.get("code") or "perfil sin datos")
+    d = data["data"]
+    nick = (d.get("userDetailVo") or {}).get("nickName")
+    ads = []
+    for key, side in (("buyList", "BUY"), ("sellList", "SELL")):
+        for adv in d.get(key) or []:
+            adv = adv.get("adv") if isinstance(adv.get("adv"), dict) else adv
+            try:
+                price = float(adv.get("price") or 0)
+            except (TypeError, ValueError):
+                continue
+            if price <= 0:
+                continue
+            ads.append({
+                "asset": adv.get("asset"), "fiat": adv.get("fiatUnit"), "side": adv.get("tradeType") or side, "price": price,
+                "available": float(adv.get("tradableQuantity") or adv.get("surplusAmount") or 0),
+                "min": float(adv.get("minSingleTransAmount") or 0),
+                "max": float(adv.get("dynamicMaxSingleTransAmount") or adv.get("maxSingleTransAmount") or 0),
+                "methods": [m.get("tradeMethodName") or m.get("identifier") for m in adv.get("tradeMethods") or []],
+                "adv": adv.get("advNo"),
+            })
+    return nick, ads
+
+
 def with_conditions(ad):
     """Le pone al anuncio las condiciones ya leídas de su detalle (si no se han leído, quedan como 'no pide')."""
     hit = CONDITIONS.get(ad.get("adv"))

@@ -229,6 +229,11 @@ export interface Settings {
   binance_rate?: number | null;
   /** Ya hiciste la verificación adicional (KYC) que piden algunos anuncios. */
   binance_kyc?: boolean;
+  /** Tu perfil de anunciante en P2P (número y apodo) para leer tus anuncios publicados. */
+  p2p_user?: string | null;
+  p2p_nick?: string | null;
+  /** Solo al guardar: el enlace de tu perfil P2P, tu número de anunciante o tu apodo (vacío = quitar). */
+  p2p_profile?: string;
   /** Anunciantes que no te dejan tomar su anuncio: no se usan en rutas, ventas ni avisos. */
   blocked?: { user: string; nick: string }[];
 }
@@ -239,7 +244,8 @@ export type MutableKind = "spot" | "p2p" | "sell" | "price";
 export interface PriceAlert {
   id: string;
   asset: string;
-  /** BUY: avisa cuando comprar cueste igual o menos que target. SELL: cuando vender pague igual o más. */
+  /** BUY: avisa cuando comprar cueste igual o menos que target. SELL: cuando vender pague igual o más.
+   *  En "move": el lado de tu anuncio que vigila (BUY = lo que pagan los que compran), o "BOTH" (ver moveSide()). */
   side: Side;
   target: number;
   /** Solo anuncios que aceptan tu capital y tus medios de pago. */
@@ -250,10 +256,13 @@ export interface PriceAlert {
   created: number;
   hits: number;
   last_hit?: number | null;
-  last: { t: number; price: number | null; nick: string | null; hit: boolean; ahead?: number; ideal?: number | null; room?: number } | null;
+  last: { t: number; price: number | null; nick: string | null; hit: boolean; ahead?: number; ideal?: number | null; room?: number;
+    now?: Partial<Record<Side, number>> } | null;
+  /** Solo "move": precio con el que avisó la última vez (o el de cuando la creaste), por lado. */
+  ref?: Partial<Record<Side, number>>;
   /** "price" (o vacío): comprar barato / vender caro. "outbid": vigila TU anuncio (side = lo que hace tu anuncio, target = su
    *  precio) y avisa cuando alguien lo supera. */
-  kind?: "price" | "outbid";
+  kind?: "price" | "outbid" | "move";
   /** Solo "outbid": puesto que quieres menos uno (0 = 1.º, 2 = top 3). Avisa si te pasan o si puedes ganar más sin salir de él. */
   ahead_ok?: number;
   /** Solo "outbid": monto por vuelta; solo cuentan los anuncios que compiten por él. */
@@ -318,6 +327,28 @@ export interface Alert {
   links?: { label: string; url: string }[] | null;
 }
 
+/** Un anuncio tuyo publicado. side: lo que hace tu anuncio (BUY = compras cripto). */
+export interface MyAd {
+  asset: string;
+  fiat: string | null;
+  side: Side;
+  price: number;
+  /** Cripto que le queda. */
+  available: number;
+  min: number;
+  max: number;
+  methods: string[];
+  adv: string | null;
+}
+
+export interface MyAds {
+  t: number;
+  user: string | null;
+  nick: string | null;
+  ads: MyAd[];
+  error: string | null;
+}
+
 /** Cuánto se movió en la última hora una lista de anuncios (medido viendo bajar el saldo de cada uno). */
 export interface FlowSide {
   /** Segundos medidos (hasta 3600; menos si el panel acaba de prender). */
@@ -347,6 +378,8 @@ export interface State {
   maker_fee: number | null;
   /** Movimiento de la última hora por cripto y lista (BUY = los que venden, SELL = los que compran). */
   flow?: Record<string, Partial<Record<Side, FlowSide>>>;
+  /** Tus anuncios publicados, leídos de tu perfil público de P2P (si anotaste tu perfil). */
+  my_ads?: MyAds | null;
   spot: SpotState | null;
   p2p: P2PState | null;
   account: AccountState | null;
