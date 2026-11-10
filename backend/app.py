@@ -676,6 +676,71 @@ def spot_step():
         publish("spot")
 
 
+# ---------------------------------------------------------------- cuánto se mueve cada anuncio (asesor de anuncios)
+# Binance no dice cuánto tarda un anuncio en llenarse, pero en cada escaneo se ve su saldo disponible: si baja, alguien
+# le tomó una orden. Se guarda cada baja (precio, cantidad y puesto que tenía) por unas horas. Si el saldo vuelve a
+# subir poco después (una orden cancelada libera lo congelado), esa baja se descuenta.
+
+FLOW_KEEP = 3 * 3600     # cuánto se guarda
+FLOW_WINDOW = 3600       # lo que se muestra: la última hora
+FLOW_UNDO = 20 * 60      # una subida dentro de 20 min deshace bajas recientes (orden cancelada)
+FLOW_BUCKETS = ((1, 1), (2, 3), (4, 8), (9, 20))
+flow = {}                # (asset, side) -> {"prev": {adv: (disponible, precio)}, "events": [...], "since": t}
+flow_lock = threading.Lock()
+
+
+def flow_update(markets, now):
+    with flow_lock:
+        for asset, m in markets.items():
+            for side in ("BUY", "SELL"):
+                ads = m.get(side) or []
+                f = flow.setdefault((asset, side), {"prev": {}, "events": [], "since": now})
+                prev, events = f["prev"], f["events"]
+                cur = {}
+                for rank, ad in enumerate(ads, 1):
+                    key = str(ad.get("adv") or ad.get("user") or ad.get("nick"))
+                    avail = float(ad.get("available") or 0)
+                    cur[key] = (avail, ad["price"])
+                    if key not in prev:
+                        continue
+                    delta = prev[key][0] - avail
+                    if delta > 0:
+                        events.append({"t": now, "adv": key, "nick": ad.get("nick"), "price": ad["price"], "qty": delta,
+                                       "fiat": delta * ad["price"], "rank": rank})
+                    elif delta < 0:  # volvió saldo: si hubo bajas hace poco, eran órdenes canceladas
+                        back = -delta
+                        for e in reversed([e for e in events if e["adv"] == key and now - e["t"] <= FLOW_UNDO]):
+                            if back <= 0:
+                                break
+                            take = min(back, e["qty"])
+                            e["qty"] -= take
+                            e["fiat"] = e["qty"] * e["price"]
+                            back -= take
+                f["prev"] = {**{k: v for k, v in prev.items() if k not in cur}, **cur}  # quien sale de la lista se recuerda
+                f["events"] = [e for e in events if now - e["t"] <= FLOW_KEEP and e["qty"] > 0]
+
+
+def flow_view():
+    """Por cripto y lado: la última hora de movimiento por puesto y por anunciante, para estimar cuánto tarda en
+    llenarse un anuncio según el puesto en que quede."""
+    now = time.time()
+    out = {}
+    with flow_lock:
+        for (asset, side), f in flow.items():
+            ev = [e for e in f["events"] if now - e["t"] <= FLOW_WINDOW]
+            window = min(FLOW_WINDOW, now - f["since"])
+            by_ad = {}
+            for e in ev:
+                x = by_ad.setdefault(e["adv"], {"n": 0, "fiat": 0.0, "last": 0, "nick": e["nick"]})
+                x["n"] += 1
+                x["fiat"] += e["fiat"]
+                x["last"] = max(x["last"], e["t"])
+            buckets = [{"from": a, "to": b, "fiat": sum(e["fiat"] for e in ev if a <= e["rank"] <= b),
+                        "n": sum(1 for e in ev if a <= e["rank"] <= b)} for a, b in FLOW_BUCKETS]
+            out.setdefault(asset, {})[side] = {"window": window, "ads": by_ad, "buckets": buckets}
+    return out
+
+
 def p2p_step():
     if p2p_hold.is_set():
         return  # se esta calculando una venta: esta vuelta se salta
@@ -700,6 +765,10 @@ def p2p_step():
             cache["market"][asset] = m  # si fallo, se conserva lo ultimo bueno
     market = {a: cache["market"][a] for a in P2P_ASSETS if a in cache["market"]}
     fee, now = current_fee(), time.time()
+    try:
+        flow_update({a: m for a, m in fresh.items() if not any(e.startswith(f"{a} ") for e in errors)}, now)
+    except Exception as e:  # medir el movimiento nunca frena el escaneo
+        logging.getLogger("arbicrypto").warning("flujo P2P: %s", e)
     usdt_ads = market.get("USDT", {}).get("BUY") or market.get("USDT", {}).get("SELL") or []
     ref = usdt_ads[0]["price"] if usdt_ads else (usd_ref() or 0)
     computed, keep = {}, set()
@@ -2451,7 +2520,7 @@ def api_state():
             "p2p_fee_auto": effective_fee({**me, "taker_fee": -1}), "price_alerts": price_alert_view(name),
             # porcentaje y minimo fijo por separado: con otro monto (simulador, otros montos) el minimo pesa distinto
             "p2p_fee_rate": taker_fee_of(me)[0], "p2p_fee_min_usd": taker_fee_of(me)[1],
-            "maker_fee": maker_fee(name), "spot": state["spot"], "p2p": p2p, "account": account_view(name),
+            "maker_fee": maker_fee(name), "flow": flow_view(), "spot": state["spot"], "p2p": p2p, "account": account_view(name),
             "opps": sorted([o for o in (mine or {}).get("found", []) + opps["spot"] if o["per_usd"] >= me["min_per_usd"]],
                            key=lambda o: -o["per_usd"]),
             "connected": name in accounts, "key_hint": accounts[name].hint() if name in accounts else None,

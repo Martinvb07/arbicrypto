@@ -2,7 +2,7 @@
 // Todo es puro (sin React) para que se pueda revisar y probar aparte.
 
 import { fitsAd, simulateAds, takerFeeAt, type AdSimResult } from "./calc";
-import type { Ad, HistPoint, MarketEntry, Order, Side, State } from "./types";
+import type { Ad, FlowSide, HistPoint, MarketEntry, Order, Side, State } from "./types";
 
 /** Cómo publicas: "fast" sale de 1.º (te toman rápido), "mid" en el top 3, "slow" más atrás (ganas más, esperas más).
  *  "take" no publica: tomas ya el mejor anuncio que acepta tu monto. */
@@ -49,6 +49,10 @@ export interface SideOption {
   plan: Plan;
   price: number | null;
   fee: number;
+  /** Minutos que tardaría en llenarse con tu monto: 0 al tomar, Infinity si nadie se movió en ese puesto, null si aún se mide. */
+  eta: number | null;
+  /** Puesto en que queda tu anuncio. */
+  pos?: number;
   /** Solo "take": a quién le compras o le vendes. */
   ad?: Ad;
 }
@@ -58,6 +62,8 @@ export interface Combo {
   sell: SideOption;
   sim: AdSimResult;
   speed: number;
+  /** Comprar y luego vender, en minutos (null si falta medir algún lado). */
+  eta: number | null;
 }
 
 export interface Advice {
@@ -70,6 +76,8 @@ export interface Advice {
   combos: Combo[];
   /** La recomendada: la más rápida que deja al menos el margen seguro; si ninguna, la más rápida que gana algo. */
   best: Combo | null;
+  /** Con lo medido: la que se llena antes y gana algo, si es otra y bastante más rápida que la recomendada. */
+  quick: Combo | null;
   /** La recomendada gana menos del margen seguro: si un precio se mueve mientras esperas puede volverse pérdida. */
   tight: boolean;
   /** El 1.º está muy por delante del 2.º: quedar 2.º te ahorra esta diferencia (en pesos por unidad). */
@@ -78,18 +86,52 @@ export interface Advice {
 
 const speedOf = (p: Plan) => PLANS.find((x) => x.id === p)!.speed;
 
+// ---------------------------------------------------------------- cuánto tarda en llenarse (con lo medido del P2P)
+
+/** Menos de 10 minutos medidos no alcanza para estimar. */
+export const FLOW_MIN = 600;
+
+/** El movimiento de la lista con la que compite tu anuncio: tu compra compite con los que compran (lista SELL). */
+export const flowOf = (s: State, asset: string, side: Side): FlowSide | undefined => s.flow?.[asset]?.[side === "BUY" ? "SELL" : "BUY"];
+
+/** Pesos por hora que se le toman a UN anuncio en ese puesto (lo de su tramo repartido entre los puestos del tramo). */
+export function perAdHour(f: FlowSide, pos: number) {
+  const b = f.buckets.find((x) => pos >= x.from && pos <= x.to) ?? f.buckets[f.buckets.length - 1];
+  return b ? (b.fiat / (b.to - b.from + 1)) * (3600 / Math.max(f.window, 1)) : 0;
+}
+
+/** Minutos para que te tomen `amount` pesos en ese puesto. */
+export function etaAt(f: FlowSide | undefined, pos: number, amount: number): number | null {
+  if (!f || f.window < FLOW_MIN) return null;
+  const rate = perAdHour(f, pos);
+  return rate > 0 ? (amount / rate) * 60 : Infinity;
+}
+
+/** Cómo se mueve un rival: órdenes por hora y la última. */
+export function rivalFlow(f: FlowSide | undefined, ad: Ad) {
+  const x = f?.ads[String(ad.adv ?? ad.user ?? ad.nick)];
+  if (!f || f.window < FLOW_MIN) return null;
+  const k = 3600 / Math.max(f.window, 1);
+  return { perHour: (x?.n ?? 0) * k, fiatHour: (x?.fiat ?? 0) * k, last: x?.last ?? null };
+}
+
 export function advise(s: State, asset: string, m: MarketEntry, amount: number, makerFee: number): Advice {
   const gmf = s.settings.gmf;
   const b = realRivals(rivalsOf(m, "BUY"), amount);
   const v = realRivals(rivalsOf(m, "SELL"), amount);
 
   const mine = (side: Side, rivals: Ad[]): SideOption[] =>
-    PLANS.filter((p) => p.id !== "take").map((p) => ({ plan: p.id, price: priceForPos(rivals, side, p.pos), fee: makerFee }));
+    PLANS.filter((p) => p.id !== "take").map((p) => {
+      const price = priceForPos(rivals, side, p.pos);
+      // el puesto en la lista completa (la que se mide), no solo entre los que aceptan tu monto
+      const pos = price == null ? undefined : rivalsOf(m, side).filter((x) => beats(side, x.price, price)).length + 1;
+      return { plan: p.id, price, fee: makerFee, pos, eta: pos == null ? null : etaAt(flowOf(s, asset, side), pos, amount) };
+    });
 
   // comprar tomando: el vendedor más barato que acepta tu monto
   const buyAd = m.BUY.find((a) => fitsAd(a, amount, amount / a.price));
   const buy: SideOption[] = [...mine("BUY", b.live), {
-    plan: "take", price: buyAd?.price ?? null, ad: buyAd,
+    plan: "take", price: buyAd?.price ?? null, ad: buyAd, eta: 0,
     fee: buyAd ? takerFeeAt(s, amount, asset, buyAd.price) : s.p2p_fee ?? 0,
   }];
 
@@ -98,7 +140,7 @@ export function advise(s: State, asset: string, m: MarketEntry, amount: number, 
   const qtyRef = refBuy ? (amount / refBuy) * (1 - makerFee) : 0;
   const sellAd = qtyRef ? m.SELL.find((a) => fitsAd(a, qtyRef * a.price, qtyRef, asset === "BTC" ? qtyRef : 0)) : undefined;
   const sell: SideOption[] = [...mine("SELL", v.live), {
-    plan: "take", price: sellAd?.price ?? null, ad: sellAd,
+    plan: "take", price: sellAd?.price ?? null, ad: sellAd, eta: 0,
     fee: sellAd ? takerFeeAt(s, qtyRef * sellAd.price, asset, sellAd.price) : s.p2p_fee ?? 0,
   }];
 
@@ -107,11 +149,16 @@ export function advise(s: State, asset: string, m: MarketEntry, amount: number, 
     for (const y of sell) {
       if (!x.price || !y.price) continue;
       combos.push({ buy: x, sell: y, speed: speedOf(x.plan) + speedOf(y.plan),
+        eta: x.eta == null || y.eta == null ? null : x.eta + y.eta,
         sim: simulateAds(amount, x.price, y.price, x.fee, y.fee, gmf, y.plan !== "take") });
     }
   }
+  // con lo medido: la que se llena antes (y entre las que tardan parecido, la que más deja); sin medir: por puesto
+  const measured = combos.every((c) => c.eta != null);
+  const slot = (c: Combo) => (c.eta === Infinity ? 1e9 : Math.round(c.eta! / 10)); // tramos de 10 min
   const pick = (ok: (c: Combo) => boolean) =>
-    combos.filter(ok).sort((p, q) => q.speed - p.speed || q.sim.net - p.sim.net)[0] ?? null;
+    combos.filter(ok).sort(measured ? (p, q) => slot(p) - slot(q) || q.sim.net - p.sim.net
+      : (p, q) => q.speed - p.speed || q.sim.net - p.sim.net)[0] ?? null;
   const safe = pick((c) => c.sim.ratio >= s.settings.safe_p2p);
   const best = safe ?? pick((c) => c.sim.net > 0);
 
@@ -120,8 +167,11 @@ export function advise(s: State, asset: string, m: MarketEntry, amount: number, 
     const g = Math.abs(r[0].price - r[1].price);
     return g / r[0].price >= 0.001 ? g : null; // solo si pesa: 0,1 % o más
   };
+  const quick = measured && best && best.eta != null && best.eta > 30
+    ? combos.filter((c) => c.sim.net > 0 && c.eta! < best.eta! / 2).sort((p, q) => p.eta! - q.eta! || q.sim.net - p.sim.net)[0] ?? null
+    : null;
   return {
-    amount, buyRivals: b.live, sellRivals: v.live, skipped: { buy: b.skipped, sell: v.skipped },
+    quick, amount, buyRivals: b.live, sellRivals: v.live, skipped: { buy: b.skipped, sell: v.skipped },
     buy, sell, combos, best, tight: !!best && !safe, gap: { buy: gapOf(b.live), sell: gapOf(v.live) },
   };
 }

@@ -318,6 +318,16 @@ export interface Alert {
   links?: { label: string; url: string }[] | null;
 }
 
+/** Cuánto se movió en la última hora una lista de anuncios (medido viendo bajar el saldo de cada uno). */
+export interface FlowSide {
+  /** Segundos medidos (hasta 3600; menos si el panel acaba de prender). */
+  window: number;
+  /** Por anuncio (advNo): órdenes, pesos y última vez que le tomaron una. */
+  ads: Record<string, { n: number; fiat: number; last: number; nick: string | null }>;
+  /** Por puesto en la lista: pesos y órdenes. */
+  buckets: { from: number; to: number; fiat: number; n: number }[];
+}
+
 export interface State {
   /** fotos de perfil del equipo: {usuario: url} (quien no tiene foto no aparece) */
   avatars?: Record<string, string>;
@@ -335,6 +345,8 @@ export interface State {
   price_alerts?: PriceAlert[];
   /** Lo que Binance te cobra por tus propios anuncios, sacado de tus órdenes como anunciante (null si no tienes). */
   maker_fee: number | null;
+  /** Movimiento de la última hora por cripto y lista (BUY = los que venden, SELL = los que compran). */
+  flow?: Record<string, Partial<Record<Side, FlowSide>>>;
   spot: SpotState | null;
   p2p: P2PState | null;
   account: AccountState | null;

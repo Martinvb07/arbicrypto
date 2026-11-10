@@ -1,15 +1,28 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { advise, hourSpreads, makerStats, mergeOrders, PLANS, rivalsOf, roomGap, watchState, type Advice, type Combo, type Plan,
+import { advise, beats, flowOf, FLOW_MIN, hourSpreads, rivalFlow, makerStats, mergeOrders, PLANS, rivalsOf, roomGap, watchState, type Advice, type Combo, type Plan,
   type SideOption } from "@/lib/advisor";
 import { api } from "@/lib/api";
 import { advertiserUrl, adRank, isDollar } from "@/lib/calc";
 import { money, num, pct, plural, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
-import type { MarketEntry, Order, PriceAlert, Side, State } from "@/lib/types";
+import type { Ad, MarketEntry, Order, PriceAlert, Side, State } from "@/lib/types";
 import { ask } from "../overlay";
 import { Ago, EmptyBox, GoButton, Icon, Segmented, Toggle } from "../ui";
+
+/** Minutos estimados en palabras. */
+function eta(min: number | null | undefined) {
+  if (min == null) return "midiendo…";
+  if (min === Infinity) return "sin movimiento";
+  if (min < 1) return "al instante";
+  if (min < 60) return `≈ ${Math.round(min)} min`;
+  if (min > 600) return "más de 10 h";
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return `≈ ${h} h${m ? ` ${m} min` : ""}`;
+}
+const etaTone = (min: number | null | undefined) => (min == null ? "" : min <= 20 ? "up" : min <= 90 ? "" : "down");
 
 const planOf = (p: Plan) => PLANS.find((x) => x.id === p)!;
 const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "a. m." : "p. m."}`;
@@ -105,10 +118,19 @@ function Verdict({ s, asset, a, c, picked, onReset, onUse, onWatch }: {
       </div>
       <div className="kpis">
         <div className={`kpi ${c.sim.net > 0 ? "kpi-good" : ""}`}><small>Te queda por vuelta</small><b className={`val ${tone(c.sim.net)}`}>{signedMoney(c.sim.net)}</b><span>{pct(c.sim.ratio)} neto</span></div>
-        <div className="kpi"><small>Compra hasta</small><b className="val">{money(lim.buy)}</b><span>para no perder vendiendo a {money(c.sell.price)} · {money(lim.buySafe)} para ganar {pct(s.settings.safe_p2p, 1)}</span></div>
-        <div className="kpi"><small>Vende desde</small><b className="val">{money(lim.sell)}</b><span>para no perder comprando a {money(c.buy.price)} · {money(lim.sellSafe)} para ganar {pct(s.settings.safe_p2p, 1)}</span></div>
+        <div className="kpi"><small>Tarda en llenarse</small><b className={`val ${etaTone(c.eta)}`}>{eta(c.eta)}</b>
+          <span>{c.eta == null ? "midiendo cuánto se mueve cada puesto" : `compra ${eta(c.buy.eta).replace("≈ ", "")} + venta ${eta(c.sell.eta).replace("≈ ", "")}`}</span></div>
+        <div className="kpi"><small>Compra hasta</small><b className="val">{money(lim.buy)}</b><span>para no perder · {money(lim.buySafe)} para {pct(s.settings.safe_p2p, 1)}</span></div>
+        <div className="kpi"><small>Vende desde</small><b className="val">{money(lim.sell)}</b><span>para no perder · {money(lim.sellSafe)} para {pct(s.settings.safe_p2p, 1)}</span></div>
         <div className="kpi"><small>Comisiones</small><b className="val down">−{money(c.sim.fees, 0)}</b><span>{c.sim.gmf ? `+ 4x1000 ${money(c.sim.gmf, 0)}` : "sin 4x1000"}</span></div>
       </div>
+      {!picked && a.quick && a.quick !== c && (
+        <p className="sim-even">
+          <Icon name="timer" size={15} />
+          <span>¿Lo quieres más rápido? {planOf(a.quick.buy.plan).label} al comprar y {planOf(a.quick.sell.plan).label.toLowerCase()} al vender se llena
+            en <b>{eta(a.quick.eta)}</b> y deja <b className={tone(a.quick.sim.net)}>{signedMoney(a.quick.sim.net)}</b> ({pct(a.quick.sim.ratio)}). Tócala en la tabla para elegirla.</span>
+        </p>
+      )}
       {picked && a.best && !isBest && (
         <p className="sim-even">
           <Icon name="sparkle" size={15} />
@@ -178,7 +200,8 @@ function Ladder({ s, side, asset, a, shown, chosen, onPick }: {
                 <small>{take ? (o.ad ? `${buying ? "Le compras" : "Le vendes"} a ${o.ad.nick}` : "Nadie acepta tu monto")
                   : r ? `Sales ${r.pos}.º de ${r.of + 1}${r.ties ? ` · empatado con ${r.ties}` : ""}` : p.short}</small></div>
               <span className="adv-rung-price">{money(o.price)}</span>
-              <span className="dim">{take ? "sin esperar · comisión de tomar" : diff == null ? "" : diff === 0 ? "igual al 1.º" : `${diff > 0 ? "+" : "−"}${money(Math.abs(diff))} vs. 1.º`}</span>
+              <span className="dim">{take ? "sin esperar · comisión de tomar" : diff == null ? "" : diff === 0 ? "igual al 1.º" : `${diff > 0 ? "+" : "−"}${money(Math.abs(diff))} vs. 1.º`}
+                {!take && <> · <b className={`adv-eta ${etaTone(o.eta)}`}><Icon name="timer" size={12} /> {eta(o.eta)}</b></>}</span>
             </button>
           );
         })}
@@ -186,7 +209,52 @@ function Ladder({ s, side, asset, a, shown, chosen, onPick }: {
       {gap != null && (
         <p className="sim-warn"><Icon name="info" size={15} /> El 1.º va {money(gap)} por delante del 2.º: quedar 2.º te ahorra eso {isDollar(asset) ? "por dólar" : `por ${asset}`}.</p>
       )}
+      <Rivals s={s} side={side} asset={asset} rivals={rivals} price={(opts.find((o) => o.plan === chosen) ?? opts[0])?.price ?? null} />
       {skipped > 0 && <p className="sim-hint">No cuento {skipped} {plural(skipped, "anuncio", "anuncios")} que no compiten por tu monto (límites muy distintos o sin saldo).</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- rivales: quién está cerca y cuánto se mueve
+
+function Rivals({ s, side, asset, rivals, price }: { s: State; side: Side; asset: string; rivals: Ad[]; price: number | null }) {
+  const f = flowOf(s, asset, side);
+  const measuring = !f || f.window < FLOW_MIN;
+  // los 5 más cerca de tu precio (o los 5 primeros)
+  const at = price == null ? 0 : Math.max(0, rivals.findIndex((x) => !beats(side, x.price, price)));
+  const from = Math.max(0, Math.min(at - 2, rivals.length - 5));
+  const near = rivals.slice(from, from + 5);
+  if (!near.length) return null;
+  const k = f ? 3600 / Math.max(f.window, 1) : 0;
+  return (
+    <div className="adv-rivals">
+      <div className="adv-rivals-head">
+        <b>Rivales cerca de tu precio</b>
+        <small>{measuring ? "midiendo cuánto venden…" : `última ${f!.window >= 3500 ? "hora" : `${Math.round(f!.window / 60)} min`}`}</small>
+      </div>
+      {near.map((x) => {
+        const r = rivalFlow(f, x);
+        const pos = rivals.indexOf(x) + 1;
+        return (
+          <div key={x.adv ?? x.nick} className="adv-rival">
+            <span className="adv-rival-pos">{pos}.º</span>
+            <div className="adv-rival-who"><b>{x.nick}</b><small>{num(x.orders, 0)} órdenes/mes · {num(x.finish * 100, 0)} %{x.merchant ? " · comerciante" : ""}</small></div>
+            <span className="adv-rival-price">{money(x.price)}</span>
+            <span className={`adv-rival-flow ${r && r.perHour > 0 ? "up" : ""}`}>
+              {!r ? "—" : r.perHour > 0
+                ? <>{num(r.perHour, r.perHour < 10 ? 1 : 0)} órd./h · {money(r.fiatHour, 0)}/h{r.last ? <> · <Ago t={r.last} /></> : null}</>
+                : "sin ventas"}
+            </span>
+          </div>
+        );
+      })}
+      {f && !measuring && (
+        <p className="sim-hint">
+          {side === "BUY" ? "Les vendieron" : "Les compraron"} por puesto, por hora: {f.buckets.map((b, i) => (
+            <span key={b.from}>{i ? " · " : ""}{b.from === b.to ? `${b.from}.º` : `${b.from}-${b.to}`} <b>{money(b.fiat * k, 0)}</b></span>
+          ))}
+        </p>
+      )}
     </div>
   );
 }
@@ -222,7 +290,7 @@ function Matrix({ a, shown, onPick }: { a: Advice; shown: Combo | null; onPick: 
                       {c ? (
                         <button type="button" className="adv-cell" aria-pressed={on} onClick={() => onPick(b.id, v.id)}
                           title={`Comprar: ${b.label} · Vender: ${v.label}`}>
-                          <b>{pct(c.sim.ratio)}</b><small>{signedMoney(c.sim.net)}</small>
+                          <b>{pct(c.sim.ratio)}</b><small>{signedMoney(c.sim.net)}</small><small className={etaTone(c.eta)}>{eta(c.eta)}</small>
                           {best && <span className="adv-best-tag">Recomendada</span>}
                           {on && !best && <span className="adv-best-tag mine">Tu elección</span>}
                         </button>
@@ -235,7 +303,8 @@ function Matrix({ a, shown, onPick }: { a: Advice; shown: Combo | null; onPick: 
           </tbody>
         </table>
       </div>
-      <p className="note"><Icon name="info" size={14} /> Tomar y tomar es el arbitraje directo (pestaña Arbitraje). Con tu anuncio ganas más, pero solo cuando alguien lo toma, y mientras esperas los precios se mueven.</p>
+      <p className="note"><Icon name="info" size={14} /> Tomar y tomar es el arbitraje directo (pestaña Arbitraje). El tiempo se estima con lo que se movió cada puesto en la última hora
+        (el panel ve bajar el saldo de cada anuncio): es aproximado y cambia con la hora del día.</p>
     </section>
   );
 }
