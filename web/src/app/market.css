@@ -520,3 +520,14 @@
 .adv-found { display: grid; gap: 6px; margin-bottom: 10px; }
 .adv-found small { color: var(--muted); font-size: 12.5px; }
 .adv-found .btn .dim { font-weight: 500; opacity: .8; }
+/* filas del asesor: quietas (sin el brillo animado de las alertas, que se montaba sobre lo de al lado) */
+.pa-row.adv-row { animation: none; box-shadow: none; border-left-width: 3px; }
+.pa-row.adv-row:hover { box-shadow: none; }
+.pa-row.adv-row.lost { border-color: color-mix(in srgb, var(--down) 45%, var(--border)); background: linear-gradient(150deg, var(--down-soft), var(--surface) 55%); }
+.pa-row.adv-row.more { border-color: color-mix(in srgb, var(--up) 45%, var(--border)); background: linear-gradient(150deg, var(--up-soft), var(--surface) 55%); }
+.pa-row.adv-row.ok { border-left-color: var(--up); }
+.pa-row.adv-pub { grid-template-columns: minmax(200px, 1.4fr) minmax(150px, 1fr) minmax(190px, 1.3fr) auto; }
+.adv-head-btn { margin-left: auto; align-self: center; flex: none; }
+@media (max-width: 1080px) { .pa-row.adv-pub { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (max-width: 640px) { .pa-row.adv-pub { grid-template-columns: minmax(0, 1fr); } }
+.mkt-sec-title + .pa-list, .mkt-sec-title + .sim-warn { margin-top: 14px; }

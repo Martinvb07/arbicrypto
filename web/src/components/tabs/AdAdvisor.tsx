@@ -450,7 +450,7 @@ function WatchRow({ a, m, amount }: { a: PriceAlert; m: MarketEntry; amount: num
     }
   };
   return (
-    <div className={`pa-row ${(w.lost || more) && a.on ? "hit" : ""} ${a.on ? "" : "off"}`}>
+    <div className={`pa-row adv-row ${a.on ? (w.lost ? "lost" : more ? "more" : "") : "off"}`}>
       <div className="pa-coin">
         <span className={`mkt-col-ico ${a.side}`}><Icon name={buying ? "cart" : "handCoins"} size={16} /></span>
         <div><b>Mi {buying ? "compra" : "venta"} de {a.asset}</b><small>a {money(a.target)} · quiero {where}</small>
@@ -524,7 +524,7 @@ function MoveRow({ a, m, amount }: { a: PriceAlert; m: MarketEntry; amount: numb
     }
   };
   return (
-    <div className={`pa-row ${a.on ? "" : "off"}`}>
+    <div className={`pa-row adv-row ${a.on ? "" : "off"}`}>
       <div className="pa-coin">
         <span className="sec-ico"><Icon name="activity" size={16} /></span>
         <div>
@@ -663,7 +663,7 @@ function Published({ s, asset, m, amount, makerFee, onUse }: {
         <p className="sub">{set ? <>Leídos de tu perfil de P2P{mine?.nick ? <> (<b>{mine.nick}</b>)</> : null} cada 30 s{mine?.t ? <> · <Ago t={mine.t} /></> : null}</>
           : "Escribe tu apodo de P2P y leo tus anuncios solos: en qué puesto vas, cuánto tardan y a cuánto moverlos"}</p>
       </div>
-      {set && <button className="btn btn-sm" disabled={busy} onClick={() => void save("")}>Cambiar perfil</button>}
+      {set && <button className="btn btn-sm adv-head-btn" disabled={busy} onClick={() => void save("")}>Cambiar perfil</button>}
     </div>
   );
   if (!set) {
@@ -724,7 +724,7 @@ function Published({ s, asset, m, amount, makerFee, onUse }: {
             const pos = all.filter((y) => beats(x.side, y.price, x.price)).length + 1;
             const t = etaAt(flowOf(s, asset, x.side), pos, Math.min(amount, left || amount));
             return (
-              <div key={x.adv ?? x.side} className={`pa-row ${!first ? "hit" : ""}`}>
+              <div key={x.adv ?? x.side} className={`pa-row adv-row adv-pub ${first ? (room >= roomGap(x.price) ? "more" : "ok") : "lost"}`}>
                 <div className="pa-coin">
                   <span className={`mkt-col-ico ${x.side}`}><Icon name={x.side === "BUY" ? "cart" : "handCoins"} size={16} /></span>
                   <div><b>{x.side === "BUY" ? "Compras" : "Vendes"} {asset} a {money(x.price)}</b>
