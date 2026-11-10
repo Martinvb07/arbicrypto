@@ -22,7 +22,21 @@ export function advTick(price: number) {
 }
 
 /** Tu anuncio de compra compite con los que compran (m.SELL: a ellos les vendes); el de venta, con los que venden (m.BUY). */
-export const rivalsOf = (m: MarketEntry, side: Side) => (side === "BUY" ? m.SELL : m.BUY);
+export const rivalsOf = (m: MarketEntry, side: Side) => {
+  const k = side === "BUY" ? "SELL" : "BUY";
+  return m.all?.[k]?.length ? m.all[k]! : m[k]; // la lista completa, tal cual la ve cualquiera en Binance
+};
+
+/** Puesto de tu anuncio en esa lista como lo pone Binance: los que ofrecen mejor precio van antes; con los que empatas,
+ *  puedes quedar antes o después (por eso un rango). */
+export function rankIn(rivals: Ad[], price: number, side: Side) {
+  const pos = rivals.filter((a) => beats(side, a.price, price)).length + 1;
+  const ties = rivals.filter((a) => a.price === price).length;
+  return { pos, last: pos + ties, ties };
+}
+
+/** "6.º" o "6.º a 8.º" si empatas. */
+export const rankText = (r: { pos: number; last: number }) => (r.last > r.pos ? `${r.pos}.º a ${r.last}.º` : `${r.pos}.º`);
 
 /** ¿Este precio es mejor que aquel para quien toma tu anuncio? Tu compra gana pagando más; tu venta, cobrando menos. */
 export const beats = (side: Side, a: number, b: number) => (side === "BUY" ? a > b : a < b);
@@ -117,8 +131,9 @@ export function rivalFlow(f: FlowSide | undefined, ad: Ad) {
 
 export function advise(s: State, asset: string, m: MarketEntry, amount: number, makerFee: number): Advice {
   const gmf = s.settings.gmf;
-  const b = realRivals(rivalsOf(m, "BUY"), amount);
-  const v = realRivals(rivalsOf(m, "SELL"), amount);
+  // el puesto se cuenta como en Binance: contra toda la lista, no solo los que aceptan tu monto
+  const b = { live: rivalsOf(m, "BUY"), skipped: 0 };
+  const v = { live: rivalsOf(m, "SELL"), skipped: 0 };
 
   const mine = (side: Side, rivals: Ad[]): SideOption[] =>
     PLANS.filter((p) => p.id !== "take").map((p) => {
@@ -294,8 +309,8 @@ export interface WatchState {
 
 export function watchState(m: MarketEntry, side: Side, target: number, amount: number, aheadOk: number): WatchState {
   const want = aheadOk + 1;
-  const all = rivalsOf(m, side).filter((x) => x.price !== target);
-  const rivals = amount ? realRivals(all, amount).live : all;
+  const rivals = rivalsOf(m, side).filter((x) => x.price !== target); // como en Binance (el monto ya no filtra)
+  void amount;
   const ahead = rivals.filter((x) => beats(side, x.price, target));
   if (!rivals.length) return { pos: 1, want, lost: false, ideal: null, room: 0, top: undefined, rivals: 0 };
   const at = rivals[want - 1];

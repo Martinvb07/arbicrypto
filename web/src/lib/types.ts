@@ -89,6 +89,8 @@ export interface Conversion {
 export interface MarketEntry {
   BUY: Ad[];
   SELL: Ad[];
+  /** La lista completa como la muestra Binance (sin filtrar por órdenes): para contar en qué puesto queda tu anuncio. */
+  all?: Partial<Record<Side, Ad[]>>;
   top: Partial<Record<Side, number | null>>;
 }
 

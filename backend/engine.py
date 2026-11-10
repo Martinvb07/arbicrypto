@@ -408,21 +408,30 @@ def p2p_pay_methods(fiat):
 _p2p_pool = ThreadPoolExecutor(8, thread_name_prefix="p2p")
 
 
+SLIM = ("price", "nick", "user", "adv", "min", "max", "available", "orders", "finish", "merchant")
+
+
+def _slim(ad):
+    """El anuncio con lo justo para saber en qué puesto queda el tuyo: la lista tal cual la muestra Binance, sin filtrar."""
+    return {k: ad.get(k) for k in SLIM}
+
+
 def p2p_market(assets, fiat, amount, pay_types, merchant, min_orders, min_finish):
     def run(job):
         asset, side = job
         try:
             ads = p2p_search(asset, side, fiat, amount, pay_types, merchant)
             ok = [a for a in ads if a["orders"] >= min_orders and a["finish"] >= min_finish]
-            return job, ok, ads[0]["price"] if ads else None, None
+            return job, ok, ads[0]["price"] if ads else None, None, [_slim(a) for a in ads]
         except (requests.RequestException, BinanceError) as e:
-            return job, [], None, f"{asset} {side}: {e}"
+            return job, [], None, f"{asset} {side}: {e}", []
 
-    market = {a: {"BUY": [], "SELL": [], "top": {}} for a in assets}
+    market = {a: {"BUY": [], "SELL": [], "top": {}, "all": {"BUY": [], "SELL": []}} for a in assets}
     errors = []
-    for (asset, side), ads, top, err in _p2p_pool.map(run, [(a, s) for a in assets for s in ("BUY", "SELL")]):
+    for (asset, side), ads, top, err, every in _p2p_pool.map(run, [(a, s) for a in assets for s in ("BUY", "SELL")]):
         market[asset][side] = ads
         market[asset]["top"][side] = top
+        market[asset]["all"][side] = every
         if err:
             errors.append(err)
     return market, errors

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { advise, advTick, beats, etaAt, flowOf, FLOW_MIN, hourSpreads, realRivals, rivalFlow, makerStats, mergeOrders, PLANS, rivalsOf, roomGap, watchState, type Advice, type Combo, type Plan,
+import { advise, advTick, beats, etaAt, flowOf, FLOW_MIN, hourSpreads, rankIn, rankText, rivalFlow, makerStats, mergeOrders, PLANS, rivalsOf, roomGap, watchState, type Advice, type Combo, type Plan,
   type SideOption } from "@/lib/advisor";
 import { api } from "@/lib/api";
-import { advertiserUrl, adRank, isDollar, simulateAds } from "@/lib/calc";
+import { advertiserUrl, isDollar, simulateAds } from "@/lib/calc";
 import { money, num, pct, plural, signedMoney, tone } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { Ad, MarketEntry, Order, PriceAlert, Side, State } from "@/lib/types";
@@ -100,7 +100,7 @@ function Verdict({ s, asset, a, c, picked, onReset, onUse, onWatch }: {
           const o = sd === "BUY" ? c.buy : c.sell;
           const p = planOf(o.plan);
           const rivals = sd === "BUY" ? a.buyRivals : a.sellRivals;
-          const r = o.plan !== "take" && o.price ? adRank(rivals, o.price, sd) : null;
+          const r = o.plan !== "take" && o.price ? rankIn(rivals, o.price, sd) : null;
           return (
             <div key={sd} className={`adv-step ${sd}`}>
               <span className="adv-step-n">{i + 1}</span>
@@ -108,7 +108,7 @@ function Verdict({ s, asset, a, c, picked, onReset, onUse, onWatch }: {
                 <small>{sd === "BUY" ? "Compras" : "Vendes"} · {p.label}</small>
                 <b>{sideText(o, sd, asset)}</b>
                 <span className="dim">
-                  {r ? <>Sales {r.pos}.º{r.ties ? ` · empatado con ${r.ties}` : ""} de {r.of + 1}</> : o.ad ? <>acepta {money(o.ad.min, 0)} – {money(o.ad.max, 0)}</> : null}
+                  {r ? <>Sales {rankText(r)}{r.ties ? ` (empatas con ${r.ties})` : ""} en la lista de Binance</> : o.ad ? <>acepta {money(o.ad.min, 0)} – {money(o.ad.max, 0)}</> : null}
                 </span>
               </div>
               {o.plan === "take" && o.ad && <GoButton href={advertiserUrl(o.ad)} icon={sd === "BUY" ? "cart" : "handCoins"}>Abrir</GoButton>}
@@ -175,7 +175,7 @@ function Ladder({ s, side, asset, a, shown, chosen, onPick }: {
         <span className={`mkt-col-ico ${side}`}><Icon name={buying ? "cart" : "handCoins"} /></span>
         <div>
           <h3>Tu anuncio de {buying ? "compra" : "venta"}</h3>
-          <p className="sub">{top ? <>El 1.º {buying ? "paga" : "cobra"} <b>{money(top.price)}</b> ({top.nick}) · {rivals.length} {plural(rivals.length, "rival", "rivales")} para tu monto</> : "Nadie más compite con tu monto"}</p>
+          <p className="sub">{top ? <>El 1.º {buying ? "paga" : "cobra"} <b>{money(top.price)}</b> ({top.nick})</> : "Nadie más compite con tu monto"}</p>
         </div>
       </header>
       {lim && shown && (
@@ -192,13 +192,13 @@ function Ladder({ s, side, asset, a, shown, chosen, onPick }: {
           const p = planOf(o.plan);
           const diff = top && o.price ? o.price - top.price : null;
           const take = o.plan === "take";
-          const r = !take && o.price ? adRank(rivals, o.price, side) : null;
+          const r = !take && o.price ? rankIn(rivals, o.price, side) : null;
           return (
             <button type="button" key={o.plan} className={`adv-rung ${chosen === o.plan ? "on" : ""}`} disabled={!o.price}
               aria-pressed={chosen === o.plan} onClick={() => onPick(o.plan)}>
               <div><b>{p.label}{rec === o.plan && <span className="adv-rec-dot">Recomendada</span>}{loses(o.price) && <span className="adv-rec-dot bad">Pierdes</span>}</b>
                 <small>{take ? (o.ad ? `${buying ? "Le compras" : "Le vendes"} a ${o.ad.nick}` : "Nadie acepta tu monto")
-                  : r ? `Sales ${r.pos}.º de ${r.of + 1}${r.ties ? ` · empatado con ${r.ties}` : ""}` : p.short}</small></div>
+                  : r ? `Sales ${rankText(r)}${r.ties ? ` (empatas con ${r.ties})` : ""}` : p.short}</small></div>
               <span className="adv-rung-price">{money(o.price)}</span>
               <span className="dim">{take ? "sin esperar · comisión de tomar" : diff == null ? "" : diff === 0 ? "igual al 1.º" : `${diff > 0 ? "+" : "−"}${money(Math.abs(diff))} vs. 1.º`}
                 {!take && <> · <b className={`adv-eta ${etaTone(o.eta)}`}><Icon name="timer" size={12} /> {eta(o.eta)}</b></>}</span>
@@ -210,7 +210,7 @@ function Ladder({ s, side, asset, a, shown, chosen, onPick }: {
         <p className="sim-warn"><Icon name="info" size={15} /> El 1.º va {money(gap)} por delante del 2.º: quedar 2.º te ahorra eso {isDollar(asset) ? "por dólar" : `por ${asset}`}.</p>
       )}
       <Rivals s={s} side={side} asset={asset} rivals={rivals} price={(opts.find((o) => o.plan === chosen) ?? opts[0])?.price ?? null} />
-      {skipped > 0 && <p className="sim-hint">No cuento {skipped} {plural(skipped, "anuncio", "anuncios")} que no compiten por tu monto (límites muy distintos o sin saldo).</p>}
+      <p className="sim-hint">El puesto es el de la lista de Binance (sin escribir monto): cuenta todos los anuncios, también los que no aceptan tu monto.</p>
     </div>
   );
 }
@@ -458,7 +458,7 @@ function WatchRow({ a, m, amount }: { a: PriceAlert; m: MarketEntry; amount: num
       </div>
       <div className="pa-cell">
         <small>Puesto ahora</small>
-        <b className={w.lost ? "down" : "up"}>{w.pos}.º <span className="dim">de {w.rivals + 1}</span></b>
+        <b className={w.lost ? "down" : "up"}>{w.pos}.º</b>
         <span className="dim">{w.top ? `1.º ${w.top.nick} · ${money(w.top.price)}` : "nadie compite por tu monto"}</span>
       </div>
       <div className="pa-cell">
@@ -499,7 +499,8 @@ const STEPS = [1, 3, 5, 10, 20] as const;
 
 /** El mejor precio de la lista con la que compite tu anuncio de ese lado, por tu monto (sin tu propio anuncio). */
 function topFor(m: MarketEntry, side: Side, amount: number) {
-  return realRivals(rivalsOf(m, side), amount).live[0];
+  void amount;
+  return rivalsOf(m, side)[0]; // el 1.º de la lista, el mismo que ves en Binance
 }
 
 function MoveRow({ a, m, amount }: { a: PriceAlert; m: MarketEntry; amount: number }) {
@@ -608,7 +609,7 @@ function Watch({ s, asset, m, amount }: { s: State; asset: string; m: MarketEntr
           <div className="pa-list">{old.map((a) => <WatchRow key={a.id} a={a} m={m} amount={amount} />)}</div>
         </>
       )}
-      <p className="note"><Icon name="info" size={14} /> Cuenta el mejor precio de los anuncios que compiten por tu monto ({money(amount, 0)}), sin contar los tuyos:
+      <p className="note"><Icon name="info" size={14} /> Cuenta el 1.º de la lista de Binance, sin contar tus anuncios:
         si cambias tu propio anuncio no te avisa.</p>
     </section>
   );
@@ -674,8 +675,8 @@ function Published({ s, asset, m, amount, makerFee, onUse }: {
         <div className="pa-list">
           {ads.map((x) => {
             const all = rivalsOf(m, x.side);
-            const rivals = realRivals(all, amount).live;
-            const r = adRank(rivals, x.price, x.side);
+            const rivals = all;
+            const r = rankIn(rivals, x.price, x.side);
             const top = rivals[0];
             const beat = top ? top.price + (x.side === "BUY" ? 1 : -1) * advTick(top.price) : null;
             const first = r.pos === 1;
@@ -693,7 +694,7 @@ function Published({ s, asset, m, amount, makerFee, onUse }: {
                 </div>
                 <div className="pa-cell">
                   <small>Puesto ahora</small>
-                  <b className={first ? "up" : "down"}>{r.pos}.º <span className="dim">de {r.of + 1}</span></b>
+                  <b className={first ? "up" : "down"}>{rankText(r)}</b>
                   <span className="dim">{top ? `mejor rival: ${top.nick} · ${money(top.price)}` : "nadie compite por tu monto"}</span>
                 </div>
                 <div className="pa-cell">
@@ -732,7 +733,11 @@ export function AdAdvisor({ s, asset, m: book, amount, makerFee, onUse }: {
 }) {
   // tus propios anuncios no son rivales: sin ellos se calcula todo
   const me = s.my_ads?.user ?? s.settings.p2p_user;
-  const m = useMemo(() => (me ? { ...book, BUY: book.BUY.filter((x) => x.user !== me), SELL: book.SELL.filter((x) => x.user !== me) } : book), [book, me]);
+  const m = useMemo(() => {
+    if (!me) return book;
+    const not = (l?: Ad[]) => l?.filter((x) => x.user !== me);
+    return { ...book, BUY: not(book.BUY)!, SELL: not(book.SELL)!, all: book.all && { BUY: not(book.all.BUY), SELL: not(book.all.SELL) } };
+  }, [book, me]);
   const a = useMemo(() => (amount ? advise(s, asset, m, amount, makerFee) : null), [s, asset, m, amount, makerFee]);
   // lo que elegiste en cada lado (undefined = el de la recomendada); se queda aunque el mercado se mueva
   const [pick, setPick] = useState<{ buy?: Plan; sell?: Plan }>({});

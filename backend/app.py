@@ -705,7 +705,7 @@ def flow_update(markets, now):
     with flow_lock:
         for asset, m in markets.items():
             for side in ("BUY", "SELL"):
-                ads = m.get(side) or []
+                ads = (m.get("all") or {}).get(side) or m.get(side) or []  # la lista completa: el puesto es el de Binance
                 f = flow.setdefault((asset, side), {"prev": {}, "events": [], "since": now})
                 prev, events = f["prev"], f["events"]
                 cur = {}
@@ -1263,6 +1263,13 @@ def wallet_qty(user, asset):
     return q if usd and usd >= 1 else 0.0
 
 
+def book_of(market, asset, side):
+    """La lista completa como la ve cualquiera en Binance (sin filtrar por órdenes ni por monto): para contar puestos.
+    side = la lista de market (BUY = los que venden)."""
+    m = market.get(asset) or {}
+    return (m.get("all") or {}).get(side) or m.get(side) or []
+
+
 def rival_side(side):
     """Tu anuncio de compra compite con los que compran (market[..]["SELL"]: a ellos les vendes); el de venta, con los que venden."""
     return "SELL" if side == "BUY" else "BUY"
@@ -1386,13 +1393,11 @@ def price_check(market):
 def move_top(a, market, side):
     """Mejor precio de la lista con la que compite tu anuncio de `side`, contando solo los que compiten por tu monto
     (igual que el asesor): side BUY = lo que pagan los que compran; SELL = lo que cobran los que venden."""
-    amount = a.get("amount") or profile(a["user"])["capital"]
     me = own_user(a["user"])
-    for x in market.get(a["asset"], {}).get(rival_side(side)) or []:
+    for x in book_of(market, a["asset"], rival_side(side)):
         if me and x.get("user") == me:
             continue  # tu propio anuncio no cuenta: si cambias tu precio no es que el mercado se movió
-        if x["min"] <= amount and x["max"] >= amount * 0.1 and (not x.get("available") or x["available"] * x["price"] >= x["min"]):
-            return x["price"]
+        return x["price"]  # el 1.º de la lista, el mismo que ves en Binance
     return None
 
 
@@ -1427,12 +1432,9 @@ def outbid_state(a, market):
     """Dónde está TU anuncio (a["target"]) frente a los que compiten por tu monto, y el precio justo para el puesto que
     quieres (ahead_ok + 1): `lost` = te pasaron; `room` > 0 = pagas de más (compra) o cobras de menos (venta) para ese puesto."""
     buys, want = a["side"] == "BUY", (a.get("ahead_ok") or 0) + 1
-    amount = a.get("amount") or profile(a["user"])["capital"]  # las vigilancias viejas no guardaban el monto
     me = own_user(a["user"])
-    rivals = [x for x in market.get(a["asset"], {}).get(rival_side(a["side"])) or [] if x["price"] != a["target"]
-              and not (me and x.get("user") == me)
-              and (not amount or (x["min"] <= amount and x["max"] >= amount * 0.1))
-              and (not x.get("available") or x["available"] * x["price"] >= x["min"])]  # igual que realRivals() del asesor
+    rivals = [x for x in book_of(market, a["asset"], rival_side(a["side"])) if x["price"] != a["target"]
+              and not (me and x.get("user") == me)]  # la lista completa, como en Binance
     beats = (lambda p, q: p > q) if buys else (lambda p, q: p < q)
     ahead = [x for x in rivals if beats(x["price"], a["target"])]
     if not rivals:
